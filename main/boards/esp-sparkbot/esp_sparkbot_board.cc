@@ -166,7 +166,9 @@ private:
 
         Settings settings("sparkbot", false);
         // 考虑到部分复刻使用了不可动摄像头的设计，默认启用翻转
-        bool camera_flipped = static_cast<bool>(settings.GetInt("camera-flipped", 1));
+        bool camera_flipped = static_cast<bool>(settings.GetInt("camera-flipped", 0));
+        ESP_LOGI(TAG, "Camera Flipped: %d", camera_flipped);
+        camera_flipped = 0;
         camera_->SetHMirror(camera_flipped);
         camera_->SetVFlip(camera_flipped);
     }
