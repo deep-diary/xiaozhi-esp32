@@ -180,6 +180,9 @@ private:
         };
 
         camera_ = new Esp32Camera(video_config);
+        // 旋转180度：同时启用水平镜像和垂直翻转
+        camera_->SetVFlip(1);
+        camera_->SetHMirror(1);
     }
 
 public:
