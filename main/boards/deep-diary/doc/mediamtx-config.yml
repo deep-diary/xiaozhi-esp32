@@ -1,0 +1,123 @@
+# MediaMTX配置文件示例
+# 用于ESP32-CAM RTSP流媒体转发
+# 
+# 使用方法：
+# 1. 将此文件保存为 mediamtx.yml
+# 2. 修改 ESP32_IP_ADDRESS 为实际的ESP32 IP地址
+# 3. 运行: ./mediamtx mediamtx.yml
+
+###############################################
+# 全局设置
+###############################################
+
+# RTSP服务器端口
+rtspAddress: :8554
+
+# HLS服务器端口（可选）
+hlsAddress: :8888
+
+# WebRTC服务器端口（可选）
+webrtcAddress: :8889
+
+# 日志级别: debug, info, warn
+logLevel: info
+
+# 日志目标: stdout, file
+logDestinations: [stdout]
+
+# 性能设置
+readTimeout: 10s
+writeTimeout: 10s
+readBufferCount: 512
+
+###############################################
+# 路径配置 - ESP32摄像头流
+###############################################
+
+paths:
+  # 路径1: 直接转发ESP32的RTSP流
+  esp32cam:
+    # 源RTSP地址（请替换为实际的ESP32 IP地址）
+    source: rtsp://ESP32_IP_ADDRESS:554/stream
+    
+    # 源协议: tcp 或 udp
+    # 建议使用tcp以确保可靠性
+    sourceProtocol: tcp
+    
+    # 按需拉流：仅当有客户端连接时才从源拉流
+    sourceOnDemand: yes
+    
+    # 源拉流超时时间
+    sourceOnDemandStartTimeout: 10s
+    sourceOnDemandCloseAfter: 10s
+    
+    # 运行时回调（可选）
+    runOnReady: echo "ESP32 camera stream started"
+    runOnNotReady: echo "ESP32 camera stream stopped"
+    
+    # 录制设置（可选）
+    # record: yes
+    # recordPath: /recordings/esp32cam/%Y-%m-%d_%H-%M-%S.mp4
+    # recordFormat: mp4
+    # recordPartDuration: 1h
+    
+    # 发布认证（可选）
+    # publishUser: admin
+    # publishPass: password123
+    
+    # 播放认证（可选）
+    # readUser: viewer
+    # readPass: password123
+
+  # 路径2: 高清流（如果ESP32支持多路流）
+  esp32cam_hd:
+    source: rtsp://ESP32_IP_ADDRESS:554/stream_hd
+    sourceProtocol: tcp
+    sourceOnDemand: yes
+    
+  # 路径3: 低清流（用于低带宽场景）
+  esp32cam_low:
+    source: rtsp://ESP32_IP_ADDRESS:554/stream_low
+    sourceProtocol: tcp
+    sourceOnDemand: yes
+
+###############################################
+# 示例：多个ESP32摄像头
+###############################################
+
+# 如果有多个ESP32摄像头，可以添加多个路径：
+#
+# paths:
+#   camera1:
+#     source: rtsp://192.168.1.100:554/stream
+#     sourceProtocol: tcp
+#     sourceOnDemand: yes
+#     
+#   camera2:
+#     source: rtsp://192.168.1.101:554/stream
+#     sourceProtocol: tcp
+#     sourceOnDemand: yes
+#     
+#   camera3:
+#     source: rtsp://192.168.1.102:554/stream
+#     sourceProtocol: tcp
+#     sourceOnDemand: yes
+
+###############################################
+# 使用示例
+###############################################
+
+# 观看流：
+# - RTSP: rtsp://35.192.64.247:8554/esp32cam
+# - HLS:  http://35.192.64.247:8888/esp32cam
+# - WebRTC: http://35.192.64.247:8889/esp32cam
+
+# 使用VLC观看：
+# vlc rtsp://35.192.64.247:8554/esp32cam
+
+# 使用ffplay观看：
+# ffplay rtsp://35.192.64.247:8554/esp32cam
+
+# 录制流：
+# ffmpeg -i rtsp://35.192.64.247:8554/esp32cam -c copy output.mp4
+

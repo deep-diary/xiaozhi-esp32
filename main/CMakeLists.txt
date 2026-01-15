@@ -398,6 +398,16 @@ elseif(CONFIG_BOARD_TYPE_ATK_DNESP32S3)
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+elseif(CONFIG_BOARD_TYPE_DEEP_DIARY)
+    set(BOARD_TYPE "deep-diary")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+    set(BUILTIN_ICON_FONT font_awesome_20_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+elseif(CONFIG_BOARD_TYPE_DEEP_THUMBLE)
+    set(BOARD_TYPE "deep-thumble")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
+    set(BUILTIN_ICON_FONT font_awesome_20_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
 elseif(CONFIG_BOARD_TYPE_ATK_DNESP32S3_BOX)
     set(BOARD_TYPE "atk-dnesp32s3-box")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
@@ -585,8 +595,9 @@ elseif(CONFIG_BOARD_TYPE_HU_087)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
 endif()
 
-file(GLOB BOARD_SOURCES
+file(GLOB_RECURSE BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
