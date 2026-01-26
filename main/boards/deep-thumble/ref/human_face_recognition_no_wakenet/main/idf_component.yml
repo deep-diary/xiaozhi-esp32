@@ -1,0 +1,4 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/esp-sr: "~1.9.4"
+  esp_mmap_assets: "1.*"
