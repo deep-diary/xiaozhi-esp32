@@ -61,6 +61,14 @@ private:
     ImuSensor* imu_sensor_;
     TaskHandle_t user_main_loop_task_handle_ = nullptr;
 
+    // ==================== 用户主循环调度相关 ====================
+    // 基础周期 10ms
+    static constexpr int MAIN_LOOP_BASE_DELAY_MS = 10;
+
+    // 周期倍数（实际周期 = 倍数 × MAIN_LOOP_BASE_DELAY_MS）
+    static constexpr int CYCLE_10MS  = 1;   // 10ms
+    static constexpr int CYCLE_500MS = 50;  // 500ms
+
     void InitializeI2c() {
         // 使用 i2c_bus 组件创建共享 I2C 总线，并获得内部的 master bus 句柄
         i2c_config_t i2c_cfg = {
@@ -218,32 +226,48 @@ private:
         }
     }
 
-    // 简单的用户主循环任务：10ms 周期采集 IMU 数据
+    // 用户主循环任务：10ms 基础周期调度（阶段三）
     static void UserMainLoopTask(void* pvParameters) {
-        auto* imu = static_cast<ImuSensor*>(pvParameters);
-        ImuRawData data{};
-        uint32_t counter = 0;
+        auto* self = static_cast<DeepThumble*>(pvParameters);
+        if (!self) {
+            vTaskDelete(nullptr);
+        }
 
-        ESP_LOGI(TAG, "UserMainLoopTask started (10ms IMU sampling).");
+        int32_t cycle_counter = 0;
+        ImuRawData imu_data{};
+
+        ESP_LOGI(TAG, "UserMainLoopTask started (base period %d ms).", MAIN_LOOP_BASE_DELAY_MS);
 
         while (true) {
-            vTaskDelay(pdMS_TO_TICKS(10));  // 10ms 周期
+            vTaskDelay(pdMS_TO_TICKS(MAIN_LOOP_BASE_DELAY_MS));
+            cycle_counter++;
 
-            if (!imu || !imu->IsInitialized()) {
-                continue;
+            // ===== 10ms 周期任务：IMU 采集 =====
+            if ((cycle_counter % CYCLE_10MS) == 0) {
+                if (self->imu_sensor_ && self->imu_sensor_->IsInitialized()) {
+                    if (self->imu_sensor_->ReadRawData(&imu_data)) {
+                        // 每 100 个 10ms 周期（约 1 秒）打印一次 IMU 数据
+                        static int log_divider = 0;
+                        log_divider++;
+                        if (log_divider >= 100) {
+                            log_divider = 0;
+                            ESP_LOGI(TAG,
+                                     "IMU raw data: accel=(%.2f, %.2f, %.2f) gyro=(%.2f, %.2f, %.2f)",
+                                     imu_data.accel_x, imu_data.accel_y, imu_data.accel_z,
+                                     imu_data.gyro_x, imu_data.gyro_y, imu_data.gyro_z);
+                        }
+                    }
+                }
             }
 
-            if (!imu->ReadRawData(&data)) {
-                continue;
+            // ===== 500ms 周期任务：预留（当前仅日志占位） =====
+            if ((cycle_counter % CYCLE_500MS) == 0) {
+                ESP_LOGD(TAG, "UserMainLoop 500ms tick");
             }
 
-            // 先简单打点日志：每 100 次（约 1s）输出一次
-            if ((++counter % 100) == 0) {
-                ESP_LOGI(TAG,
-                         "IMU raw data (stub): "
-                         "accel=(%.2f, %.2f, %.2f) gyro=(%.2f, %.2f, %.2f)",
-                         data.accel_x, data.accel_y, data.accel_z,
-                         data.gyro_x, data.gyro_y, data.gyro_z);
+            // 防止计数器溢出过大
+            if (cycle_counter >= 1000000) {
+                cycle_counter = 0;
             }
         }
     }
@@ -283,13 +307,13 @@ public:
         InitializeLedStrip();
         InitializeTools();
 
-        // 启动用户主循环任务：10ms 周期采集传感器数据
+        // 启动用户主循环任务：10ms 基础周期调度（阶段三）
         if (imu_sensor_ && imu_sensor_->IsInitialized()) {
             BaseType_t ret = xTaskCreate(
                 UserMainLoopTask,
                 "user_main_loop",
                 4096,
-                imu_sensor_,
+                this,
                 4,
                 &user_main_loop_task_handle_);
             if (ret != pdPASS) {
