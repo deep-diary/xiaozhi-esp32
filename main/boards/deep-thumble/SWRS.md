@@ -400,7 +400,9 @@ std::function<void()> on_motion_detected_callback_;
 
 ### 3.1 六轴加速度传感器
 - **传感器类型**: BMI270（六轴加速度传感器：加速度计+陀螺仪）
-- **参考实现**: 参考 `ref/factory_demo_v1/main/app/app_imu.c` 和 `app_datafusion.c`
+- **参考实现**: 
+  - 优先参考本仓库中的 BMI270 集成：`main/boards/esp-spot/esp_spot_board.cc` 中的 `Bmi270Imu` 命名空间（初始化、I2C 总线复用、低功耗与唤醒）
+  - 也可参考外部示例：`ref/factory_demo_v1/main/app/app_imu.c` 和 `app_datafusion.c`
 - **代码位置**: 在 `./sensor/` 目录下实现
 - **采集周期**: 10ms（在用户主循环的10ms周期任务中调用）
 

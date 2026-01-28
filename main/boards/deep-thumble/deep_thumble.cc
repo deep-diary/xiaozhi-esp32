@@ -16,6 +16,12 @@
 #include "esp32_camera.h"
 #include "led/circular_strip.h"
 #include "led/led_control.h"
+#include "sensor/imu_sensor.h"
+
+#include "i2c_bus.h"
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define TAG "deep_thumble"
 
@@ -43,28 +49,48 @@ public:
 
 class DeepThumble : public WifiBoard {
 private:
-    i2c_master_bus_handle_t i2c_bus_;
+    // 通过 i2c_bus 组件创建的共享 I2C 总线句柄
+    i2c_bus_handle_t shared_i2c_bus_handle_ = nullptr;
+    // 从共享总线句柄派生出的 IDF 原生 master bus 句柄，供摄像头 / Codec 使用
+    i2c_master_bus_handle_t i2c_bus_ = nullptr;
     Button boot_button_;
     Display* display_;
     Esp32Camera* camera_;
     CircularStrip* led_strip_;
     LedStripControl* led_control_;
+    ImuSensor* imu_sensor_;
+    TaskHandle_t user_main_loop_task_handle_ = nullptr;
 
     void InitializeI2c() {
-        // Initialize I2C peripheral
-        i2c_master_bus_config_t i2c_bus_cfg = {
-            .i2c_port = I2C_NUM_0,
+        // 使用 i2c_bus 组件创建共享 I2C 总线，并获得内部的 master bus 句柄
+        i2c_config_t i2c_cfg = {
+            .mode = I2C_MODE_MASTER,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
             .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
-            .clk_source = I2C_CLK_SRC_DEFAULT,
-            .glitch_ignore_cnt = 7,
-            .intr_priority = 0,
-            .trans_queue_depth = 0,
-            .flags = {
-                .enable_internal_pullup = 1,
-            },
+            .sda_pullup_en = true,
+            .scl_pullup_en = true,
+            .master =
+                {
+                    .clk_speed = I2C_MASTER_FREQ_HZ,
+                },
+            .clk_flags = 0,
         };
-        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+
+        shared_i2c_bus_handle_ = i2c_bus_create(I2C_NUM_0, &i2c_cfg);
+        if (!shared_i2c_bus_handle_) {
+            ESP_LOGE(TAG, "Failed to create shared I2C bus");
+            ESP_ERROR_CHECK(ESP_FAIL);
+        }
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0) && !CONFIG_I2C_BUS_BACKWARD_CONFIG
+        i2c_bus_ = i2c_bus_get_internal_bus_handle(shared_i2c_bus_handle_);
+#else
+#error "DeepThumble board requires i2c_bus_get_internal_bus_handle() support"
+#endif
+        if (!i2c_bus_) {
+            ESP_LOGE(TAG, "Failed to obtain master bus handle from i2c_bus");
+            ESP_ERROR_CHECK(ESP_FAIL);
+        }
     }
 
     void InitializeSpi() {
@@ -182,6 +208,46 @@ private:
         ESP_LOGI(TAG, "WS2812灯带初始化完成");
     }
 
+    void InitializeImuSensor() {
+        // 使用与音频 Codec / 摄像头共享的 I2C 总线（i2c_bus 组件）初始化 BMI270
+        imu_sensor_ = new ImuSensor(shared_i2c_bus_handle_);
+        if (imu_sensor_->Initialize()) {
+            ESP_LOGI(TAG, "IMU 传感器 (BMI270) 初始化完成");
+        } else {
+            ESP_LOGW(TAG, "IMU 传感器 (BMI270) 初始化失败，后续读取将被忽略");
+        }
+    }
+
+    // 简单的用户主循环任务：10ms 周期采集 IMU 数据
+    static void UserMainLoopTask(void* pvParameters) {
+        auto* imu = static_cast<ImuSensor*>(pvParameters);
+        ImuRawData data{};
+        uint32_t counter = 0;
+
+        ESP_LOGI(TAG, "UserMainLoopTask started (10ms IMU sampling).");
+
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(10));  // 10ms 周期
+
+            if (!imu || !imu->IsInitialized()) {
+                continue;
+            }
+
+            if (!imu->ReadRawData(&data)) {
+                continue;
+            }
+
+            // 先简单打点日志：每 100 次（约 1s）输出一次
+            if ((++counter % 100) == 0) {
+                ESP_LOGI(TAG,
+                         "IMU raw data (stub): "
+                         "accel=(%.2f, %.2f, %.2f) gyro=(%.2f, %.2f, %.2f)",
+                         data.accel_x, data.accel_y, data.accel_z,
+                         data.gyro_x, data.gyro_y, data.gyro_z);
+            }
+        }
+    }
+
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
 
@@ -204,14 +270,38 @@ private:
     }
 
 public:
-    DeepThumble() : boot_button_(BOOT_BUTTON_GPIO), led_strip_(nullptr), led_control_(nullptr) {
+    DeepThumble() : boot_button_(BOOT_BUTTON_GPIO),
+                    led_strip_(nullptr),
+                    led_control_(nullptr),
+                    imu_sensor_(nullptr) {
         InitializeI2c();
         InitializeSpi();
         InitializeDisplay();
         InitializeButtons();
         InitializeCamera();
+        InitializeImuSensor();
         InitializeLedStrip();
         InitializeTools();
+
+        // 启动用户主循环任务：10ms 周期采集传感器数据
+        if (imu_sensor_ && imu_sensor_->IsInitialized()) {
+            BaseType_t ret = xTaskCreate(
+                UserMainLoopTask,
+                "user_main_loop",
+                4096,
+                imu_sensor_,
+                4,
+                &user_main_loop_task_handle_);
+            if (ret != pdPASS) {
+                ESP_LOGE(TAG, "Failed to create user_main_loop task");
+                user_main_loop_task_handle_ = nullptr;
+            } else {
+                ESP_LOGI(TAG, "user_main_loop task created successfully");
+            }
+        } else {
+            ESP_LOGW(TAG, "IMU not initialized, skip user_main_loop task");
+        }
+
         GetBacklight()->RestoreBrightness();
     }
 
