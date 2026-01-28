@@ -121,8 +121,8 @@ LedStripControl::LedStripControl(CircularStrip* led_strip, McpServer& mcp_server
             Property("red", kPropertyTypeInteger, 0, 255),
             Property("green", kPropertyTypeInteger, 0, 255),
             Property("blue", kPropertyTypeInteger, 0, 255),
-            Property("length", kPropertyTypeInteger, 1, 7),
-            Property("interval", kPropertyTypeInteger, 0, 1000)
+            Property("length", kPropertyTypeInteger, 1, WS2812_LED_COUNT),
+            Property("interval", kPropertyTypeInteger, 0, 100)
         }), [this](const PropertyList& properties) -> ReturnValue {
             int red = properties["red"].value<int>();
             int green = properties["green"].value<int>();
@@ -151,7 +151,7 @@ LedStripControl::LedStripControl(CircularStrip* led_strip, McpServer& mcp_server
             Property("high_red", kPropertyTypeInteger, 255, 0, 255),
             Property("high_green", kPropertyTypeInteger, 0, 0, 255),
             Property("high_blue", kPropertyTypeInteger, 0, 0, 255),
-            Property("interval", kPropertyTypeInteger, 50, 10, 1000)
+            Property("interval", kPropertyTypeInteger, 50, 10, 100)
         }), [this](const PropertyList& properties) -> ReturnValue {
             int low_red = properties["low_red"].value<int>();
             int low_green = properties["low_green"].value<int>();

@@ -600,7 +600,19 @@ file(GLOB_RECURSE BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
 )
+
+# 排除板级 ref 示例代码（例如 deep-thumble/ref/factory_demo_v1），
+# 这些代码可能依赖未引入的外部组件（如 esp_lv_decoder.h）
+file(GLOB_RECURSE BOARD_REF_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/ref/*.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/ref/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/ref/*.c
+)
+list(REMOVE_ITEM BOARD_SOURCES ${BOARD_REF_SOURCES})
+
 list(APPEND SOURCES ${BOARD_SOURCES})
+# Add board directory to include paths so board-specific headers can be found
+list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)

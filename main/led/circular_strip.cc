@@ -1,6 +1,7 @@
 #include "circular_strip.h"
 #include "application.h"
 #include <esp_log.h>
+#include <memory>
 
 #define TAG "CircularStrip"
 
@@ -106,38 +107,44 @@ void CircularStrip::FadeOut(int interval_ms) {
 }
 
 void CircularStrip::Breathe(StripColor low, StripColor high, int interval_ms) {
-    StartStripTask(interval_ms, [this, low, high]() {
-        static bool increase = true;
-        static StripColor color = low;
-        if (increase) {
-            if (color.red < high.red) {
-                color.red++;
+    // 使用 shared_ptr 来在 lambda 之间共享状态，每次调用 Breathe 时创建新的状态
+    struct BreatheState {
+        bool increase = true;
+        StripColor color;
+        BreatheState(StripColor start_color) : color(start_color) {}
+    };
+    auto state = std::make_shared<BreatheState>(low);
+    
+    StartStripTask(interval_ms, [this, low, high, state]() {
+        if (state->increase) {
+            if (state->color.red < high.red) {
+                state->color.red++;
             }
-            if (color.green < high.green) {
-                color.green++;
+            if (state->color.green < high.green) {
+                state->color.green++;
             }
-            if (color.blue < high.blue) {
-                color.blue++;
+            if (state->color.blue < high.blue) {
+                state->color.blue++;
             }
-            if (color.red == high.red && color.green == high.green && color.blue == high.blue) {
-                increase = false;
+            if (state->color.red == high.red && state->color.green == high.green && state->color.blue == high.blue) {
+                state->increase = false;
             }
         } else {
-            if (color.red > low.red) {
-                color.red--;
+            if (state->color.red > low.red) {
+                state->color.red--;
             }
-            if (color.green > low.green) {
-                color.green--;
+            if (state->color.green > low.green) {
+                state->color.green--;
             }
-            if (color.blue > low.blue) {
-                color.blue--;
+            if (state->color.blue > low.blue) {
+                state->color.blue--;
             }
-            if (color.red == low.red && color.green == low.green && color.blue == low.blue) {
-                increase = true;
+            if (state->color.red == low.red && state->color.green == low.green && state->color.blue == low.blue) {
+                state->increase = true;
             }
         }
         for (int i = 0; i < max_leds_; i++) {
-            led_strip_set_pixel(led_strip_, i, color.red, color.green, color.blue);
+            led_strip_set_pixel(led_strip_, i, state->color.red, state->color.green, state->color.blue);
         }
         led_strip_refresh(led_strip_);
     });
