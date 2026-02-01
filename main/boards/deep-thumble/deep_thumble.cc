@@ -1,7 +1,12 @@
 #include "wifi_board.h"
 #include "codecs/es8311_audio_codec.h"
 #include "display/lcd_display.h"
+#include "display/display.h"
+#include "display/lvgl_display/lvgl_display.h"
+#include "display/lvgl_display/lvgl_image.h"
 #include "application.h"
+#include "device_state.h"
+#include "assets/lang_config.h"
 #include "button.h"
 #include "config.h"
 #include "mcp_server.h"
@@ -12,18 +17,53 @@
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <cstring>
+#include <memory>
 
+#include <esp_heap_caps.h>
+
+#include "camera.h"
 #include "esp32_camera.h"
 #include "led/circular_strip.h"
 #include "led/led_control.h"
 #include "sensor/imu_sensor.h"
 
+#include "app_ai.hpp"
+
 #include "i2c_bus.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 
 #define TAG "deep_thumble"
+
+// 双队列：相机任务与 MCP take_photo 共用 Capture/GetLastFrame，用互斥锁串行化
+class CameraCaptureLockWrapper : public Camera {
+public:
+    CameraCaptureLockWrapper(Camera* inner, SemaphoreHandle_t mutex) : inner_(inner), mutex_(mutex) {}
+    void SetExplainUrl(const std::string& url, const std::string& token) override {
+        inner_->SetExplainUrl(url, token);
+    }
+    bool Capture() override {
+        if (xSemaphoreTake(mutex_, portMAX_DELAY) != pdTRUE) return false;
+        bool ok = inner_->Capture();
+        xSemaphoreGive(mutex_);
+        return ok;
+    }
+    void SetCapturePreviewEnabled(bool enabled) override { inner_->SetCapturePreviewEnabled(enabled); }
+    bool SetHMirror(bool enabled) override { return inner_->SetHMirror(enabled); }
+    bool SetVFlip(bool enabled) override { return inner_->SetVFlip(enabled); }
+    std::string Explain(const std::string& question) override { return inner_->Explain(question); }
+    bool GetLastFrame(CameraFrame* out) override {
+        if (xSemaphoreTake(mutex_, portMAX_DELAY) != pdTRUE) return false;
+        bool ok = inner_->GetLastFrame(out);
+        xSemaphoreGive(mutex_);
+        return ok;
+    }
+private:
+    Camera* inner_;
+    SemaphoreHandle_t mutex_;
+};
 
 class DeepThumbleEs8311AudioCodec : public Es8311AudioCodec {
 private:    
@@ -60,6 +100,9 @@ private:
     LedStripControl* led_control_;
     ImuSensor* imu_sensor_;
     TaskHandle_t user_main_loop_task_handle_ = nullptr;
+
+    SemaphoreHandle_t camera_capture_mutex_ = nullptr;
+    Camera* camera_proxy_ = nullptr;
 
     // ==================== 用户主循环调度相关 ====================
     // 基础周期 10ms
@@ -201,10 +244,9 @@ private:
         camera_ = new Esp32Camera(video_config);
 
         Settings settings("deep-thumble", false);
-        // 考虑到部分复刻使用了不可动摄像头的设计，默认启用翻转
-        bool camera_flipped = static_cast<bool>(settings.GetInt("camera-flipped", 0));
+        // 只翻转摄像头输出（不翻转整块屏幕），与摄像头安装方向一致
+        bool camera_flipped = static_cast<bool>(settings.GetInt("camera-flipped", 1));
         ESP_LOGI(TAG, "Camera Flipped: %d", camera_flipped);
-        camera_flipped = 0;
         camera_->SetHMirror(camera_flipped);
         camera_->SetVFlip(camera_flipped);
     }
@@ -224,6 +266,35 @@ private:
         } else {
             ESP_LOGW(TAG, "IMU 传感器 (BMI270) 初始化失败，后续读取将被忽略");
         }
+    }
+
+    void InitializeFaceRecognition() {
+        if (!camera_ || !display_) {
+            ESP_LOGW(TAG, "app_ai skipped: camera or display not ready");
+            return;
+        }
+        if (camera_proxy_) {
+            return;  // 已初始化过
+        }
+        camera_capture_mutex_ = xSemaphoreCreateMutex();
+        if (!camera_capture_mutex_) {
+            ESP_LOGE(TAG, "Camera capture mutex create failed");
+            return;
+        }
+        camera_proxy_ = new CameraCaptureLockWrapper(camera_, camera_capture_mutex_);
+        app_ai::Start(camera_proxy_, display_);
+    }
+
+    static void DelayedFaceInitTask(void* pv) {
+        auto* self = static_cast<DeepThumble*>(pv);
+        if (!self) {
+            vTaskDelete(nullptr);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(FACE_RECOGNITION_DELAYED_START_MS));
+        ESP_LOGI(TAG, "Delayed face init: starting after %d ms", (int)FACE_RECOGNITION_DELAYED_START_MS);
+        self->InitializeFaceRecognition();
+        vTaskDelete(nullptr);
     }
 
     // 用户主循环任务：10ms 基础周期调度（阶段三）
@@ -251,7 +322,7 @@ private:
                         log_divider++;
                         if (log_divider >= 100) {
                             log_divider = 0;
-                            ESP_LOGI(TAG,
+                            ESP_LOGD(TAG,
                                      "IMU raw data: accel=(%.2f, %.2f, %.2f) gyro=(%.2f, %.2f, %.2f)",
                                      imu_data.accel_x, imu_data.accel_y, imu_data.accel_z,
                                      imu_data.gyro_x, imu_data.gyro_y, imu_data.gyro_z);
@@ -306,6 +377,7 @@ public:
         InitializeImuSensor();
         InitializeLedStrip();
         InitializeTools();
+        xTaskCreate(DelayedFaceInitTask, "face_delayed", 2048, this, 3, nullptr);
 
         // 启动用户主循环任务：10ms 基础周期调度（阶段三）
         if (imu_sensor_ && imu_sensor_->IsInitialized()) {
@@ -346,7 +418,7 @@ public:
     }
 
     virtual Camera* GetCamera() override {
-        return camera_;
+        return camera_proxy_ ? camera_proxy_ : camera_;
     }
 };
 

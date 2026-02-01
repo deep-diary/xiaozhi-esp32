@@ -9,6 +9,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 
 #include "camera.h"
 #include "jpg/image_to_jpeg.h"
@@ -40,14 +41,17 @@ private:
     std::string explain_url_;
     std::string explain_token_;
     std::thread encoder_thread_;
+    bool capture_preview_enabled_ = true;
+    SemaphoreHandle_t explain_capture_mutex_ = nullptr;  // 串行化 Explain 与 Capture，避免 Capture() join 掉 Explain() 的编码线程导致二次 join 崩溃
 
 public:
     Esp32Camera(const esp_video_init_config_t& config);
     ~Esp32Camera();
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
+    virtual void SetCapturePreviewEnabled(bool enabled) override;
     virtual bool Capture();
-    // 翻转控制函数
+    virtual bool GetLastFrame(CameraFrame* out) override;
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
     virtual std::string Explain(const std::string& question);

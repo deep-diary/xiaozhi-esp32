@@ -64,7 +64,7 @@ public:
     void InitializeMcpTools();
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
-    virtual bool Capture();
+    virtual bool Capture(bool show_preview = true) override;
     // 翻转控制函数
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;

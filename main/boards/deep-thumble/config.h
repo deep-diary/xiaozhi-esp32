@@ -28,7 +28,7 @@
 #define DISPLAY_WIDTH   240
 #define DISPLAY_HEIGHT  240
 #define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
+#define DISPLAY_MIRROR_Y false  // 不翻转整屏；仅通过摄像头 SetVFlip 翻转画面
 #define DISPLAY_SWAP_XY false
 
 #define DISPLAY_OFFSET_X  0
@@ -46,6 +46,36 @@
 // 2812灯带
 #define WS2812_STRIP_GPIO GPIO_NUM_38
 #define WS2812_LED_COUNT 24
+
+#define FACE_RECOGNITION_INTERVAL_MS   2000  // 人脸识别周期（ms），测试分析时用 2s 便于看 log
+#define FACE_RECOGNITION_DELAYED_START_MS 15000  // 延迟启动人脸管道（ms），让 AFE/WakeNet 先完成 32KB PSRAM 分配，避免「Item psram alloc failed」后 memcpy(NULL) 崩溃
+#define FACE_RECOGNITION_TEST_PREVIEW  1     // 测试开关：1=周期显示预览并在检测到人脸时绘制人脸框，0=不显示
+#define FACE_AI_PASSTHROUGH            1     // 1=人脸 AI 任务仅透传（不检测、不画框、不 YUYV 转换），用于验证内存是否因检测/转换不足；0=正常检测+画框
+#define MAX_FACE_COUNT                 5     // 本地最多保存的人脸数量
+#define ENABLE_REMOTE_RECOGNITION      1     // 是否启用远程识别（当前使用本地占位实现）
+#define FACE_USE_VIRTUAL_ONLY          1     // 1=新注册时屏蔽 Explain，仅用虚拟姓名，用于先验证离线人脸检测/框是否正常；0=正常走 Explain
+#define REMOTE_RECOGNITION_TIMEOUT_MS  3000  // 远程识别超时时间
+#define FACE_STORAGE_PATH              "/assets/face_recognition/"  // 人脸数据存储路径（占位）
+#define FACE_DETECT_SCORE_THRESHOLD    0.85f  // 人脸框置信度阈值（每张脸单独 score；遮挡/过暗时模型仍会高置信度误检，需配合亮度过滤）
+#define FACE_DETECT_MIN_BOX_SIZE       40    // 人脸框最小边长（像素），队列为 320×240 时约 1/8 画面（原 640×480 用 80）
+#define FACE_DETECT_MIN_LUMINANCE      30    // 检测输入 320×240 画面平均亮度下限（0～255）；低于此视为遮挡/过暗，本帧不认人脸
+#define FACE_DETECT_BOX_SWAP_XY        0     // 0=标准 [x0,y0,x1,y1]；若框总在最上方或错位可试 1（按 [y,x,y,x] 解析）
+
+// 双队列架构：相机任务 + AI 任务 + 显示任务（唯一模式）
+// 队列帧为 320×240×2（相机 640×480 做 2x2 下采样后入队），显著降低 PSRAM（池约 300KB vs 原 1.2MB）
+#define FACE_QUEUE_FRAME_WIDTH         320   // 队列帧宽（与 FACE_DETECT_INPUT_W 一致，检测无需再缩放）
+#define FACE_QUEUE_FRAME_HEIGHT        240   // 队列帧高（与 FACE_DETECT_INPUT_H 一致）
+#define FACE_QUEUE_FRAME_POOL_SIZE     2     // 帧缓冲池 buffer 数量
+#define FACE_QUEUE_RAW_DEPTH           2     // 原始帧队列深度
+#define FACE_QUEUE_AI_DEPTH            2     // AI 处理后帧队列深度
+#define FACE_QUEUE_FRAME_MAX_BYTES     (FACE_QUEUE_FRAME_WIDTH * FACE_QUEUE_FRAME_HEIGHT * 2)  // 320×240 RGB565
+#define FACE_CAMERA_CAPTURE_INTERVAL_MS 500  // 取帧间隔（ms），500≈2fps，后台人脸检测/识别为主、非实时预览
+#define FACE_CAMERA_TASK_STACK         4096
+#define FACE_AI_TASK_STACK              4096  // 原 6144，降至 4096 以省 ~2KB 内部 RAM
+#define FACE_DISPLAY_TASK_STACK        4096
+#define FACE_CAMERA_TASK_PRIORITY      4
+#define FACE_AI_TASK_PRIORITY          4
+#define FACE_DISPLAY_TASK_PRIORITY     3
 
 #define MOTOR_SPEED_MAX 100
 #define MOTOR_SPEED_80  80

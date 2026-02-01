@@ -610,9 +610,28 @@ file(GLOB_RECURSE BOARD_REF_SOURCES
 )
 list(REMOVE_ITEM BOARD_SOURCES ${BOARD_REF_SOURCES})
 
+# deep-thumble 使用 esp_video（common/Esp32Camera），未引入 esp32-camera，故无 esp_camera.h。
+# 以下参考管线源文件依赖 esp_camera（camera_fb_t / esp_camera_fb_get/return），全部排除编译。
+if(BOARD_TYPE STREQUAL "deep-thumble")
+    list(REMOVE_ITEM BOARD_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/app_ai/src/app_camera.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/app_ai/src/app_face.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/app_ai/src/app_lcd.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/app_ai/src/app_motion.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/ai/who_human_face_recognition.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/ai/who_human_face_detection.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/ai/who_color_detection.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/ai/who_motion_detection.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-thumble/ai/who_cat_face_detection.cpp
+    )
+endif()
+
 list(APPEND SOURCES ${BOARD_SOURCES})
 # Add board directory to include paths so board-specific headers can be found
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})
+if(BOARD_TYPE STREQUAL "deep-thumble")
+    list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/app_ai/include)
+endif()
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)

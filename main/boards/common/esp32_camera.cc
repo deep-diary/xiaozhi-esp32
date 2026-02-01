@@ -358,9 +358,14 @@ Esp32Camera::Esp32Camera(const esp_video_init_config_t& config) {
     ESP_LOGI(TAG, "Camera init success");
     streaming_on_ = true;
 #endif  // CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
+    explain_capture_mutex_ = xSemaphoreCreateMutex();
 }
 
 Esp32Camera::~Esp32Camera() {
+    if (explain_capture_mutex_) {
+        vSemaphoreDelete(explain_capture_mutex_);
+        explain_capture_mutex_ = nullptr;
+    }
     if (streaming_on_ && video_fd_ >= 0) {
         int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         ioctl(video_fd_, VIDIOC_STREAMOFF, &type);
@@ -383,10 +388,42 @@ void Esp32Camera::SetExplainUrl(const std::string& url, const std::string& token
     explain_token_ = token;
 }
 
-bool Esp32Camera::Capture() {
-    if (encoder_thread_.joinable()) {
-        encoder_thread_.join();
+void Esp32Camera::SetCapturePreviewEnabled(bool enabled) {
+    capture_preview_enabled_ = enabled;
+}
+
+bool Esp32Camera::GetLastFrame(CameraFrame* out) {
+    if (out == nullptr || frame_.data == nullptr || frame_.len == 0) {
+        return false;
     }
+    out->data = frame_.data;
+    out->len = frame_.len;
+    out->width = frame_.width;
+    out->height = frame_.height;
+    if (frame_.format == V4L2_PIX_FMT_RGB565) {
+        out->format = 1;
+    } else if (frame_.format == V4L2_PIX_FMT_RGB24) {
+        out->format = 2;
+    } else if (frame_.format == V4L2_PIX_FMT_YUYV) {
+        out->format = 3;
+    } else {
+        out->format = static_cast<int>(frame_.format);
+    }
+    return true;
+}
+
+bool Esp32Camera::Capture() {
+    if (explain_capture_mutex_ && xSemaphoreTake(explain_capture_mutex_, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+    struct CaptureMutexGuard {
+        SemaphoreHandle_t m;
+        ~CaptureMutexGuard() {
+            if (m) {
+                xSemaphoreGive(m);
+            }
+        }
+    } capture_guard = {explain_capture_mutex_};
 
     if (!streaming_on_ || video_fd_ < 0) {
         return false;
@@ -418,10 +455,10 @@ bool Esp32Camera::Capture() {
             }
 
 #ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
-            ESP_LOGW(TAG, "mmap_buffers_[buf.index].length = %d, sensor_width = %d, sensor_height = %d",
+            ESP_LOGD(TAG, "mmap_buffers_[buf.index].length = %d, sensor_width = %d, sensor_height = %d",
                      mmap_buffers_[buf.index].length, sensor_width_, sensor_height_);
 #else
-            ESP_LOGW(TAG, "mmap_buffers_[buf.index].length = %d, frame.width = %d, frame.height = %d",
+            ESP_LOGD(TAG, "mmap_buffers_[buf.index].length = %d, frame.width = %d, frame.height = %d",
                      mmap_buffers_[buf.index].length, frame_.width, frame_.height);
 #endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
             ESP_LOG_BUFFER_HEXDUMP(TAG, mmap_buffers_[buf.index].start, MIN(mmap_buffers_[buf.index].length, 256),
@@ -727,21 +764,22 @@ bool Esp32Camera::Capture() {
         }
     }
 
-    // 显示预览图片
-    auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
-    if (display != nullptr) {
-        if (!frame_.data) {
-            ESP_LOGE(TAG, "frame.data is null");
-            return false;
-        }
-        uint16_t w = frame_.width;
-        uint16_t h = frame_.height;
-        size_t lvgl_image_size = frame_.len;
-        size_t stride = ((w * 2) + 3) & ~3;  // 4字节对齐
-        lv_color_format_t color_format = LV_COLOR_FORMAT_RGB565;
-        uint8_t* data = nullptr;
+    // 显示预览图片（app_ai 用人脸管道单独预览时可关闭，避免双重预览抢 PSRAM）
+    if (capture_preview_enabled_) {
+        auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
+        if (display != nullptr) {
+            if (!frame_.data) {
+                ESP_LOGE(TAG, "frame.data is null");
+                return false;
+            }
+            uint16_t w = frame_.width;
+            uint16_t h = frame_.height;
+            size_t lvgl_image_size = frame_.len;
+            size_t stride = ((w * 2) + 3) & ~3;  // 4字节对齐
+            lv_color_format_t color_format = LV_COLOR_FORMAT_RGB565;
+            uint8_t* data = nullptr;
 
-        switch (frame_.format) {
+            switch (frame_.format) {
             // LVGL 显示 YUV 系的图像似乎都有问题，暂时转换为 RGB565 显示
             case V4L2_PIX_FMT_YUYV:
             case V4L2_PIX_FMT_YUV420:
@@ -832,8 +870,9 @@ bool Esp32Camera::Capture() {
                 return false;
         }
 
-        auto image = std::make_unique<LvglAllocatedImage>(data, lvgl_image_size, w, h, stride, color_format);
-        display->SetPreviewImage(std::move(image));
+            auto image = std::make_unique<LvglAllocatedImage>(data, lvgl_image_size, w, h, stride, color_format);
+            display->SetPreviewImage(std::move(image));
+        }
     }
     return true;
 }
@@ -899,6 +938,17 @@ std::string Esp32Camera::Explain(const std::string& question) {
     if (explain_url_.empty()) {
         throw std::runtime_error("Image explain URL or token is not set");
     }
+    if (explain_capture_mutex_ && xSemaphoreTake(explain_capture_mutex_, portMAX_DELAY) != pdTRUE) {
+        throw std::runtime_error("Explain: failed to take explain_capture_mutex");
+    }
+    struct ExplainMutexGuard {
+        SemaphoreHandle_t m;
+        ~ExplainMutexGuard() {
+            if (m) {
+                xSemaphoreGive(m);
+            }
+        }
+    } explain_guard = {explain_capture_mutex_};
 
     // 创建局部的 JPEG 队列, 40 entries is about to store 512 * 40 = 20480 bytes of JPEG data
     QueueHandle_t jpeg_queue = xQueueCreate(40, sizeof(JpegChunk));

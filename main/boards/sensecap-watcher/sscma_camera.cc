@@ -568,7 +568,8 @@ void SscmaCamera::SetExplainUrl(const std::string& url, const std::string& token
     explain_token_ = token;
 }
 
-bool SscmaCamera::Capture() {
+bool SscmaCamera::Capture(bool show_preview) {
+    (void)show_preview;  // SSCMA 始终按原逻辑显示预览
 
     SscmaData data;
     int ret = 0;
