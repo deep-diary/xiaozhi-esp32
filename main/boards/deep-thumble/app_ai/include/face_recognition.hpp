@@ -52,8 +52,6 @@ private:
     std::function<void()> trigger_wake_for_explain_;
     std::function<void(const std::string& name)> on_new_face_registered_;
 
-    void* esp_dl_detect_handle_ = nullptr;
-
     std::vector<FaceBox> last_detection_boxes_;
 
     void InitializeIfNeeded();

@@ -23,6 +23,7 @@ struct AppAIContext {
 
 void FaceCameraTask(void* pv);
 void FaceAITask(void* pv);
+void FaceDisplayTask(void* pv);
 void FaceExplainTask(void* pv);
 
 }  // namespace detail

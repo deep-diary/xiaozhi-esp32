@@ -1,5 +1,15 @@
+/**
+ * face_recognition.cpp：人脸检测 + 画框 + 识别预留。
+ *
+ * 当前链路（由 task_face_ai 驱动）：
+ * 1. 检测：RunFaceDetectCore(qframe, &core_results) 得到已过滤的框（与 esp-who 模型与 rescale 对齐）。
+ * 2. 画框：将 core_results 转为 FaceBox，DrawFaceBoxesOnRgb565(qframe->data) 在原图上画框。
+ * 3. 识别：暂未实现（person_name 为 "unknown"）；预留 UpdateLocalDatabase、Explain 等，下一阶段接入数据库与姓名显示。
+ * 4. 送入 q_ai：由 task_face_ai 在 ProcessOneFrame 返回后 xQueueSend(ctx->q_ai, &qframe)；本文件不负责入队。
+ */
 #include "face_recognition.hpp"
 #include "face_draw.hpp"
+#include "face_detect_core.hpp"
 #include "face_explain.hpp"
 #include "frame_queue.hpp"
 
@@ -14,21 +24,13 @@
 #include "config.h"
 #include "camera.h"
 #include "display/display.h"
-#include "esp_imgfx_color_convert.h"
 
 static constexpr int64_t FACE_EXPLAIN_COOLDOWN_AFTER_REG_MS = 5000;
 static constexpr int64_t FACE_EXPLAIN_COOLDOWN_AFTER_NO_REG_MS = 5000;
 
-#if CONFIG_IDF_TARGET_ESP32S3
-#include "human_face_detect.hpp"
-#include "dl_image_process.hpp"
-#include "dl_image_define.hpp"
-#endif
-
 static const char* TAG_FACE = "FaceRecognition";
 
-static constexpr int FACE_DETECT_INPUT_W = 320;
-static constexpr int FACE_DETECT_INPUT_H = 240;
+static constexpr size_t MAX_DRAW_BOXES = 1;
 
 FaceRecognition::FaceRecognition(Camera* camera, Display* display)
     : camera_(camera), display_(display) {
@@ -43,147 +45,34 @@ void FaceRecognition::ProcessOneFrame(QueuedFrame* qframe) {
     if (!qframe || !qframe->data || qframe->width == 0 || qframe->height == 0) {
         return;
     }
-    InitializeIfNeeded();
     last_detection_boxes_.clear();
 
     const uint16_t w = qframe->width;
     const uint16_t h = qframe->height;
-    const size_t size_rgb565 = (size_t)w * h * 2;
 
-    if (qframe->format == 3) {
-        uint8_t* out_buf = (uint8_t*)heap_caps_malloc(size_rgb565, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!out_buf) {
-            ESP_LOGW(TAG_FACE, "ProcessOneFrame: YUYV convert alloc failed.");
-            return;
-        }
-        esp_imgfx_color_convert_cfg_t cfg = {
-            .in_res = {.width = static_cast<int16_t>(w), .height = static_cast<int16_t>(h)},
-            .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_YUYV,
-            .out_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
-            .color_space_std = ESP_IMGFX_COLOR_SPACE_STD_BT601,
-        };
-        esp_imgfx_color_convert_handle_t handle = nullptr;
-        esp_imgfx_err_t err = esp_imgfx_color_convert_open(&cfg, &handle);
-        if (err != ESP_IMGFX_ERR_OK || !handle) {
-            heap_caps_free(out_buf);
-            return;
-        }
-        esp_imgfx_data_t in_data = {.data = qframe->data, .data_len = qframe->len};
-        esp_imgfx_data_t out_data = {.data = out_buf, .data_len = static_cast<uint32_t>(size_rgb565)};
-        err = esp_imgfx_color_convert_process(handle, &in_data, &out_data);
-        esp_imgfx_color_convert_close(handle);
-        if (err != ESP_IMGFX_ERR_OK) {
-            heap_caps_free(out_buf);
-            return;
-        }
-        memcpy(qframe->data, out_buf, size_rgb565);
-        heap_caps_free(out_buf);
-        qframe->format = 1;
-        qframe->len = size_rgb565;
-    }
-
-    if (qframe->format != 1) {
-        return;
+    std::vector<app_ai::FaceDetectResult> core_results;
+    if (!app_ai::RunFaceDetectCore(qframe, &core_results)) {
+        return;  // Frame unchanged (e.g. format unsupported); display will handle as-is
     }
 
     std::string person_name;
-#if CONFIG_IDF_TARGET_ESP32S3
-    if (esp_dl_detect_handle_ != nullptr) {
-        dl::image::img_t src_img = {
-            .data = qframe->data,
-            .width = w,
-            .height = h,
-            .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565,
-        };
-        const bool already_320x240 = (w == FACE_DETECT_INPUT_W && h == FACE_DETECT_INPUT_H);
-        void* dst_buf = nullptr;
-        dl::image::img_t run_img = src_img;
-        if (!already_320x240) {
-            const size_t dst_size = (size_t)FACE_DETECT_INPUT_W * FACE_DETECT_INPUT_H * 2;
-            dst_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (!dst_buf) {
-                dst_buf = heap_caps_malloc(dst_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-            }
-            if (dst_buf) {
-                dl::image::img_t dst_img = {
-                    .data = dst_buf,
-                    .width = static_cast<uint16_t>(FACE_DETECT_INPUT_W),
-                    .height = static_cast<uint16_t>(FACE_DETECT_INPUT_H),
-                    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565,
-                };
-                dl::image::resize(src_img, dst_img, dl::image::DL_IMAGE_INTERPOLATE_BILINEAR);
-                run_img = dst_img;
-            }
-        }
-        if (run_img.data != nullptr &&
-            run_img.width == FACE_DETECT_INPUT_W && run_img.height == FACE_DETECT_INPUT_H) {
-            const size_t num_pixels = (size_t)run_img.width * run_img.height;
-            uint32_t lum_sum = 0;
-            const uint16_t* rgb565 = (const uint16_t*)run_img.data;
-            for (size_t i = 0; i < num_pixels; i++) {
-                uint16_t p = rgb565[i];
-                int r = (p >> 11) & 0x1F, g = (p >> 5) & 0x3F, b = p & 0x1F;
-                lum_sum += (r * 255 / 31 + g * 255 / 63 + b * 255 / 31) / 3;
-            }
-            unsigned mean_lum = (unsigned)(lum_sum / num_pixels);
-            if (dst_buf != nullptr) {
-                heap_caps_free(dst_buf);
-                dst_buf = nullptr;
-            }
-            if (mean_lum < FACE_DETECT_MIN_LUMINANCE) {
-                ESP_LOGI(TAG_FACE, "Frame too dark (mean_lum=%u), no face.", mean_lum);
-            } else {
-                auto* detect = static_cast<HumanFaceDetect*>(esp_dl_detect_handle_);
-                auto& results = detect->run(run_img);
-                const int fw = static_cast<int>(w);
-                const int fh = static_cast<int>(h);
-                const float sx = static_cast<float>(fw) / FACE_DETECT_INPUT_W;
-                const float sy = static_cast<float>(fh) / FACE_DETECT_INPUT_H;
-                const float score_thr = FACE_DETECT_SCORE_THRESHOLD;
-                const int min_box = FACE_DETECT_MIN_BOX_SIZE;
-                constexpr size_t MAX_DRAW_BOXES = 1;
-#if FACE_DETECT_BOX_SWAP_XY
-                #define BOX_X0(r) ((r).box[1])
-                #define BOX_Y0(r) ((r).box[0])
-                #define BOX_X1(r) ((r).box[3])
-                #define BOX_Y1(r) ((r).box[2])
-#else
-                #define BOX_X0(r) ((r).box[0])
-                #define BOX_Y0(r) ((r).box[1])
-                #define BOX_X1(r) ((r).box[2])
-                #define BOX_Y1(r) ((r).box[3])
-#endif
-                for (const auto& r : results) {
-                    if (r.score < score_thr) continue;
-                    int box_w = static_cast<int>((BOX_X1(r) - BOX_X0(r)) * sx);
-                    int box_h = static_cast<int>((BOX_Y1(r) - BOX_Y0(r)) * sy);
-                    if (box_w >= min_box && box_h >= min_box && last_detection_boxes_.size() < MAX_DRAW_BOXES) {
-                        FaceBox fb;
-                        fb.x = static_cast<int>(BOX_X0(r) * sx);
-                        fb.y = static_cast<int>(BOX_Y0(r) * sy);
-                        fb.width = box_w;
-                        fb.height = box_h;
-                        fb.id = static_cast<int>(last_detection_boxes_.size());
-                        fb.name = last_detection_boxes_.empty() ? "?" : "";
-                        last_detection_boxes_.push_back(fb);
-                    }
-                }
-#undef BOX_X0
-#undef BOX_Y0
-#undef BOX_X1
-#undef BOX_Y1
-                if (!last_detection_boxes_.empty()) {
-                    person_name = "unknown";
-                }
-            }
-        }
+    for (size_t i = 0; i < core_results.size() && last_detection_boxes_.size() < MAX_DRAW_BOXES; i++) {
+        const auto& r = core_results[i];
+        FaceBox fb;
+        fb.x = static_cast<int>(r.box[0]);
+        fb.y = static_cast<int>(r.box[1]);
+        fb.width = static_cast<int>(r.box[2] - r.box[0]);
+        fb.height = static_cast<int>(r.box[3] - r.box[1]);
+        fb.id = static_cast<int>(last_detection_boxes_.size());
+        fb.name = last_detection_boxes_.empty() ? "?" : "";
+        last_detection_boxes_.push_back(fb);
+    }
+    if (!last_detection_boxes_.empty()) {
+        person_name = "unknown";
     }
     if (person_name.empty()) {
         SimulateLocalDetection(person_name);
     }
-#else
-    SimulateLocalDetection(person_name);
-#endif
 
     for (size_t i = 0; i < last_detection_boxes_.size(); i++) {
         if (i == 0 && !person_name.empty()) {
@@ -275,18 +164,7 @@ void FaceRecognition::ProcessOneFrame(QueuedFrame* qframe) {
 }
 
 void FaceRecognition::InitializeIfNeeded() {
-#if CONFIG_IDF_TARGET_ESP32S3
-    if (esp_dl_detect_handle_ == nullptr) {
-        esp_dl_detect_handle_ = new HumanFaceDetect();
-        ESP_LOGI(TAG_FACE, "ESP-DL HumanFaceDetect initialized (no face / blocked = no report).");
-#if FACE_USE_VIRTUAL_ONLY
-        ESP_LOGI(TAG_FACE, "FACE_USE_VIRTUAL_ONLY=1: Explain disabled, use virtual name only for registration.");
-#endif
-#if FACE_DETECT_BOX_SWAP_XY
-        ESP_LOGI(TAG_FACE, "FACE_DETECT_BOX_SWAP_XY=1: box parsed as [y,x,y,x] for display correction.");
-#endif
-    }
-#endif
+    // Detection is done by app_ai::RunFaceDetectCore (unified core). No local detector handle.
 }
 
 void FaceRecognition::SimulateLocalDetection(std::string& out_person_name) {

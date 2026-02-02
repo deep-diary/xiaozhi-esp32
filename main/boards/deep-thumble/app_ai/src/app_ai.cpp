@@ -63,10 +63,11 @@ void Start(Camera* camera, Display* display) {
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "FaceAI task create failed");
     }
-    ret = xTaskCreate(detail::FaceExplainTask, "face_explain", FACE_DISPLAY_TASK_STACK, ctx,
+    // 先只启动显示任务，确认检测+画框在 LCD 上正常；解释/识别任务后续再扩展
+    ret = xTaskCreate(detail::FaceDisplayTask, "face_display", FACE_DISPLAY_TASK_STACK, ctx,
                       FACE_DISPLAY_TASK_PRIORITY, nullptr);
     if (ret != pdPASS) {
-        ESP_LOGE(TAG, "FaceExplain task create failed");
+        ESP_LOGE(TAG, "FaceDisplay task create failed");
     }
 }
 

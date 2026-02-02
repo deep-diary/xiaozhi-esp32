@@ -50,16 +50,17 @@
 #define FACE_RECOGNITION_INTERVAL_MS   2000  // 人脸识别周期（ms），测试分析时用 2s 便于看 log
 #define FACE_RECOGNITION_DELAYED_START_MS 15000  // 延迟启动人脸管道（ms），让 AFE/WakeNet 先完成 32KB PSRAM 分配，避免「Item psram alloc failed」后 memcpy(NULL) 崩溃
 #define FACE_RECOGNITION_TEST_PREVIEW  1     // 测试开关：1=周期显示预览并在检测到人脸时绘制人脸框，0=不显示
-#define FACE_AI_PASSTHROUGH            1     // 1=人脸 AI 任务仅透传（不检测、不画框、不 YUYV 转换），用于验证内存是否因检测/转换不足；0=正常检测+画框
+#define FACE_AI_PASSTHROUGH            0     // 0=正常检测+画框并送 LCD；1=仅透传（不检测、不画框），用于验证内存
 #define MAX_FACE_COUNT                 5     // 本地最多保存的人脸数量
 #define ENABLE_REMOTE_RECOGNITION      1     // 是否启用远程识别（当前使用本地占位实现）
 #define FACE_USE_VIRTUAL_ONLY          1     // 1=新注册时屏蔽 Explain，仅用虚拟姓名，用于先验证离线人脸检测/框是否正常；0=正常走 Explain
 #define REMOTE_RECOGNITION_TIMEOUT_MS  3000  // 远程识别超时时间
 #define FACE_STORAGE_PATH              "/assets/face_recognition/"  // 人脸数据存储路径（占位）
-#define FACE_DETECT_SCORE_THRESHOLD    0.85f  // 人脸框置信度阈值（每张脸单独 score；遮挡/过暗时模型仍会高置信度误检，需配合亮度过滤）
-#define FACE_DETECT_MIN_BOX_SIZE       40    // 人脸框最小边长（像素），队列为 320×240 时约 1/8 画面（原 640×480 用 80）
+#define FACE_DETECT_SCORE_THRESHOLD    0.94f  // 折中：0.96 对天花板好但人脸漏检多，0.94 减少人脸漏检；天花板误检略增可再微调
+#define FACE_DETECT_MIN_BOX_SIZE       52    // 折中：55 漏人脸多，52 略降以保留略小人脸框
 #define FACE_DETECT_MIN_LUMINANCE      30    // 检测输入 320×240 画面平均亮度下限（0～255）；低于此视为遮挡/过暗，本帧不认人脸
-#define FACE_DETECT_BOX_SWAP_XY        0     // 0=标准 [x0,y0,x1,y1]；若框总在最上方或错位可试 1（按 [y,x,y,x] 解析）
+#define FACE_DETECT_BOX_SWAP_XY        0     // ESP-DL result_t 为 [x0,y0,x1,y1]，必须为 0；见 docs/face-detection-root-cause.md
+#define FACE_DETECT_RGB565_BYTE_SWAP   1     // 1=检测前对 RGB565 每像素做高/低字节对调，用于排查组件 BIG_ENDIAN 与相机 LE 不一致
 
 // 双队列架构：相机任务 + AI 任务 + 显示任务（唯一模式）
 // 队列帧为 320×240×2（相机 640×480 做 2x2 下采样后入队），显著降低 PSRAM（池约 300KB vs 原 1.2MB）

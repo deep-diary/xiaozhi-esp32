@@ -207,3 +207,80 @@ AI 任务:  xQueueReceive(xQueueFrameO) -> ProcessOneFrame(检测+画框) -> xQu
   - `config.h`：增加 `FACE_RECOGNITION_DELAYED_START_MS`（默认 15000 ms）。
   - `deep_thumble.cc`：构造函数中不再直接调用 `InitializeFaceRecognition()`，改为创建任务 `DelayedFaceInitTask`，在 `vTaskDelay(FACE_RECOGNITION_DELAYED_START_MS)` 后调用 `InitializeFaceRecognition()`。
 - **效果**：约 0～15s 内无人脸预览；约 11s 时状态到 idle、AFE 初始化，此时无帧池占用，32KB PSRAM 分配成功率提高；约 15s 后人脸管道启动，预览与检测正常。若仍出现「Item psram alloc failed」，可适当增大 `FACE_RECOGNITION_DELAYED_START_MS` 或继续减少其它 PSRAM 占用。
+
+---
+
+## esp-who 对齐的人脸检测实施（本阶段：检测正确 + LCD 显示人脸框）
+
+### 实施概要
+
+- **统一检测核心**：`app_ai/include/face_detect_core.hpp`、`app_ai/src/face_detect_core.cpp`。`RunFaceDetectCore(QueuedFrame*, std::vector<FaceDetectResult>*)` 完成 YUYV→RGB565、resize 320×240、亮度过滤、`HumanFaceDetect::run`、与 esp-who 一致的 rescale（inv_rescale + 边界 clamp）及阈值/最小框过滤，输出已映射到帧尺寸的 `FaceDetectResult`。
+- **app_face_detection**：`RunFaceDetectionAndLog` 仅调用 `RunFaceDetectCore`，根据返回结果打 log（人脸数、框、score）。
+- **face_recognition**：`ProcessOneFrame` 调用 `RunFaceDetectCore`，将结果转为 `FaceBox` 填入 `last_detection_boxes_`，再 `DrawFaceBoxesOnRgb565` 画框；人脸识别（数据库、姓名）预留接口，下一阶段实现。检测器改由检测核心内部持有，`FaceRecognition` 不再持有 `esp_dl_detect_handle_`。
+- **显示**：`task_face_ai` 在 `FACE_AI_PASSTHROUGH=0` 时对每帧执行检测并画框，同一 buffer 送入 `q_ai`；`task_face_display` 从 `q_ai` 取帧并 `ShowQueuedFrameOnDisplay`，LCD 显示带框画面。本阶段未改 `task_face_camera` / `task_face_display` 职责。
+- **配置**：`config.h` 中 `FACE_AI_PASSTHROUGH=0` 启用检测与画框；阈值/最小框/亮度仍为 `FACE_DETECT_*`。
+
+### 整条链路与 face_recognition 职责
+
+- **拍照**：`task_face_camera` 调用 `Capture()`、`GetLastFrame()`，下采样到 320×240 入池 buffer，`xQueueSend(ctx->q_raw, &qframe)`。
+- **检测 + 画框**：`task_face_ai` 从 `q_raw` 取帧 → `RunFaceDetectionAndLog`（打 log）→ `ProcessOneFrame`。`ProcessOneFrame` 内：`RunFaceDetectCore` 做检测 → 结果转 `FaceBox` → `DrawFaceBoxesOnRgb565(qframe->data)` 画框；识别暂未实现（person_name 为 "unknown"），预留 UpdateLocalDatabase/Explain。**送入 q_ai 由 task_face_ai 在 ProcessOneFrame 返回后执行**（`xQueueSend(ctx->q_ai, &qframe)`），face_recognition 不负责入队。
+- **显示**：`task_face_display`（app_ai 当前启动的为 FaceDisplayTask）从 `q_ai` 取帧 → `ShowQueuedFrameOnDisplay` → 归还池 buffer。解释任务（FaceExplainTask）本阶段已关闭，仅启动显示任务以确认检测结果正常。
+
+### 与 components 的关系
+
+- **检测模型**：与 esp-who 一致，使用 `HumanFaceDetect`（human_face_detect 组件）；`face_detect_core` 内 rescale 逻辑与 who_detect 对齐。
+- **画框**：使用 app_ai 自实现 `DrawFaceBoxesOnRgb565`（face_draw）；components 中 who_detect_result_handle 的 `draw_detect_results_on_img` 基于 `dl::image::img_t` 与 `result_t`，接口与当前 RGB565 buffer + FaceBox 不同，暂不替换。
+- **who_detect / who_recognition**：依赖 WhoFrameCapNode（从 who_cam 取帧），当前帧来自 QueuedFrame + 双队列，无法直接复用 WhoDetect 类；保持“逻辑对齐、不接 WhoDetect 管线”的方案。
+
+---
+
+## 画框逻辑说明：当前实现 vs esp-who，以及图像格式一致性
+
+### 1. 当前画框逻辑（face_draw）
+
+- **接口**：`DrawFaceBoxesOnRgb565(uint8_t* rgb565_buf, uint16_t buf_w, uint16_t buf_h, const std::vector<FaceBox>& boxes)`。
+- **数据**：原始 RGB565 缓冲指针 + 宽高 + 自有的 `FaceBox` 列表（`x, y, width, height, id, name`）。
+- **行为**：在缓冲上直接画矩形框（厚度 5）、ID 数字、姓名字符（5×7 点阵）；不依赖 `dl::image::img_t` 或 `dl::detect::result_t`。
+
+### 2. esp-who / components 画框逻辑（who_detect_result_handle）
+
+- **接口**：`who::detect::draw_detect_results_on_img(const dl::image::img_t &img, const std::list<dl::detect::result_t> &detect_res, const std::vector<std::vector<uint8_t>> &palette)`。
+- **数据**：
+  - `img_t`：`data + width + height + pix_type`（支持 RGB565 / RGB888 等），即“图像描述”而非裸指针。
+  - `result_t`：`box[4]`（x1,y1,x2,y2）、`score`、`category`（用于 palette 下标）、可选 `keypoint`（5 点）。
+  - `palette`：按类别给的 RGB 颜色，如 `{{255,0,0}}` 表示第 0 类为红。
+- **行为**：内部调用 esp-dl 的 `dl::image::draw_hollow_rectangle(img, box[0..3], palette[res.category], 2)` 和 `draw_point` 画关键点；**画框本身来自 esp-dl**（`managed_components/espressif__esp-dl/vision/image/dl_image_draw.hpp`），who_detect_result_handle 只是按 `result_t` 列表和 palette 转调。
+
+### 3. 为何“暂不替换”
+
+- **接口不一致**：我们上游是 `QueuedFrame`（`data` + `width/height`）+ 检测核心输出的 `std::vector<FaceDetectResult>`（后转成 `FaceBox`）。who 侧是 `img_t` + `std::list<dl::detect::result_t>` + palette；`result_t` 还带 `category`、`keypoint`，我们当前只用了 box + score。
+- **依赖链**：若直接调用 `who::detect::draw_detect_results_on_img`，需要链接 who_detect_result_handle，其依赖 who_detect（再依赖 who_frame_cap、who_cam），会拉入整条 who 管线，而我们现在只用 QueuedFrame 双队列，不需要 WhoFrameCapNode。
+- **功能**：当前 face_draw 已满足“框 + ID/姓名”的显示需求；esp-who 那套多了一个“按 category 选颜色 + 关键点”，我们人脸只有一类，可后续再对齐。
+
+### 4. 送入 AI 检测的图像帧是否与 esp-who 一致
+
+**一致。**
+
+- **格式**：我们都是 **RGB565**。esp-who 示例里 WhoS3Cam 使用 `PIXFORMAT_RGB565`，`cam_fb_t` 转成 `dl::image::img_t` 时 `pix_type = DL_IMAGE_PIX_TYPE_RGB565`。我们 `RunFaceDetectCore` 里对 `QueuedFrame` 若为 YUYV 会先转成 RGB565，再构造 `dl::image::img_t`（`pix_type = DL_IMAGE_PIX_TYPE_RGB565`）交给 `HumanFaceDetect::run(img)`，与 esp-who 一致。
+- **分辨率**：检测输入均为 **320×240**。esp-who 通过 `get_cam_frame_size_from_lcd_resolution()` 取帧尺寸，我们相机下采样后入队为 320×240（`FACE_QUEUE_FRAME_WIDTH/HEIGHT`），非 320×240 时在检测核心内 resize 到 320×240 再 `run()`，与 who 侧对模型的输入要求一致。
+- **字节序**：若存在 BIG_ENDIAN/LE 差异，我们通过 `config.h` 的 `FACE_DETECT_RGB565_BYTE_SWAP` 在检测前做像素字节对调，与文档 `docs/face-detection-root-cause.md` 一致。
+
+因此：**送入 AI 检测的一帧（320×240 RGB565，必要时字节对调）与 esp-who 的检测输入格式保持一致**；差异只在“谁产帧”（WhoS3Cam + WhoFrameCapNode vs 我们相机 + QueuedFrame）和“谁画框”（who_detect_result_handle vs face_draw）。
+
+### 5. 若要改为 esp-who 风格画框，可怎么做
+
+两种做法（由简到繁）：
+
+**方案 A：仅复用 esp-dl 的绘制 API（推荐，不引入 who 组件）**
+
+- 我们已有 esp-dl（human_face_detect 依赖），其中 `dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, color_rgb_vector, line_width)` 支持在 `img_t`（RGB565）上画框，颜色传 `std::vector<uint8_t>{R,G,B}`，内部会转成 RGB565 再画。
+- **修改方式**：在 face_recognition（或单独一层）中，用当前帧构造 `dl::image::img_t`（`data = qframe->data`，`width/height`，`pix_type = DL_IMAGE_PIX_TYPE_RGB565`），对每个 `FaceDetectResult` 调用 `dl::image::draw_hollow_rectangle(img, (int)box[0], (int)box[1], (int)box[2], (int)box[3], {255,0,0}, 2)`；若需要关键点再调 `dl::image::draw_point`。这样“画框逻辑”与 esp-who 使用的 esp-dl 接口一致，且不依赖 who_detect_result_handle。
+- **头文件**：`#include "dl_image_draw.hpp"`、`#include "dl_image_define.hpp"`（或 `dl_image.hpp`），由 esp-dl 提供。
+
+**方案 B：直接调用 who_detect_result_handle::draw_detect_results_on_img**
+
+- 需要构造 `std::list<dl::detect::result_t>`：从当前 `FaceDetectResult` 或从检测核心的“原始 result_t 列表”转出（若保留 category/keypoint 可一并填入）；再给一个 `palette`，如 `{{255,0,0}}`。
+- 将 `qframe->data` 包装成 `dl::image::img_t`，然后调用 `who::detect::draw_detect_results_on_img(img, list_result, palette)`。
+- **代价**：需在板级或 main 里链接 who_detect_result_handle；该组件依赖 who_detect，会拖入 who_frame_cap、who_cam 等，需评估 CMake/依赖是否接受。若只想“画框风格一致”，方案 A 足够。
+
+**小结**：当前画框用“自实现 RGB565 + FaceBox”是接口与依赖上的折中；**检测输入与 esp-who 一致（320×240 RGB565）**。若要和 esp-who 画框一致，优先用 **方案 A（仅用 esp-dl 的 draw_hollow_rectangle/draw_point）**，无需引入 who 组件。

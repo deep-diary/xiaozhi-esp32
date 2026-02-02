@@ -1,4 +1,5 @@
 #include "app_ai_context.hpp"
+#include "app_face_detection.hpp"
 #include "config.h"
 #include "frame_queue.hpp"
 #include "face_recognition.hpp"
@@ -27,6 +28,8 @@ void FaceAITask(void* pv) {
         if (xQueueReceive(ctx->q_raw, &qframe, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+        int face_count = app_ai::RunFaceDetectionAndLog(&qframe);
+        (void)face_count;
 #if !FACE_AI_PASSTHROUGH
         ctx->face_recognition->ProcessOneFrame(&qframe);
 #endif

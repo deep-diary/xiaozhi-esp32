@@ -19,7 +19,7 @@ namespace app_ai {
 namespace detail {
 
 // 收到 20 帧后触发 Explain 的帧数阈值（0.5s/帧 ≈ 10s）
-static constexpr unsigned kExplainFrameThreshold = 20;
+static constexpr unsigned kExplainFrameThreshold = 200;
 
 void FaceExplainTask(void* pv) {
     auto* ctx = static_cast<AppAIContext*>(pv);
