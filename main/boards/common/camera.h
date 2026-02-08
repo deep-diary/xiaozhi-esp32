@@ -20,6 +20,7 @@ public:
     virtual bool Capture() = 0;
     virtual bool SetHMirror(bool enabled) = 0;
     virtual bool SetVFlip(bool enabled) = 0;
+    virtual bool SetSwapBytes(bool enabled) { return false; }  // Optional, default no-op
     virtual std::string Explain(const std::string& question) = 0;
     // 取最后一帧（Capture 后有效）；未实现则返回 false，out 不修改
     virtual bool GetLastFrame(CameraFrame* out) { (void)out; return false; }

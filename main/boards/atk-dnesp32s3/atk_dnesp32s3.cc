@@ -6,7 +6,7 @@
 #include "config.h"
 #include "i2c_device.h"
 #include "led/single_led.h"
-#include "esp32_camera.h"
+#include "esp_video.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -49,7 +49,7 @@ private:
     Button boot_button_;
     LcdDisplay* display_;
     XL9555* xl9555_;
-    Esp32Camera* camera_;
+    EspVideo* camera_;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -179,10 +179,7 @@ private:
             .dvp = &dvp_config,
         };
 
-        camera_ = new Esp32Camera(video_config);
-        // 旋转180度：同时启用水平镜像和垂直翻转
-        camera_->SetVFlip(1);
-        camera_->SetHMirror(1);
+        camera_ = new EspVideo(video_config);
     }
 
 public:
