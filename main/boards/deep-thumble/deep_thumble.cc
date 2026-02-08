@@ -22,7 +22,7 @@
 #include <esp_heap_caps.h>
 
 #include "camera.h"
-#include "esp32_camera.h"
+#include "esp_video.h"
 #include "led/circular_strip.h"
 #include "led/led_control.h"
 #include "sensor/imu_sensor.h"
@@ -50,7 +50,18 @@ public:
         xSemaphoreGive(mutex_);
         return ok;
     }
-    void SetCapturePreviewEnabled(bool enabled) override { inner_->SetCapturePreviewEnabled(enabled); }
+    bool CaptureOnly() override {
+        if (xSemaphoreTake(mutex_, portMAX_DELAY) != pdTRUE) return false;
+        bool ok = inner_->CaptureOnly();
+        xSemaphoreGive(mutex_);
+        return ok;
+    }
+    bool ShowLastFrame() override {
+        if (xSemaphoreTake(mutex_, portMAX_DELAY) != pdTRUE) return false;
+        bool ok = inner_->ShowLastFrame();
+        xSemaphoreGive(mutex_);
+        return ok;
+    }
     bool SetHMirror(bool enabled) override { return inner_->SetHMirror(enabled); }
     bool SetVFlip(bool enabled) override { return inner_->SetVFlip(enabled); }
     std::string Explain(const std::string& question) override { return inner_->Explain(question); }
@@ -95,7 +106,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     Button boot_button_;
     Display* display_;
-    Esp32Camera* camera_;
+    EspVideo* camera_;
     CircularStrip* led_strip_;
     LedStripControl* led_control_;
     ImuSensor* imu_sensor_;
@@ -241,7 +252,7 @@ private:
             .dvp = &dvp_config,
         };
         
-        camera_ = new Esp32Camera(video_config);
+        camera_ = new EspVideo(video_config);
 
         Settings settings("deep-thumble", false);
         // 只翻转摄像头输出（不翻转整块屏幕），与摄像头安装方向一致
@@ -313,6 +324,7 @@ private:
             vTaskDelay(pdMS_TO_TICKS(MAIN_LOOP_BASE_DELAY_MS));
             cycle_counter++;
 
+
             // ===== 10ms 周期任务：IMU 采集 =====
             if ((cycle_counter % CYCLE_10MS) == 0) {
                 if (self->imu_sensor_ && self->imu_sensor_->IsInitialized()) {
@@ -330,6 +342,9 @@ private:
                     }
                 }
             }
+
+            // ===== 每轮（10ms）：人脸管道单显示（从 q_ai 非阻塞取一帧则显示并还 buffer，无数据则直接跳过） =====
+            app_ai::TickDisplay();
 
             // ===== 500ms 周期任务：预留（当前仅日志占位） =====
             if ((cycle_counter % CYCLE_500MS) == 0) {

@@ -141,15 +141,26 @@ bool RunFaceDetectCore(QueuedFrame* qframe, std::vector<FaceDetectResult>* out_r
         }
     }
 
+    // 检测用输入：若需字节对调则对副本操作，不修改 qframe->data，保证送显队列色彩正确
+    void* detect_src_buf = nullptr;
+    const size_t src_size = (size_t)w * h * 2;
 #if FACE_DETECT_RGB565_BYTE_SWAP
-    for (size_t i = 0; i < (size_t)w * h; i++) {
-        uint16_t* p = reinterpret_cast<uint16_t*>(qframe->data) + i;
-        *p = static_cast<uint16_t>((*p >> 8) | (*p << 8));
+    detect_src_buf = heap_caps_malloc(src_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!detect_src_buf) {
+        detect_src_buf = heap_caps_malloc(src_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (detect_src_buf) {
+        memcpy(detect_src_buf, qframe->data, src_size);
+        for (size_t i = 0; i < (size_t)w * h; i++) {
+            uint16_t* p = reinterpret_cast<uint16_t*>(detect_src_buf) + i;
+            *p = static_cast<uint16_t>((*p >> 8) | (*p << 8));
+        }
     }
 #endif
 
+    void* src_data = detect_src_buf ? detect_src_buf : qframe->data;
     dl::image::img_t src_img = {
-        .data = qframe->data,
+        .data = src_data,
         .width = w,
         .height = h,
         .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565,
@@ -159,7 +170,7 @@ bool RunFaceDetectCore(QueuedFrame* qframe, std::vector<FaceDetectResult>* out_r
     void* dst_buf = nullptr;
     dl::image::img_t run_img = src_img;
 
-    if (!already_320x240) {
+    if (!already_320x240 && src_data != nullptr) {
         const size_t dst_size = (size_t)FACE_DETECT_INPUT_W * FACE_DETECT_INPUT_H * 2;
         dst_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!dst_buf) {
@@ -182,6 +193,9 @@ bool RunFaceDetectCore(QueuedFrame* qframe, std::vector<FaceDetectResult>* out_r
         if (dst_buf != nullptr) {
             heap_caps_free(dst_buf);
         }
+        if (detect_src_buf != nullptr) {
+            heap_caps_free(detect_src_buf);
+        }
         ESP_LOGD(TAG, "Resize failed or unsupported size, skip.");
         return false;
     }
@@ -195,17 +209,27 @@ bool RunFaceDetectCore(QueuedFrame* qframe, std::vector<FaceDetectResult>* out_r
         lum_sum += (r * 255 / 31 + g * 255 / 63 + b * 255 / 31) / 3;
     }
     unsigned mean_lum = (unsigned)(lum_sum / num_pixels);
-    if (dst_buf != nullptr) {
-        heap_caps_free(dst_buf);
-        dst_buf = nullptr;
-    }
     if (mean_lum < FACE_DETECT_MIN_LUMINANCE) {
+        if (dst_buf != nullptr) {
+            heap_caps_free(dst_buf);
+        }
+        if (detect_src_buf != nullptr) {
+            heap_caps_free(detect_src_buf);
+        }
         ESP_LOGD(TAG, "Frame too dark (mean_lum=%u), skip.", mean_lum);
         return true;  // ran pipeline but no detection
     }
 
     auto& raw_results = s_detector->run(run_img);
     rescale_and_filter(raw_results, w, h, out_results);
+
+    // 检测用完后才能释放（run_img 可能指向 dst_buf）
+    if (dst_buf != nullptr) {
+        heap_caps_free(dst_buf);
+    }
+    if (detect_src_buf != nullptr) {
+        heap_caps_free(detect_src_buf);
+    }
     return true;
 
 #else

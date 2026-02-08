@@ -23,8 +23,10 @@ struct AppAIContext {
 
 void FaceCameraTask(void* pv);
 void FaceAITask(void* pv);
-void FaceDisplayTask(void* pv);
 void FaceExplainTask(void* pv);
+
+/// 将 q_ai 中的一帧显示到屏幕（供 TickDisplay 使用）
+void ShowQueuedFrameOnDisplay(AppAIContext* ctx, QueuedFrame* qframe);
 
 }  // namespace detail
 }  // namespace app_ai

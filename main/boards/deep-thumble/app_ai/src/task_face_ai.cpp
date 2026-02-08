@@ -28,9 +28,12 @@ void FaceAITask(void* pv) {
         if (xQueueReceive(ctx->q_raw, &qframe, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+#if FACE_AI_PASSTHROUGH
+        // 透传模式：不跑检测，直接转发 q_raw→q_ai，避免长时间占用 buffer 导致 pool 耗尽
+        (void)0;
+#else
         int face_count = app_ai::RunFaceDetectionAndLog(&qframe);
         (void)face_count;
-#if !FACE_AI_PASSTHROUGH
         ctx->face_recognition->ProcessOneFrame(&qframe);
 #endif
         if (xQueueSend(ctx->q_ai, &qframe, pdMS_TO_TICKS(200)) != pdTRUE) {

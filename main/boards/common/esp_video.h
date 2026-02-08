@@ -46,8 +46,17 @@ public:
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
     virtual bool Capture();
+    virtual bool CaptureOnly() override;
+    virtual bool ShowLastFrame() override;
+    virtual bool GetLastFrame(CameraFrame* out) override;
     // 翻转控制函数
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
     virtual std::string Explain(const std::string& question);
+
+private:
+    // 内部：只做 DQBUF + 填 frame_ + 格式/旋转 + QBUF，供 Capture() 与 CaptureOnly() 使用
+    bool DoCaptureOnly();
+    // 内部：将当前 frame_ 格式转换并 SetPreviewImage，供 Capture() 与 ShowLastFrame() 使用
+    bool ShowFrameToDisplay();
 };

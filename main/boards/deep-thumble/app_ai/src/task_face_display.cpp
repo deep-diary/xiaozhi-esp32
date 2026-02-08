@@ -12,7 +12,6 @@
 #include <cstring>
 
 #include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <freertos/queue.h>
 
 #define TAG "app_ai"
@@ -22,7 +21,7 @@ namespace app_ai {
 namespace detail {
 
 // q_ai 保持相机原格式（YUYV/RGB565 等）；显示时按 format 转成 LVGL 可用的 RGB565，与 MCP/Explain 侧“原格式 + 按需转换”一致
-static void ShowQueuedFrameOnDisplay(AppAIContext* ctx, QueuedFrame* qframe) {
+void ShowQueuedFrameOnDisplay(AppAIContext* ctx, QueuedFrame* qframe) {
     if (!ctx || !ctx->display || !qframe || !qframe->data || qframe->width == 0 || qframe->height == 0) {
         return;
     }
@@ -77,23 +76,6 @@ static void ShowQueuedFrameOnDisplay(AppAIContext* ctx, QueuedFrame* qframe) {
         std::make_unique<LvglAllocatedImage>(buf, size_rgb565, w, h, (int)stride, LV_COLOR_FORMAT_RGB565);
     DisplayLockGuard lock(ctx->display);
     lvgl->SetPreviewImage(std::move(image));
-}
-
-void FaceDisplayTask(void* pv) {
-    auto* ctx = static_cast<AppAIContext*>(pv);
-    if (!ctx || !ctx->q_ai || !ctx->display) {
-        vTaskDelete(nullptr);
-        return;
-    }
-    ESP_LOGI(TAG, "FaceDisplayTask started");
-    QueuedFrame qframe;
-    while (true) {
-        if (xQueueReceive(ctx->q_ai, &qframe, portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
-        ShowQueuedFrameOnDisplay(ctx, &qframe);
-        ctx->pool.ReturnBuffer(qframe.data);
-    }
 }
 
 }  // namespace detail

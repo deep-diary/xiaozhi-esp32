@@ -18,6 +18,9 @@
 
 #define TAG "LcdDisplay"
 
+// 预览图显示区域：宽高为屏幕的 1/PREVIEW_IMAGE_SIZE_DIVISOR（2=半屏，如 240×240 屏为 120×120）
+#define PREVIEW_IMAGE_SIZE_DIVISOR 2
+
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
@@ -826,9 +829,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_center(emoji_image_);
     lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
 
-    /* Middle layer: preview_image_ - centered display */
+    /* Middle layer: preview_image_ - centered display (size from PREVIEW_IMAGE_SIZE_DIVISOR) */
     preview_image_ = lv_image_create(screen);
-    lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
+    lv_obj_set_size(preview_image_, width_ / PREVIEW_IMAGE_SIZE_DIVISOR, height_ / PREVIEW_IMAGE_SIZE_DIVISOR);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 

@@ -18,6 +18,8 @@
 
 namespace app_ai {
 
+static detail::AppAIContext* g_ctx = nullptr;
+
 void Start(Camera* camera, Display* display) {
     if (!camera || !display) {
         ESP_LOGW(TAG, "Start skipped: camera or display null");
@@ -25,6 +27,7 @@ void Start(Camera* camera, Display* display) {
     }
 
     detail::AppAIContext* ctx = new detail::AppAIContext();
+    g_ctx = ctx;
     ctx->camera = camera;
     ctx->display = display;
 
@@ -48,9 +51,6 @@ void Start(Camera* camera, Display* display) {
         return s == kDeviceStateConnecting || s == kDeviceStateListening || s == kDeviceStateSpeaking;
     });
 
-    // 人脸管道单独做 320×240 预览，关闭 Capture() 内 640×480 预览，避免双重预览抢 PSRAM
-    ctx->camera->SetCapturePreviewEnabled(false);
-
     ESP_LOGI(TAG, "dual-queue: pool=%d raw=%d ai=%d",
              FACE_QUEUE_FRAME_POOL_SIZE, FACE_QUEUE_RAW_DEPTH, FACE_QUEUE_AI_DEPTH);
 
@@ -63,12 +63,18 @@ void Start(Camera* camera, Display* display) {
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "FaceAI task create failed");
     }
-    // 先只启动显示任务，确认检测+画框在 LCD 上正常；解释/识别任务后续再扩展
-    ret = xTaskCreate(detail::FaceDisplayTask, "face_display", FACE_DISPLAY_TASK_STACK, ctx,
-                      FACE_DISPLAY_TASK_PRIORITY, nullptr);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "FaceDisplay task create failed");
+}
+
+void TickDisplay() {
+    if (!g_ctx || !g_ctx->q_ai) {
+        return;
     }
+    QueuedFrame qframe;
+    if (xQueueReceive(g_ctx->q_ai, &qframe, 0) != pdTRUE) {
+        return;
+    }
+    detail::ShowQueuedFrameOnDisplay(g_ctx, &qframe);
+    g_ctx->pool.ReturnBuffer(qframe.data);
 }
 
 }  // namespace app_ai

@@ -50,7 +50,7 @@
 #define FACE_RECOGNITION_INTERVAL_MS   2000  // 人脸识别周期（ms），测试分析时用 2s 便于看 log
 #define FACE_RECOGNITION_DELAYED_START_MS 15000  // 延迟启动人脸管道（ms），让 AFE/WakeNet 先完成 32KB PSRAM 分配，避免「Item psram alloc failed」后 memcpy(NULL) 崩溃
 #define FACE_RECOGNITION_TEST_PREVIEW  1     // 测试开关：1=周期显示预览并在检测到人脸时绘制人脸框，0=不显示
-#define FACE_AI_PASSTHROUGH            0     // 0=正常检测+画框并送 LCD；1=仅透传（不检测、不画框），用于验证内存
+#define FACE_AI_PASSTHROUGH            1     // 0=正常检测+画框并送 LCD；1=仅透传（不检测、不画框），用于验证内存
 #define MAX_FACE_COUNT                 5     // 本地最多保存的人脸数量
 #define ENABLE_REMOTE_RECOGNITION      1     // 是否启用远程识别（当前使用本地占位实现）
 #define FACE_USE_VIRTUAL_ONLY          1     // 1=新注册时屏蔽 Explain，仅用虚拟姓名，用于先验证离线人脸检测/框是否正常；0=正常走 Explain
@@ -58,19 +58,19 @@
 #define FACE_STORAGE_PATH              "/assets/face_recognition/"  // 人脸数据存储路径（占位）
 #define FACE_DETECT_SCORE_THRESHOLD    0.94f  // 折中：0.96 对天花板好但人脸漏检多，0.94 减少人脸漏检；天花板误检略增可再微调
 #define FACE_DETECT_MIN_BOX_SIZE       52    // 折中：55 漏人脸多，52 略降以保留略小人脸框
-#define FACE_DETECT_MIN_LUMINANCE      30    // 检测输入 320×240 画面平均亮度下限（0～255）；低于此视为遮挡/过暗，本帧不认人脸
+#define FACE_DETECT_MIN_LUMINANCE      30    // 检测输入画面平均亮度下限（0～255）；低于此视为遮挡/过暗，本帧不认人脸
 #define FACE_DETECT_BOX_SWAP_XY        0     // ESP-DL result_t 为 [x0,y0,x1,y1]，必须为 0；见 docs/face-detection-root-cause.md
-#define FACE_DETECT_RGB565_BYTE_SWAP   1     // 1=检测前对 RGB565 每像素做高/低字节对调，用于排查组件 BIG_ENDIAN 与相机 LE 不一致
+#define FACE_DETECT_RGB565_BYTE_SWAP   0     // 1=检测前对 RGB565 每像素做高/低字节对调，用于排查组件 BIG_ENDIAN 与相机 LE 不一致
 
-// 双队列架构：相机任务 + AI 任务 + 显示任务（唯一模式）
-// 队列帧为 320×240×2（相机 640×480 做 2x2 下采样后入队），显著降低 PSRAM（池约 300KB vs 原 1.2MB）
-#define FACE_QUEUE_FRAME_WIDTH         320   // 队列帧宽（与 FACE_DETECT_INPUT_W 一致，检测无需再缩放）
-#define FACE_QUEUE_FRAME_HEIGHT        240   // 队列帧高（与 FACE_DETECT_INPUT_H 一致）
+// 双队列架构：相机任务 + AI 任务 + 主循环单显示（唯一模式）
+// 队列帧为 240×240×2，与 config.json 相机输出 240×240 一致，直接拷贝入队
+#define FACE_QUEUE_FRAME_WIDTH         240   // 队列帧宽（与相机输出一致）
+#define FACE_QUEUE_FRAME_HEIGHT        240   // 队列帧高（与相机输出一致）
 #define FACE_QUEUE_FRAME_POOL_SIZE     2     // 帧缓冲池 buffer 数量
 #define FACE_QUEUE_RAW_DEPTH           2     // 原始帧队列深度
 #define FACE_QUEUE_AI_DEPTH            2     // AI 处理后帧队列深度
-#define FACE_QUEUE_FRAME_MAX_BYTES     (FACE_QUEUE_FRAME_WIDTH * FACE_QUEUE_FRAME_HEIGHT * 2)  // 320×240 RGB565
-#define FACE_CAMERA_CAPTURE_INTERVAL_MS 500  // 取帧间隔（ms），500≈2fps，后台人脸检测/识别为主、非实时预览
+#define FACE_QUEUE_FRAME_MAX_BYTES     (FACE_QUEUE_FRAME_WIDTH * FACE_QUEUE_FRAME_HEIGHT * 2)  // 240×240 RGB565
+#define FACE_CAMERA_CAPTURE_INTERVAL_MS 500  // 取帧间隔（ms），500≈2fps；开检测时消费慢于生产，避免 pool 耗尽
 #define FACE_CAMERA_TASK_STACK         4096
 #define FACE_AI_TASK_STACK              4096  // 原 6144，降至 4096 以省 ~2KB 内部 RAM
 #define FACE_DISPLAY_TASK_STACK        4096

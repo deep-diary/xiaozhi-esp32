@@ -25,7 +25,7 @@ void FaceCameraTask(void* pv) {
     CameraFrame frame;
     QueuedFrame qframe;
     while (true) {
-        bool cap_ok = ctx->camera->Capture();
+        bool cap_ok = ctx->camera->CaptureOnly();
         if (!cap_ok) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
@@ -43,32 +43,17 @@ void FaceCameraTask(void* pv) {
         const uint16_t out_w = FACE_QUEUE_FRAME_WIDTH;
         const uint16_t out_h = FACE_QUEUE_FRAME_HEIGHT;
         const size_t out_len = FACE_QUEUE_FRAME_MAX_BYTES;
-        if (frame.width >= out_w * 2 && frame.height >= out_h * 2) {
-            for (uint16_t i = 0; i < out_h; i++) {
-                for (uint16_t j = 0; j < out_w; j++) {
-                    size_t src_idx = ((size_t)(2 * i) * frame.width + (2 * j)) * 2;
-                    size_t dst_idx = ((size_t)i * out_w + j) * 2;
-                    buf[dst_idx] = frame.data[src_idx];
-                    buf[dst_idx + 1] = frame.data[src_idx + 1];
-                }
-            }
-            qframe.data = buf;
-            qframe.len = out_len;
-            qframe.width = out_w;
-            qframe.height = out_h;
-            qframe.format = frame.format;
-        } else {
-            size_t copy_len = frame.len;
-            if (copy_len > out_len) {
-                copy_len = out_len;
-            }
-            memcpy(buf, frame.data, copy_len);
-            qframe.data = buf;
-            qframe.len = copy_len;
-            qframe.width = frame.width;
-            qframe.height = frame.height;
-            qframe.format = frame.format;
+        // 相机 240×240，直接拷贝入队（无下采样）
+        size_t copy_len = frame.len;
+        if (copy_len > out_len) {
+            copy_len = out_len;
         }
+        memcpy(buf, frame.data, copy_len);
+        qframe.data = buf;
+        qframe.len = copy_len;
+        qframe.width = out_w;
+        qframe.height = out_h;
+        qframe.format = frame.format;
         if (xQueueSend(ctx->q_raw, &qframe, pdMS_TO_TICKS(100)) != pdTRUE) {
             ctx->pool.ReturnBuffer(buf);
             ESP_LOGW(TAG, "FaceCamera: raw queue full, return buffer");
