@@ -1,5 +1,4 @@
 #include "app_ai_context.hpp"
-#include "app_face_detection.hpp"
 #include "config.h"
 #include "frame_queue.hpp"
 #include "face_recognition.hpp"
@@ -37,9 +36,9 @@ void FaceAITask(void* pv) {
         // 透传模式：不跑检测，直接转发 q_raw→q_ai，避免长时间占用 buffer 导致 pool 耗尽
         (void)0;
 #else
-        int face_count = app_ai::RunFaceDetectionAndLog(&qframe);
-        (void)face_count;
+        // 非透传：只跑一次检测+画框（ProcessOneFrame 内）；FACE_DETECTION_ONLY=1 时仅画框不跑识别
         ctx->face_recognition->ProcessOneFrame(&qframe);
+        taskYIELD();  // 单帧处理耗时较长，让出 CPU 给 IDLE/其他任务，避免 task_wdt
 #endif
         if (xQueueSend(ctx->q_ai, &qframe, pdMS_TO_TICKS(200)) != pdTRUE) {
             ctx->pool.ReturnBuffer(qframe.data);

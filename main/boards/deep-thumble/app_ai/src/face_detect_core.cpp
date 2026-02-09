@@ -1,5 +1,5 @@
 /**
- * 统一人脸检测核心：与 esp-who WhoDetect 的模型与 rescale 逻辑对齐。
+ * 统一人脸检测核心：基于 human_face_detect 组件（MSR_S8_V1 + MNP_S8_V1）。
  * 输入 QueuedFrame，输出已映射到帧尺寸且过滤后的 FaceDetectResult 列表。
  */
 #include "face_detect_core.hpp"
@@ -9,9 +9,11 @@
 #include <esp_heap_caps.h>
 #include <cstring>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #if CONFIG_IDF_TARGET_ESP32S3
 #include "human_face_detect.hpp"
-#include "dl_image_process.hpp"
 #include "dl_image_define.hpp"
 #include "esp_imgfx_color_convert.h"
 #endif
@@ -21,18 +23,18 @@
 namespace app_ai {
 
 #if CONFIG_IDF_TARGET_ESP32S3
-static constexpr int FACE_DETECT_INPUT_W = 320;
-static constexpr int FACE_DETECT_INPUT_H = 240;
-
-// esp-who style: rescale detection result from 320x240 to frame size (inv_rescale = frame / detect)
+// 组件内部 MSR 模型输入为 120×160×3（见 README），ImagePreprocessor 会自行 resize；调用 run(img) 时传入任意尺寸即可，结果坐标为传入 img 的宽高
+// 将检测结果从「传给 run() 的图片尺寸」rescale 到帧尺寸（通常一致则 scale=1）
 static void rescale_and_filter(
     const std::list<dl::detect::result_t>& raw,
     uint16_t frame_w,
     uint16_t frame_h,
+    uint16_t detect_input_w,
+    uint16_t detect_input_h,
     std::vector<FaceDetectResult>* out_results)
 {
-    const float inv_rescale_x = static_cast<float>(frame_w) / FACE_DETECT_INPUT_W;
-    const float inv_rescale_y = static_cast<float>(frame_h) / FACE_DETECT_INPUT_H;
+    const float inv_rescale_x = detect_input_w > 0 ? static_cast<float>(frame_w) / detect_input_w : 1.0f;
+    const float inv_rescale_y = detect_input_h > 0 ? static_cast<float>(frame_h) / detect_input_h : 1.0f;
     const float score_thr = FACE_DETECT_SCORE_THRESHOLD;
     const int min_box = FACE_DETECT_MIN_BOX_SIZE;
 
@@ -56,7 +58,7 @@ static void rescale_and_filter(
         float y0 = BOX_Y0(r) * inv_rescale_y;
         float x1 = BOX_X1(r) * inv_rescale_x;
         float y1 = BOX_Y1(r) * inv_rescale_y;
-        // clamp to frame (esp-who limit_box equivalent)
+        // 限制在帧范围内
         if (x0 < 0.f) x0 = 0.f;
         if (y0 < 0.f) y0 = 0.f;
         if (x1 > static_cast<float>(frame_w)) x1 = static_cast<float>(frame_w);
@@ -123,6 +125,7 @@ bool RunFaceDetectCore(QueuedFrame* qframe, std::vector<FaceDetectResult>* out_r
         heap_caps_free(out_buf);
         qframe->format = 1;
         qframe->len = size_rgb565;
+        taskYIELD();  // YUYV→RGB565 耗时长，让出 CPU 避免 task_wdt（IDLE0/IDLE1 得不到运行）
     }
 #endif
 
@@ -159,74 +162,25 @@ bool RunFaceDetectCore(QueuedFrame* qframe, std::vector<FaceDetectResult>* out_r
 #endif
 
     void* src_data = detect_src_buf ? detect_src_buf : qframe->data;
-    dl::image::img_t src_img = {
+    dl::image::img_t run_img = {
         .data = src_data,
         .width = w,
         .height = h,
         .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565,
     };
-
-    const bool already_320x240 = (w == FACE_DETECT_INPUT_W && h == FACE_DETECT_INPUT_H);
-    void* dst_buf = nullptr;
-    dl::image::img_t run_img = src_img;
-
-    if (!already_320x240 && src_data != nullptr) {
-        const size_t dst_size = (size_t)FACE_DETECT_INPUT_W * FACE_DETECT_INPUT_H * 2;
-        dst_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!dst_buf) {
-            dst_buf = heap_caps_malloc(dst_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        }
-        if (dst_buf) {
-            dl::image::img_t dst_img = {
-                .data = dst_buf,
-                .width = static_cast<uint16_t>(FACE_DETECT_INPUT_W),
-                .height = static_cast<uint16_t>(FACE_DETECT_INPUT_H),
-                .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565,
-            };
-            dl::image::resize(src_img, dst_img, dl::image::DL_IMAGE_INTERPOLATE_BILINEAR);
-            run_img = dst_img;
-        }
-    }
-
-    if (run_img.data == nullptr ||
-        run_img.width != FACE_DETECT_INPUT_W || run_img.height != FACE_DETECT_INPUT_H) {
-        if (dst_buf != nullptr) {
-            heap_caps_free(dst_buf);
-        }
+    if (run_img.data == nullptr) {
         if (detect_src_buf != nullptr) {
             heap_caps_free(detect_src_buf);
         }
-        ESP_LOGD(TAG, "Resize failed or unsupported size, skip.");
         return false;
     }
-
-    const size_t num_pixels = (size_t)run_img.width * run_img.height;
-    uint32_t lum_sum = 0;
-    const uint16_t* rgb565 = (const uint16_t*)run_img.data;
-    for (size_t i = 0; i < num_pixels; i++) {
-        uint16_t p = rgb565[i];
-        int r = (p >> 11) & 0x1F, g = (p >> 5) & 0x3F, b = p & 0x1F;
-        lum_sum += (r * 255 / 31 + g * 255 / 63 + b * 255 / 31) / 3;
-    }
-    unsigned mean_lum = (unsigned)(lum_sum / num_pixels);
-    if (mean_lum < FACE_DETECT_MIN_LUMINANCE) {
-        if (dst_buf != nullptr) {
-            heap_caps_free(dst_buf);
-        }
-        if (detect_src_buf != nullptr) {
-            heap_caps_free(detect_src_buf);
-        }
-        ESP_LOGD(TAG, "Frame too dark (mean_lum=%u), skip.", mean_lum);
-        return true;  // ran pipeline but no detection
-    }
+    // 不在此处 resize：组件 run(img) 内部会通过 ImagePreprocessor 将任意尺寸 resize 到模型输入（MSR 120×160），结果坐标为传入 img 的 (w,h)
+    // 亮度门限已去掉：暗场下模型本身难检出，直接跑检测即可；去掉 57k 像素循环可省耗时并减轻 task_wdt
 
     auto& raw_results = s_detector->run(run_img);
-    rescale_and_filter(raw_results, w, h, out_results);
+    taskYIELD();  // 模型推理后让出 CPU，避免 task_wdt（IDLE1 长时间得不到运行）
+    rescale_and_filter(raw_results, w, h, run_img.width, run_img.height, out_results);
 
-    // 检测用完后才能释放（run_img 可能指向 dst_buf）
-    if (dst_buf != nullptr) {
-        heap_caps_free(dst_buf);
-    }
     if (detect_src_buf != nullptr) {
         heap_caps_free(detect_src_buf);
     }

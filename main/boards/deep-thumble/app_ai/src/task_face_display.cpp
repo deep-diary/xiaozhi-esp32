@@ -17,6 +17,10 @@
 #define TAG "app_ai"
 
 // format 与 frame_queue/face_recognition 一致：1=RGB565，3=YUYV（V4L2 四字符码的约定）
+//
+// 显示来源说明：本路径从 q_ai 取帧（人脸管道产出的检测/画框结果）→ SetPreviewImage。
+// esp_video 的 ShowLastFrame() 则是用相机内部 frame_（最近一帧原始采集）→ ShowFrameToDisplay → SetPreviewImage。
+// 两路数据源不同（队列 vs 相机内部缓冲）、使用场景不同，不合并为同一接口。
 namespace app_ai {
 namespace detail {
 
@@ -27,6 +31,7 @@ void ShowQueuedFrameOnDisplay(AppAIContext* ctx, QueuedFrame* qframe) {
     }
     LvglDisplay* lvgl = dynamic_cast<LvglDisplay*>(ctx->display);
     if (!lvgl) {
+        ESP_LOGW(TAG, "ShowQueuedFrame: display not LvglDisplay");
         return;
     }
     const uint16_t w = qframe->width;
@@ -35,6 +40,7 @@ void ShowQueuedFrameOnDisplay(AppAIContext* ctx, QueuedFrame* qframe) {
     size_t stride = ((w * 2) + 3) & ~3;
     uint8_t* buf = (uint8_t*)heap_caps_malloc(size_rgb565, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) {
+        ESP_LOGW(TAG, "ShowQueuedFrame: PSRAM alloc %zu failed", size_rgb565);
         return;
     }
 
@@ -74,7 +80,7 @@ void ShowQueuedFrameOnDisplay(AppAIContext* ctx, QueuedFrame* qframe) {
 
     std::unique_ptr<LvglImage> image =
         std::make_unique<LvglAllocatedImage>(buf, size_rgb565, w, h, (int)stride, LV_COLOR_FORMAT_RGB565);
-    DisplayLockGuard lock(ctx->display);
+    // 不再在此处加锁：LcdDisplay::SetPreviewImage 内部会 DisplayLockGuard，避免同一 display 嵌套锁死锁
     lvgl->SetPreviewImage(std::move(image));
 }
 

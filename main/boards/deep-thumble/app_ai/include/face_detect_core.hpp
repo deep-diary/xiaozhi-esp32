@@ -7,7 +7,7 @@
 namespace app_ai {
 
 /**
- * 单个人脸检测结果（与 esp-who WhoDetect rescale 后的坐标一致：原图/显示尺寸）。
+ * 单个人脸检测结果（坐标已 rescale 到原图/显示尺寸）。
  * 下一阶段人脸识别可在此扩展 keypoint / id 等。
  */
 struct FaceDetectResult {
@@ -16,9 +16,9 @@ struct FaceDetectResult {
 };
 
 /**
- * 统一人脸检测核心：与 esp-who 的模型与 rescale 逻辑对齐。
- * 输入 QueuedFrame（format=1 RGB565 或 format=3 YUYV），内部做格式转换、resize 到 320x240、
- * 亮度过滤、HumanFaceDetect::run、rescale_detect_result 风格映射与阈值/最小框过滤。
+ * 统一人脸检测核心：对齐 human_face_detect README 的「实例化 + run(img)」流程。
+ * 输入 QueuedFrame（format=1 RGB565 或 format=3 YUYV），内部：格式转换（YUYV→RGB565）、亮度过滤
+ * → HumanFaceDetect::run(img)（组件内部将任意尺寸 resize 到模型输入 120×160）→ 后处理（rescale 到帧尺寸、阈值与最小框过滤）。
  *
  * @param qframe 队列帧（会被修改：format=3 时原地转为 RGB565）
  * @param out_results 输出：已映射到帧尺寸且过滤后的检测框（空表示无人脸或跳过）

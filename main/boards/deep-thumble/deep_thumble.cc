@@ -394,14 +394,14 @@ public:
         InitializeTools();
         xTaskCreate(DelayedFaceInitTask, "face_delayed", 2048, this, 3, nullptr);
 
-        // 启动用户主循环任务：10ms 基础周期调度（阶段三）
+        // 启动用户主循环任务：10ms 基础周期调度（阶段三）；优先级需高于人脸任务，保证 TickDisplay 及时消费 q_ai
         if (imu_sensor_ && imu_sensor_->IsInitialized()) {
             BaseType_t ret = xTaskCreate(
                 UserMainLoopTask,
                 "user_main_loop",
                 4096,
                 this,
-                4,
+                USER_MAIN_LOOP_TASK_PRIORITY,
                 &user_main_loop_task_handle_);
             if (ret != pdPASS) {
                 ESP_LOGE(TAG, "Failed to create user_main_loop task");

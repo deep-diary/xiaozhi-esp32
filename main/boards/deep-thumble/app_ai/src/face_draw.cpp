@@ -1,5 +1,4 @@
-// 在 RGB565 缓冲上绘制人脸框和简单文字
-// 参考：who_ai_utils.hpp 的 draw_detection_result()；此处为最小实现（框 + ID/姓名）
+// 在 RGB565 缓冲上绘制人脸框和简单文字（本地最小实现：框 + ID/姓名）
 
 #include "face_draw.hpp"
 

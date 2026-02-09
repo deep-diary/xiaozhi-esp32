@@ -2,7 +2,7 @@
  * face_recognition.cpp：人脸检测 + 画框 + 识别预留。
  *
  * 当前链路（由 task_face_ai 驱动）：
- * 1. 检测：RunFaceDetectCore(qframe, &core_results) 得到已过滤的框（与 esp-who 模型与 rescale 对齐）。
+ * 1. 检测：RunFaceDetectCore(qframe, &core_results) 得到已过滤的框（human_face_detect 检测 + rescale 到帧尺寸）。
  * 2. 画框：将 core_results 转为 FaceBox，DrawFaceBoxesOnRgb565(qframe->data) 在原图上画框。
  * 3. 识别：暂未实现（person_name 为 "unknown"）；预留 UpdateLocalDatabase、Explain 等，下一阶段接入数据库与姓名显示。
  * 4. 送入 q_ai：由 task_face_ai 在 ProcessOneFrame 返回后 xQueueSend(ctx->q_ai, &qframe)；本文件不负责入队。
@@ -86,6 +86,11 @@ void FaceRecognition::ProcessOneFrame(QueuedFrame* qframe) {
     }
 
     deep_thumble::DrawFaceBoxesOnRgb565(qframe->data, w, h, last_detection_boxes_);
+
+#if FACE_DETECTION_ONLY
+    // 仅验证人脸检测+显示：画框后直接返回，不跑识别/Explain/数据库
+    return;
+#endif
 
     bool did_new_registration = false;
 #if ENABLE_REMOTE_RECOGNITION

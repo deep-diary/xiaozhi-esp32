@@ -48,9 +48,11 @@
 #define WS2812_LED_COUNT 24
 
 #define FACE_RECOGNITION_INTERVAL_MS   2000  // 人脸识别周期（ms），测试分析时用 2s 便于看 log
-#define FACE_RECOGNITION_DELAYED_START_MS 15000  // 延迟启动人脸管道（ms），让 AFE/WakeNet 先完成 32KB PSRAM 分配，避免「Item psram alloc failed」后 memcpy(NULL) 崩溃
+// 延迟启动人脸管道：应用约 11s 到 idle 时 AFE/WakeNet 会分配约 32KB PSRAM；若人脸管道更早启动会占 PSRAM，导致该分配失败并 memcpy(NULL) 崩溃。15s 为保守值（>11s），可酌情改为 10000–12000 缩短无预览时间；理想为等状态到 idle 再启动（需改 DelayedFaceInitTask 逻辑）
+#define FACE_RECOGNITION_DELAYED_START_MS 15000
 #define FACE_RECOGNITION_TEST_PREVIEW  1     // 测试开关：1=周期显示预览并在检测到人脸时绘制人脸框，0=不显示
-#define FACE_AI_PASSTHROUGH            1     // 0=正常检测+画框并送 LCD；1=仅透传（不检测、不画框），用于验证内存
+#define FACE_AI_PASSTHROUGH            0     // 0=正常检测+画框并送 LCD；1=仅透传（不检测、不画框），用于验证内存
+#define FACE_DETECTION_ONLY            1     // 1=仅人脸检测+画框显示（不跑识别/Explain）；0=检测+识别全流程。先验证检测时可置 1
 #define MAX_FACE_COUNT                 5     // 本地最多保存的人脸数量
 #define ENABLE_REMOTE_RECOGNITION      1     // 是否启用远程识别（当前使用本地占位实现）
 #define FACE_USE_VIRTUAL_ONLY          1     // 1=新注册时屏蔽 Explain，仅用虚拟姓名，用于先验证离线人脸检测/框是否正常；0=正常走 Explain
@@ -58,7 +60,7 @@
 #define FACE_STORAGE_PATH              "/assets/face_recognition/"  // 人脸数据存储路径（占位）
 #define FACE_DETECT_SCORE_THRESHOLD    0.94f  // 折中：0.96 对天花板好但人脸漏检多，0.94 减少人脸漏检；天花板误检略增可再微调
 #define FACE_DETECT_MIN_BOX_SIZE       52    // 折中：55 漏人脸多，52 略降以保留略小人脸框
-#define FACE_DETECT_MIN_LUMINANCE      30    // 检测输入画面平均亮度下限（0～255）；低于此视为遮挡/过暗，本帧不认人脸
+#define FACE_DETECT_MIN_LUMINANCE      30    // [当前未使用] 原为整帧平均亮度下限，暗则本帧不跑检测；已去掉：暗场下模型本身难检出，直接跑检测即可，且省 57k 像素循环
 #define FACE_DETECT_BOX_SWAP_XY        0     // ESP-DL result_t 为 [x0,y0,x1,y1]，必须为 0；见 docs/face-detection-root-cause.md
 #define FACE_DETECT_RGB565_BYTE_SWAP   0     // 1=检测前对 RGB565 每像素做高/低字节对调，用于排查组件 BIG_ENDIAN 与相机 LE 不一致
 
@@ -74,9 +76,11 @@
 #define FACE_CAMERA_TASK_STACK         4096
 #define FACE_AI_TASK_STACK              4096  // 原 6144，降至 4096 以省 ~2KB 内部 RAM
 #define FACE_DISPLAY_TASK_STACK        4096
-#define FACE_CAMERA_TASK_PRIORITY      4
-#define FACE_AI_TASK_PRIORITY          4
+// 人脸管道为后台辅助逻辑；face_ai 优先级 2 低于 audio_detection(3)，减少长时间占用 CPU 触发 task_wdt
+#define FACE_CAMERA_TASK_PRIORITY      3
+#define FACE_AI_TASK_PRIORITY          2
 #define FACE_DISPLAY_TASK_PRIORITY     3
+#define USER_MAIN_LOOP_TASK_PRIORITY   5   // 高于人脸任务，保证 TickDisplay 及时消费 q_ai
 
 #define MOTOR_SPEED_MAX 100
 #define MOTOR_SPEED_80  80

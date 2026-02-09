@@ -144,8 +144,17 @@ void SystemInfo::PrintTaskList() {
     ESP_LOGI(TAG, "Task list: \n%s", buffer);
 }
 
+// 打印堆统计：内部 SRAM 与 PSRAM 的 free/minimal（字节）及空闲占比（%）
 void SystemInfo::PrintHeapStats() {
-    int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    ESP_LOGI(TAG, "free sram: %u minimal sram: %u", free_sram, min_free_sram);
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t min_internal = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    size_t total_internal = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t min_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
+    size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    float pct_internal = total_internal > 0 ? (100.0f * (float)free_internal / (float)total_internal) : 0.0f;
+    float pct_psram = total_psram > 0 ? (100.0f * (float)free_psram / (float)total_psram) : 0.0f;
+    ESP_LOGI(TAG, "sram(internal): free=%u min=%u total=%u (%.1f%% free)  psram: free=%u min=%u total=%u (%.1f%% free)",
+             (unsigned)free_internal, (unsigned)min_internal, (unsigned)total_internal, (double)pct_internal,
+             (unsigned)free_psram, (unsigned)min_psram, (unsigned)total_psram, (double)pct_psram);
 }

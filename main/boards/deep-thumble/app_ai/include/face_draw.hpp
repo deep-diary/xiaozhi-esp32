@@ -1,7 +1,6 @@
 #pragma once
 
-// 在 RGB565 上绘制人脸框与 ID/姓名。当使用 MSR01+MNP01（dl::detect::result_t）时，
-// 可改用 main/boards/deep-thumble/ai/who_ai_utils.hpp 的 draw_detection_result 及 fb_gfx 文本。
+// 在 RGB565 上绘制人脸框与 ID/姓名（本地画框实现，不依赖 who_ai_utils）。
 
 #include <cstdint>
 #include <vector>

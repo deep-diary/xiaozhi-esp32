@@ -1,6 +1,6 @@
 /**
  * 人脸检测并打 log（是否有人脸、框大小等）。
- * 使用统一检测核心 face_detect_core（与 esp-who WhoDetect 模型与 rescale 对齐）。
+ * 使用统一检测核心 face_detect_core（human_face_detect 组件，检测结果 rescale 到帧尺寸）。
  * 效果不佳时优先调 config.h：FACE_DETECT_SCORE_THRESHOLD、FACE_DETECT_MIN_BOX_SIZE、FACE_DETECT_MIN_LUMINANCE。
  */
 #include "app_face_detection.hpp"

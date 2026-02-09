@@ -414,6 +414,8 @@ bool EspVideo::DoCaptureOnly() {
         return false;
     }
 
+    // 连续 DQBUF 3 次、仅保留第 3 帧：目的是丢弃管道中可能积压的旧帧，取「最新一帧」，
+    // 并非防抖（无时序平滑）。若需提高帧率可改为 1 次 DQBUF，见 docs/face-pipeline-fps.md。
     for (int i = 0; i < 3; i++) {
         struct v4l2_buffer buf = {};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -871,6 +873,7 @@ bool EspVideo::CaptureOnly() {
     return DoCaptureOnly();
 }
 
+// 将当前相机内部 frame_（最近一次 CaptureOnly 结果）显示到屏幕；人脸管道显示走 app_ai::TickDisplay → q_ai → ShowQueuedFrameOnDisplay，与本接口数据源不同
 bool EspVideo::ShowLastFrame() {
     return ShowFrameToDisplay();
 }

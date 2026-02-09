@@ -1,3 +1,9 @@
+/**
+ * 人脸采集任务：CaptureOnly → GetLastFrame → TakeBuffer → 入队 q_raw。
+ * 透传帧率约 3.x fps 的主要原因：EspVideo::DoCaptureOnly() 内部做 3 次 DQBUF 只取第 3 帧，
+ * 等效于每 3 帧相机输出才得到 1 帧；若相机实际约 10fps 则管道约 3.3fps。拿不到 buffer 时也会丢帧。
+ * 详见 docs/face-pipeline-fps.md。
+ */
 #include "app_ai_context.hpp"
 #include "config.h"
 #include "camera.h"
