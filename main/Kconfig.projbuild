@@ -161,6 +161,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_ESP_SPARKBOT
         bool "Espressif SparkBot"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_DEEP_DOG
+        bool "DeepDog (ESP SparkBot-based robot dog)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ESP_SENSAIRSHUTTLE
         bool "Espressif ESP-SensairShuttle"
         depends on IDF_TARGET_ESP32C5

@@ -940,6 +940,14 @@ std::string EspVideo::Explain(const std::string& question) {
         throw std::runtime_error("Image explain URL or token is not set");
     }
 
+    // 确保已经有一帧可用于编码；如果还没有，就同步采一帧
+    if (frame_.data == nullptr || frame_.len == 0 || frame_.format == 0) {
+        if (!DoCaptureOnly()) {
+            ESP_LOGE(TAG, "Failed to capture frame for Explain()");
+            throw std::runtime_error("Failed to capture camera frame");
+        }
+    }
+
     // 创建局部的 JPEG 队列, 40 entries is about to store 512 * 40 = 20480 bytes of JPEG data
     QueueHandle_t jpeg_queue = xQueueCreate(40, sizeof(JpegChunk));
     if (jpeg_queue == nullptr) {

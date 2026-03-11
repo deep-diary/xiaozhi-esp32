@@ -11,7 +11,7 @@
 #include "system_info.h"
 
 /** 置 1：先全黑检测、不调 nvs、不主循环（与 ref 一致，堆最干净），用于对比 ref；置 0 正常启动 */
-#define FACE_DETECT_BLACK_TEST_IN_MAIN 1
+#define FACE_DETECT_BLACK_TEST_IN_MAIN 0
 
 #if FACE_DETECT_BLACK_TEST_IN_MAIN
 #include "face_detect_core.hpp"
