@@ -6,6 +6,7 @@
 #include "application.h"
 #include "device_state.h"
 #include "frame_queue.hpp"
+#include "face_detect_core.hpp"
 #include "face_recognition.hpp"
 
 #include <esp_log.h>
@@ -25,6 +26,9 @@ void Start(Camera* camera, Display* display) {
         ESP_LOGW(TAG, "Start skipped: camera or display null");
         return;
     }
+
+    // 最早创建人脸检测器并跑全黑自检（在 pool/队列/FaceRecognition 之前），逼近 ref 的堆状态
+    CreateFaceDetectorEarly();
 
     detail::AppAIContext* ctx = new detail::AppAIContext();
     g_ctx = ctx;
@@ -65,7 +69,7 @@ void Start(Camera* camera, Display* display) {
     }
 }
 
-void TickDisplay() {
+void TickDisplayQueuedFrame() {
     if (!g_ctx || !g_ctx->q_ai) {
         return;
     }
@@ -75,6 +79,30 @@ void TickDisplay() {
     }
     detail::ShowQueuedFrameOnDisplay(g_ctx, &qframe);
     g_ctx->pool.ReturnBuffer(qframe.data);
+}
+
+void TickDisplayRawCamera() {
+    if (!g_ctx) {
+        return;
+    }
+    if (g_ctx->q_ai) {
+        QueuedFrame qframe;
+        if (xQueueReceive(g_ctx->q_ai, &qframe, 0) == pdTRUE) {
+            g_ctx->pool.ReturnBuffer(qframe.data);
+        }
+    }
+    if (g_ctx->camera) {
+        g_ctx->camera->ShowLastFrame();
+    }
+}
+
+void TickDisplay() {
+    if (!g_ctx) {
+        return;
+    }
+    // 临时：显示原始采集图像；改为 TickDisplayQueuedFrame() 则显示出队列后的图像
+    // TickDisplayRawCamera();
+    TickDisplayQueuedFrame();
 }
 
 }  // namespace app_ai

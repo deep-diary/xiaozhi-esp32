@@ -55,16 +55,40 @@ void FaceRecognition::ProcessOneFrame(QueuedFrame* qframe) {
         return;  // Frame unchanged (e.g. format unsupported); display will handle as-is
     }
 
+    if (!core_results.empty()) {
+        // 嵌入式 newlib 常不支持 %zu，用 (int) 与 %d 打人脸框总数；box0 为第一个框 [x0,y0,x1,y1]
+        int n = static_cast<int>(core_results.size());
+        ESP_LOGI(TAG_FACE, "FaceDetect: %d face(s), box0 [%.0f,%.0f,%.0f,%.0f] score=%.2f",
+                n,
+                core_results[0].box[0], core_results[0].box[1],
+                core_results[0].box[2], core_results[0].box[3],
+                core_results[0].score);
+    }
+
     std::string person_name;
-    for (size_t i = 0; i < core_results.size() && last_detection_boxes_.size() < MAX_DRAW_BOXES; i++) {
-        const auto& r = core_results[i];
+    if (!core_results.empty()) {
+        for (size_t i = 0; i < core_results.size() && last_detection_boxes_.size() < MAX_DRAW_BOXES; i++) {
+            const auto& r = core_results[i];
+            FaceBox fb;
+            fb.x = static_cast<int>(r.box[0]);
+            fb.y = static_cast<int>(r.box[1]);
+            fb.width = static_cast<int>(r.box[2] - r.box[0]);
+            fb.height = static_cast<int>(r.box[3] - r.box[1]);
+            fb.id = static_cast<int>(last_detection_boxes_.size());
+            fb.name = last_detection_boxes_.empty() ? "?" : "";
+            last_detection_boxes_.push_back(fb);
+        }
+    } else {
+        // 无人脸时画默认框，用于验证画图/显示链路是否正常（居中固定大小）
+        const int default_w = 80;
+        const int default_h = 100;
         FaceBox fb;
-        fb.x = static_cast<int>(r.box[0]);
-        fb.y = static_cast<int>(r.box[1]);
-        fb.width = static_cast<int>(r.box[2] - r.box[0]);
-        fb.height = static_cast<int>(r.box[3] - r.box[1]);
-        fb.id = static_cast<int>(last_detection_boxes_.size());
-        fb.name = last_detection_boxes_.empty() ? "?" : "";
+        fb.x = (static_cast<int>(w) - default_w) / 2;
+        fb.y = (static_cast<int>(h) - default_h) / 2;
+        fb.width = default_w;
+        fb.height = default_h;
+        fb.id = 0;
+        fb.name = "?";
         last_detection_boxes_.push_back(fb);
     }
     if (!last_detection_boxes_.empty()) {

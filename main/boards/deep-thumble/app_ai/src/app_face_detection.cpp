@@ -1,7 +1,7 @@
 /**
  * 人脸检测并打 log（是否有人脸、框大小等）。
  * 使用统一检测核心 face_detect_core（human_face_detect 组件，检测结果 rescale 到帧尺寸）。
- * 效果不佳时优先调 config.h：FACE_DETECT_SCORE_THRESHOLD、FACE_DETECT_MIN_BOX_SIZE、FACE_DETECT_MIN_LUMINANCE。
+ * 检测结果采用组件默认输出；可选 config.h：FACE_DETECT_BOX_SWAP_XY 等。
  */
 #include "app_face_detection.hpp"
 #include "face_detect_core.hpp"

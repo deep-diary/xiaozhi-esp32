@@ -16,14 +16,20 @@ struct FaceDetectResult {
 };
 
 /**
- * 统一人脸检测核心：对齐 human_face_detect README 的「实例化 + run(img)」流程。
- * 输入 QueuedFrame（format=1 RGB565 或 format=3 YUYV），内部：格式转换（YUYV→RGB565）、亮度过滤
- * → HumanFaceDetect::run(img)（组件内部将任意尺寸 resize 到模型输入 120×160）→ 后处理（rescale 到帧尺寸、阈值与最小框过滤）。
+ * 统一人脸检测核心：与 esp-who who_detect 对齐，构造 dl::image::img_t 后直接 run(img)。
+ * 输入 QueuedFrame（format=1 RGB565 或 format=3 YUYV）；format=3 时先转 RGB565，再按需做 RGB565 字节对调后送入 run(img)。
  *
- * @param qframe 队列帧（会被修改：format=3 时原地转为 RGB565）
- * @param out_results 输出：已映射到帧尺寸且过滤后的检测框（空表示无人脸或跳过）
- * @return 是否执行了检测（false 表示格式不支持、过暗等未跑模型）
+ * @param qframe 队列帧（format=3 时会被原地转为 RGB565）
+ * @param out_results 输出：已映射到帧尺寸的检测框（空表示无人脸或跳过）
+ * @return 是否执行了检测（false 表示格式不支持等未跑模型）
  */
 bool RunFaceDetectCore(QueuedFrame* qframe, std::vector<FaceDetectResult>* out_results);
+
+/**
+ * 提前创建人脸检测器并跑 240×240 全黑自检（在启动 FaceCamera/FaceAI 任务之前调用）。
+ * 若此处得到 0/0 而原先「首次 RunFaceDetectCore 时创建」得到多框，可认定是创建时机/堆状态导致；
+ * 此后 RunFaceDetectCore 会复用该 detector，不再在任务内创建。
+ */
+void CreateFaceDetectorEarly();
 
 }  // namespace app_ai

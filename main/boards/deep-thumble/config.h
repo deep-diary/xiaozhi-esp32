@@ -51,18 +51,18 @@
 // 延迟启动人脸管道：应用约 11s 到 idle 时 AFE/WakeNet 会分配约 32KB PSRAM；若人脸管道更早启动会占 PSRAM，导致该分配失败并 memcpy(NULL) 崩溃。15s 为保守值（>11s），可酌情改为 10000–12000 缩短无预览时间；理想为等状态到 idle 再启动（需改 DelayedFaceInitTask 逻辑）
 #define FACE_RECOGNITION_DELAYED_START_MS 15000
 #define FACE_RECOGNITION_TEST_PREVIEW  1     // 测试开关：1=周期显示预览并在检测到人脸时绘制人脸框，0=不显示
-#define FACE_AI_PASSTHROUGH            0     // 0=正常检测+画框并送 LCD；1=仅透传（不检测、不画框），用于验证内存
+#define FACE_AI_PASSTHROUGH            0     // 0=正常检测+画框并送 LCD；1=仅透传（不检测、不画框）。透传时显示的就是原始采集图像（相机→q_raw→q_ai→ShowQueuedFrame 仅 memcpy，无格式/字节转换）；若仍有杂点则来自相机/驱动或 LCD 字节序
 #define FACE_DETECTION_ONLY            1     // 1=仅人脸检测+画框显示（不跑识别/Explain）；0=检测+识别全流程。先验证检测时可置 1
 #define MAX_FACE_COUNT                 5     // 本地最多保存的人脸数量
 #define ENABLE_REMOTE_RECOGNITION      1     // 是否启用远程识别（当前使用本地占位实现）
 #define FACE_USE_VIRTUAL_ONLY          1     // 1=新注册时屏蔽 Explain，仅用虚拟姓名，用于先验证离线人脸检测/框是否正常；0=正常走 Explain
 #define REMOTE_RECOGNITION_TIMEOUT_MS  3000  // 远程识别超时时间
 #define FACE_STORAGE_PATH              "/assets/face_recognition/"  // 人脸数据存储路径（占位）
-#define FACE_DETECT_SCORE_THRESHOLD    0.94f  // 折中：0.96 对天花板好但人脸漏检多，0.94 减少人脸漏检；天花板误检略增可再微调
-#define FACE_DETECT_MIN_BOX_SIZE       52    // 折中：55 漏人脸多，52 略降以保留略小人脸框
+#define FACE_DETECT_SCORE_THRESHOLD    0.94f  // [当前未使用] 已改为完全采用 human_face_detect 组件输出，与 esp-who 一致不做额外阈值/最小框过滤；若需再过滤可在此恢复
+#define FACE_DETECT_MIN_BOX_SIZE       0     // 0=不过滤；>0 时过滤宽高小于该值的框（当前关闭以便看原始检测结果）
 #define FACE_DETECT_MIN_LUMINANCE      30    // [当前未使用] 原为整帧平均亮度下限，暗则本帧不跑检测；已去掉：暗场下模型本身难检出，直接跑检测即可，且省 57k 像素循环
-#define FACE_DETECT_BOX_SWAP_XY        0     // ESP-DL result_t 为 [x0,y0,x1,y1]，必须为 0；见 docs/face-detection-root-cause.md
-#define FACE_DETECT_RGB565_BYTE_SWAP   0     // 1=检测前对 RGB565 每像素做高/低字节对调，用于排查组件 BIG_ENDIAN 与相机 LE 不一致
+#define FACE_DETECT_BOX_SWAP_XY        0     // ESP-DL result_t 为 [x0,y0,x1,y1]，保持 0；框错位优先查 RGB565 字节序
+#define FACE_DETECT_RGB565_BYTE_SWAP   0     // 组件期望 RGB565 BIG_ENDIAN；全黑仍多框多为 LE 被误解释，置 1 做 LE→BE 再 run。若置 0 则与 esp-who 一致不交换
 
 // 双队列架构：相机任务 + AI 任务 + 主循环单显示（唯一模式）
 // 队列帧为 240×240×2，与 config.json 相机输出 240×240 一致，直接拷贝入队

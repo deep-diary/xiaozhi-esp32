@@ -11,7 +11,7 @@
 #include <freertos/queue.h>
 
 #define TAG "app_ai"
-#define FACE_AI_FPS_LOG_INTERVAL_MS 1000
+#define FACE_AI_FPS_LOG_INTERVAL_MS 10000
 
 namespace app_ai {
 namespace detail {
@@ -44,7 +44,7 @@ void FaceAITask(void* pv) {
             ctx->pool.ReturnBuffer(qframe.data);
             ESP_LOGW(TAG, "FaceAI: AI queue full, return buffer");
         }
-        // 每隔 1s 打印当前帧率，便于对比使能 AI 前后的帧率变化
+        // 每隔 10s 打印当前帧率，便于对比使能 AI 前后的帧率变化
         int64_t now_us = esp_timer_get_time();
         if ((now_us - last_fps_log_us) >= (FACE_AI_FPS_LOG_INTERVAL_MS * 1000)) {
             float elapsed_s = (float)(now_us - last_fps_log_us) / 1e6f;

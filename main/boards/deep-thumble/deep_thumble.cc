@@ -64,7 +64,13 @@ public:
     }
     bool SetHMirror(bool enabled) override { return inner_->SetHMirror(enabled); }
     bool SetVFlip(bool enabled) override { return inner_->SetVFlip(enabled); }
-    std::string Explain(const std::string& question) override { return inner_->Explain(question); }
+    std::string Explain(const std::string& question) override {
+        // Explain 内部会读 frame_ 并编码上传，持锁避免 face_camera 的 CaptureOnly 覆盖 frame_ 导致 UAF
+        if (xSemaphoreTake(mutex_, portMAX_DELAY) != pdTRUE) return "";
+        std::string result = inner_->Explain(question);
+        xSemaphoreGive(mutex_);
+        return result;
+    }
     bool GetLastFrame(CameraFrame* out) override {
         if (xSemaphoreTake(mutex_, portMAX_DELAY) != pdTRUE) return false;
         bool ok = inner_->GetLastFrame(out);

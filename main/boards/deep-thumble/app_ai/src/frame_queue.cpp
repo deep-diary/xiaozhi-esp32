@@ -56,7 +56,7 @@ bool FaceFramePool::Init(size_t buffer_count, size_t buffer_bytes) {
         free_list_ = nullptr;
         return false;
     }
-    ESP_LOGI(TAG, "pool init: %zu buffers, %zu bytes each", pool_size_, buffer_bytes_);
+    ESP_LOGI(TAG, "pool init: %u buffers, %u bytes each", (unsigned)pool_size_, (unsigned)buffer_bytes_);
     return true;
 }
 
