@@ -41,10 +41,14 @@
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_46
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
-#define UART_ECHO_TXD GPIO_NUM_38
-#define UART_ECHO_RXD GPIO_NUM_48
+// #define UART_ECHO_TXD GPIO_NUM_38
+// #define UART_ECHO_RXD GPIO_NUM_48
 #define UART_ECHO_RTS (-1)
 #define UART_ECHO_CTS (-1)
+
+// CAN总线 - 已验证可工作的配置
+#define CAN_TX_GPIO GPIO_NUM_38   // TX引脚，支持输出
+#define CAN_RX_GPIO GPIO_NUM_48   // RX引脚，支持输入
 
 #define MOTOR_SPEED_MAX 100
 #define MOTOR_SPEED_80  80
