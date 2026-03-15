@@ -9,6 +9,7 @@
 #include "can/ESP32-TWAI-CAN.hpp"
 #include "motor/deep_motor.h"
 #include "motor/deep_motor_control.h"
+#include "leg/leg_control.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -56,6 +57,8 @@ private:
     Display* display_;
     EspVideo* camera_;
     DeepMotor* deep_motor_ = nullptr;
+    LegControl leg_fl_;  // 单腿调试：前左
+    LegControl* leg_ptrs_[4] = { nullptr };  // 供 MCP 回调使用，生命周期与板一致，避免悬空引用
     TaskHandle_t can_rx_task_handle_ = nullptr;
 
     static void CanRxTask(void* arg) {
@@ -220,6 +223,11 @@ private:
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
         RegisterMotorMcpTools(mcp_server, deep_motor_);
+        leg_fl_.setDeepMotor(deep_motor_);
+        leg_fl_.setLegType(LegType::FL);
+        leg_ptrs_[0] = &leg_fl_;
+        leg_ptrs_[1] = leg_ptrs_[2] = leg_ptrs_[3] = nullptr;
+        RegisterLegMcpTools(mcp_server, leg_ptrs_);
     }
 
 public:
@@ -232,7 +240,7 @@ public:
         InitializeCan();
         deep_motor_ = new DeepMotor(nullptr);
         deep_motor_->registerMotor(DEEP_DOG_TEST_MOTOR_ID);
-        InitializeTools();
+        InitializeTools();  // 内里会配置 leg_fl_ 并注册腿 MCP
         xTaskCreate(CanRxTask, "can_rx", CAN_RX_TASK_STACK, deep_motor_, CAN_RX_TASK_PRIO, &can_rx_task_handle_);
         GetBacklight()->RestoreBrightness();
     }
