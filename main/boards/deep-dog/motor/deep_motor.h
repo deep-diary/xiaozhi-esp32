@@ -163,6 +163,13 @@ public:
     uint8_t getRegisteredMotorIds(int8_t* motor_ids, uint8_t max_count) const;
     
     /**
+     * @brief 注册电机ID（用于在未收到反馈前即可发送控制指令）
+     * @param motor_id 电机ID
+     * @return true 成功, false 失败（已满或已存在）
+     */
+    bool registerMotor(uint8_t motor_id);
+    
+    /**
      * @brief 检查电机是否已注册
      * @param motor_id 电机ID
      * @return true 已注册, false 未注册

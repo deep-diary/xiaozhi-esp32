@@ -6,17 +6,26 @@
 #include "config.h"
 #include "mcp_server.h"
 #include "settings.h"
+#include "can/ESP32-TWAI-CAN.hpp"
+#include "motor/deep_motor.h"
+#include "motor/deep_motor_control.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
-#include <driver/uart.h>
 #include <cstring>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "esp_video.h"
 
 #define TAG "deep_dog"
+
+// CAN 接收任务栈与优先级
+#define CAN_RX_TASK_STACK  4096
+#define CAN_RX_TASK_PRIO   5
+#define DEEP_DOG_TEST_MOTOR_ID  1
 
 class SparkBotEs8311AudioCodec : public Es8311AudioCodec {
 private:    
@@ -46,7 +55,42 @@ private:
     Button boot_button_;
     Display* display_;
     EspVideo* camera_;
-    light_mode_t light_mode_ = LIGHT_MODE_ALWAYS_ON;
+    DeepMotor* deep_motor_ = nullptr;
+    TaskHandle_t can_rx_task_handle_ = nullptr;
+
+    static void CanRxTask(void* arg) {
+        DeepMotor* motor = static_cast<DeepMotor*>(arg);
+        CanFrame frame;
+        while (1) {
+            if (ESP32Can.readFrame(&frame, 50)) {
+                ESP_LOGI(TAG, "CAN RX: id=0x%08lX extd=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X",
+                         (unsigned long)frame.identifier, frame.extd ? 1 : 0, frame.data_length_code,
+                         frame.data[0], frame.data[1], frame.data[2], frame.data[3],
+                         frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+                if (motor) {
+                    motor->processCanFrame(frame);
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+    }
+
+    void InitializeCan() {
+        ESP32Can.setTxQueueSize(10);
+        ESP32Can.setRxQueueSize(10);
+        bool ok = ESP32Can.begin(
+            ESP32Can.convertSpeed(1000),
+            (int8_t)CAN_TX_GPIO,
+            (int8_t)CAN_RX_GPIO,
+            10,
+            10
+        );
+        if (ok) {
+            ESP_LOGI(TAG, "CAN init ok, TX=%d RX=%d", (int)CAN_TX_GPIO, (int)CAN_RX_GPIO);
+        } else {
+            ESP_LOGE(TAG, "CAN init failed");
+        }
+    }
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -173,99 +217,9 @@ private:
         camera_->SetVFlip(camera_flipped);
     }
 
-    /*
-        ESP-SparkBot 的底座
-        https://gitee.com/esp-friends/esp_sparkbot/tree/master/example/tank/c2_tracked_chassis
-    */
-    void InitializeEchoUart() {
-        uart_config_t uart_config = {
-            .baud_rate = ECHO_UART_BAUD_RATE,
-            .data_bits = UART_DATA_8_BITS,
-            .parity    = UART_PARITY_DISABLE,
-            .stop_bits = UART_STOP_BITS_1,
-            .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-            .source_clk = UART_SCLK_DEFAULT,
-        };
-        int intr_alloc_flags = 0;
-
-        ESP_ERROR_CHECK(uart_driver_install(ECHO_UART_PORT_NUM, BUF_SIZE * 2, 0, 0, NULL, intr_alloc_flags));
-        ESP_ERROR_CHECK(uart_param_config(ECHO_UART_PORT_NUM, &uart_config));
-        ESP_ERROR_CHECK(uart_set_pin(ECHO_UART_PORT_NUM, UART_ECHO_TXD, UART_ECHO_RXD, UART_ECHO_RTS, UART_ECHO_CTS));
-
-        SendUartMessage("w2");
-    }
-
-    void SendUartMessage(const char * command_str) {
-        uint8_t len = strlen(command_str);
-        uart_write_bytes(ECHO_UART_PORT_NUM, command_str, len);
-        ESP_LOGI(TAG, "Sent command: %s", command_str);
-    }
-
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
-        // 定义设备的属性
-        mcp_server.AddTool("self.chassis.get_light_mode", "获取灯光效果编号", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            if (light_mode_ < 2) {
-                return 1;
-            } else {
-                return light_mode_ - 2;
-            }
-        });
-
-        mcp_server.AddTool("self.chassis.go_forward", "前进", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            SendUartMessage("x0.0 y1.0");
-            return true;
-        });
-
-        mcp_server.AddTool("self.chassis.go_back", "后退", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            SendUartMessage("x0.0 y-1.0");
-            return true;
-        });
-
-        mcp_server.AddTool("self.chassis.turn_left", "向左转", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            SendUartMessage("x-1.0 y0.0");
-            return true;
-        });
-
-        mcp_server.AddTool("self.chassis.turn_right", "向右转", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            SendUartMessage("x1.0 y0.0");
-            return true;
-        });
-        
-        mcp_server.AddTool("self.chassis.dance", "跳舞", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            SendUartMessage("d1");
-            light_mode_ = LIGHT_MODE_MAX;
-            return true;
-        });
-
-        mcp_server.AddTool("self.chassis.switch_light_mode", "打开灯光效果", PropertyList({
-            Property("light_mode", kPropertyTypeInteger, 1, 6)
-        }), [this](const PropertyList& properties) -> ReturnValue {
-            char command_str[5] = {'w', 0, 0};
-            char mode = static_cast<light_mode_t>(properties["light_mode"].value<int>());
-
-            ESP_LOGI(TAG, "Switch Light Mode: %c", (mode + '0'));
-
-            if (mode >= 3 && mode <= 8) {
-                command_str[1] = mode + '0';
-                SendUartMessage(command_str);
-                return true;
-            }
-            throw std::runtime_error("Invalid light mode");
-        });
-
-        mcp_server.AddTool("self.camera.set_camera_flipped", "翻转摄像头图像方向", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            Settings settings("sparkbot", true);
-            // 考虑到部分复刻使用了不可动摄像头的设计，默认启用翻转
-            bool flipped = !static_cast<bool>(settings.GetInt("camera-flipped", 1));
-            
-            camera_->SetHMirror(flipped);
-            camera_->SetVFlip(flipped);
-            
-            settings.SetInt("camera-flipped", flipped ? 1 : 0);
-            
-            return true;
-        });
+        RegisterMotorMcpTools(mcp_server, deep_motor_);
     }
 
 public:
@@ -275,8 +229,11 @@ public:
         InitializeDisplay();
         InitializeButtons();
         InitializeCamera();
-        InitializeEchoUart();
+        InitializeCan();
+        deep_motor_ = new DeepMotor(nullptr);
+        deep_motor_->registerMotor(DEEP_DOG_TEST_MOTOR_ID);
         InitializeTools();
+        xTaskCreate(CanRxTask, "can_rx", CAN_RX_TASK_STACK, deep_motor_, CAN_RX_TASK_PRIO, &can_rx_task_handle_);
         GetBacklight()->RestoreBrightness();
     }
 

@@ -4,25 +4,23 @@
 
 #define TAG "DeepMotorControl"
 
-DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server) 
-    : deep_motor_(deep_motor) {
-    
+static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_motor) {
     // CAN控制工具
     mcp_server.AddTool("self.can.send_motor_position", "发送电机位置控制指令", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
         Property("position", kPropertyTypeInteger, 200, -314, 314)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         int position_int = properties["position"].value<int>();
         float position = position_int / 100.0f; // 转换为浮点数（保留2位小数）
         
-        if (!deep_motor_) {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
         // 使用电机类方法发送位置控制指令，自动保存目标位置
-        if (deep_motor_->setMotorPosition(motor_id, position, 10.0f)) {
+        if (deep_motor->setMotorPosition(motor_id, position, 10.0f)) {
             ESP_LOGI(TAG, "发送电机位置控制指令成功 - 电机ID: %d, 位置: %.2f 弧度", motor_id, position);
             return std::string("电机ID " + std::to_string(motor_id) + " 位置设置成功: " + std::to_string(position) + " 弧度");
         } else {
@@ -35,7 +33,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // mcp_server.AddTool("self.can.send_motor_speed", "发送电机速度控制指令", PropertyList(std::vector<Property>{
     //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
     //     Property("speed", kPropertyTypeInteger, 0, -300, 300)
-    // }), [this](const PropertyList& properties) -> ReturnValue {
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
     //     int motor_id = properties["motor_id"].value<int>();
     //     int speed_int = properties["speed"].value<int>();
     //     float speed = speed_int / 10.0f; // 转换为浮点数（保留1位小数）
@@ -52,7 +50,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 电机使能工具
     mcp_server.AddTool("self.can.enable_motor", "激活电机", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::enableMotor(motor_id)) {
@@ -67,7 +65,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 电机停止工具
     mcp_server.AddTool("self.can.reset_motor", "停止电机", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::resetMotor(motor_id)) {
@@ -87,7 +85,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     //     Property("speed", kPropertyTypeInteger, 0, -300, 300),
     //     Property("kp", kPropertyTypeInteger, 30, 0, 500),
     //     Property("kd", kPropertyTypeInteger, 0, 0, 50)
-    // }), [this](const PropertyList& properties) -> ReturnValue {
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
     //     int motor_id = properties["motor_id"].value<int>();
     //     float torque = properties["torque"].value<int>() / 10.0f;
     //     float position = properties["position"].value<int>() / 10.0f;
@@ -108,21 +106,21 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 电机状态查询工具
     mcp_server.AddTool("self.motor.get_status", "获取电机状态", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (!deep_motor_) {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        if (!deep_motor_->isMotorRegistered(motor_id)) {
+        if (!deep_motor->isMotorRegistered(motor_id)) {
             ESP_LOGW(TAG, "电机ID %d 未注册", motor_id);
             return std::string("电机ID " + std::to_string(motor_id) + " 未注册");
         }
         
         motor_status_t status;
-        if (deep_motor_->getMotorStatus(motor_id, &status)) {
+        if (deep_motor->getMotorStatus(motor_id, &status)) {
             std::string result = "电机ID " + std::to_string(motor_id) + " 状态:\n";
             result += "  角度: " + std::to_string(status.current_angle) + " rad\n";
             result += "  速度: " + std::to_string(status.current_speed) + " rad/s\n";
@@ -138,14 +136,14 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     });
 
     // 获取所有已注册电机ID工具
-    // mcp_server.AddTool("self.motor.list", "获取所有已注册电机ID", PropertyList(), [this](const PropertyList&) -> ReturnValue {
-    //     if (!deep_motor_) {
+    // mcp_server.AddTool("self.motor.list", "获取所有已注册电机ID", PropertyList(), [deep_motor](const PropertyList&) -> ReturnValue {
+    //     if (!deep_motor) {
     //         ESP_LOGW(TAG, "深度电机管理器未初始化");
     //         return std::string("深度电机管理器未初始化");
     //     }
         
     //     int8_t motor_ids[MAX_MOTOR_COUNT];
-    //     uint8_t count = deep_motor_->getRegisteredMotorIds(motor_ids, MAX_MOTOR_COUNT);
+    //     uint8_t count = deep_motor->getRegisteredMotorIds(motor_ids, MAX_MOTOR_COUNT);
         
     //     ESP_LOGI(TAG, "已注册电机数量: %d", count);
     //     for (int i = 0; i < count; i++) {
@@ -170,15 +168,15 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 设置活跃电机工具
     // mcp_server.AddTool("self.motor.set_active", "设置活跃电机ID", PropertyList(std::vector<Property>{
     //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    // }), [this](const PropertyList& properties) -> ReturnValue {
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
     //     int motor_id = properties["motor_id"].value<int>();
         
-    //     if (!deep_motor_) {
+    //     if (!deep_motor) {
     //         ESP_LOGW(TAG, "深度电机管理器未初始化");
     //         return std::string("深度电机管理器未初始化");
     //     }
         
-    //     if (deep_motor_->setActiveMotorId(motor_id)) {
+    //     if (deep_motor->setActiveMotorId(motor_id)) {
     //         ESP_LOGI(TAG, "设置活跃电机ID为: %d", motor_id);
     //         return std::string("成功设置活跃电机ID为: " + std::to_string(motor_id));
     //     } else {
@@ -188,13 +186,13 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // });
 
     // 打印所有电机状态工具
-    mcp_server.AddTool("self.motor.print_all", "打印所有电机状态", PropertyList(), [this](const PropertyList&) -> ReturnValue {
-        if (!deep_motor_) {
+    mcp_server.AddTool("self.motor.print_all", "打印所有电机状态", PropertyList(), [deep_motor](const PropertyList&) -> ReturnValue {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        deep_motor_->printAllMotorStatus();
+        deep_motor->printAllMotorStatus();
         return std::string("已打印所有电机状态到日志");
     });
 
@@ -203,7 +201,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // // 设置电机运控模式
     // mcp_server.AddTool("self.motor.set_control_mode", "设置电机为运控模式", PropertyList(std::vector<Property>{
     //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    // }), [this](const PropertyList& properties) -> ReturnValue {
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
     //     int motor_id = properties["motor_id"].value<int>();
         
     //     if (MotorProtocol::setMotorControlMode(motor_id)) {
@@ -218,7 +216,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 设置电机位置模式
     mcp_server.AddTool("self.motor.set_position_mode", "设置电机为位置模式", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::setMotorPositionMode(motor_id)) {
@@ -233,7 +231,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 设置电机零位
     mcp_server.AddTool("self.motor.set_zero_position", "设置电机零位", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::setMotorZero(motor_id)) {
@@ -248,7 +246,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // // 设置电机速度模式
     // mcp_server.AddTool("self.motor.set_speed_mode", "设置电机为速度模式", PropertyList(std::vector<Property>{
     //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    // }), [this](const PropertyList& properties) -> ReturnValue {
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
     //     int motor_id = properties["motor_id"].value<int>();
         
     //     if (MotorProtocol::setMotorSpeedMode(motor_id)) {
@@ -263,7 +261,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // // 设置电机电流模式
     // mcp_server.AddTool("self.motor.set_current_mode", "设置电机为电流模式", PropertyList(std::vector<Property>{
     //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    // }), [this](const PropertyList& properties) -> ReturnValue {
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
     //     int motor_id = properties["motor_id"].value<int>();
         
     //     if (MotorProtocol::setMotorCurrentMode(motor_id)) {
@@ -279,7 +277,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // mcp_server.AddTool("self.motor.set_mode", "设置电机运行模式", PropertyList(std::vector<Property>{
     //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
     //     Property("mode", kPropertyTypeInteger, 0, 0, 3)
-    // }), [this](const PropertyList& properties) -> ReturnValue {
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
     //     int motor_id = properties["motor_id"].value<int>();
     //     int mode = properties["mode"].value<int>();
         
@@ -300,7 +298,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     mcp_server.AddTool("self.motor.initialize", "初始化电机", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
         Property("max_speed", kPropertyTypeInteger, 300, 10, 300)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         int max_speed_int = properties["max_speed"].value<int>();
         float max_speed = max_speed_int / 10.0f; // 转换为浮点数（保留1位小数）
@@ -319,15 +317,15 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 启动状态查询任务
     mcp_server.AddTool("self.motor.start_status_task", "启动电机状态查询任务", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (!deep_motor_) {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        if (deep_motor_->startInitStatusTask(motor_id)) {
+        if (deep_motor->startInitStatusTask(motor_id)) {
             ESP_LOGI(TAG, "启动电机%d状态查询任务成功", motor_id);
             return std::string("启动电机" + std::to_string(motor_id) + "状态查询任务成功");
         } else {
@@ -337,13 +335,13 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     });
 
     // 停止状态查询任务
-    mcp_server.AddTool("self.motor.stop_status_task", "停止电机状态查询任务", PropertyList(), [this](const PropertyList&) -> ReturnValue {
-        if (!deep_motor_) {
+    mcp_server.AddTool("self.motor.stop_status_task", "停止电机状态查询任务", PropertyList(), [deep_motor](const PropertyList&) -> ReturnValue {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        if (deep_motor_->stopInitStatusTask()) {
+        if (deep_motor->stopInitStatusTask()) {
             ESP_LOGI(TAG, "停止电机状态查询任务成功");
             return std::string("停止电机状态查询任务成功");
         } else {
@@ -357,15 +355,15 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 开始录制
     mcp_server.AddTool("self.motor.start_recording", "开始录制模式", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (!deep_motor_) {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        if (deep_motor_->startTeaching(motor_id)) {
+        if (deep_motor->startTeaching(motor_id)) {
             ESP_LOGI(TAG, "开始录制模式成功，电机ID: %d", motor_id);
             return std::string("开始录制模式成功，电机ID: " + std::to_string(motor_id) + "，可以开始拖动电机");
         } else {
@@ -375,14 +373,14 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     });
 
     // 结束录制
-    mcp_server.AddTool("self.motor.stop_recording", "结束录制模式", PropertyList(), [this](const PropertyList&) -> ReturnValue {
-        if (!deep_motor_) {
+    mcp_server.AddTool("self.motor.stop_recording", "结束录制模式", PropertyList(), [deep_motor](const PropertyList&) -> ReturnValue {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        if (deep_motor_->stopTeaching()) {
-            uint16_t point_count = deep_motor_->getTeachingPointCount();
+        if (deep_motor->stopTeaching()) {
+            uint16_t point_count = deep_motor->getTeachingPointCount();
             ESP_LOGI(TAG, "结束录制模式成功，共记录 %d 个录制点", point_count);
             return std::string("结束录制模式成功，共记录 " + std::to_string(point_count) + " 个录制点");
         } else {
@@ -394,16 +392,16 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 播放录制
     mcp_server.AddTool("self.motor.play_recording", "播放录制", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (!deep_motor_) {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        if (deep_motor_->executeTeaching(motor_id)) {
-            uint16_t point_count = deep_motor_->getTeachingPointCount();
+        if (deep_motor->executeTeaching(motor_id)) {
+            uint16_t point_count = deep_motor->getTeachingPointCount();
             ESP_LOGI(TAG, "播放录制成功，电机ID: %d，总点数: %d", motor_id, point_count);
             return std::string("播放录制成功，电机ID: " + std::to_string(motor_id) + "，总点数: " + std::to_string(point_count));
         } else {
@@ -413,15 +411,15 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     });
 
     // 获取录制状态
-    mcp_server.AddTool("self.motor.get_recording_status", "获取录制状态", PropertyList(), [this](const PropertyList&) -> ReturnValue {
-        if (!deep_motor_) {
+    mcp_server.AddTool("self.motor.get_recording_status", "获取录制状态", PropertyList(), [deep_motor](const PropertyList&) -> ReturnValue {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        bool is_teaching = deep_motor_->isTeachingMode();
-        bool data_ready = deep_motor_->isTeachingDataReady();
-        uint16_t point_count = deep_motor_->getTeachingPointCount();
+        bool is_teaching = deep_motor->isTeachingMode();
+        bool data_ready = deep_motor->isTeachingDataReady();
+        uint16_t point_count = deep_motor->getTeachingPointCount();
         
         std::string result = "录制状态:\n";
         result += "  录制模式: " + std::string(is_teaching ? "进行中" : "未启动") + "\n";
@@ -443,7 +441,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
         Property("amplitude", kPropertyTypeInteger, 200, 1, 1000),  // 幅度 (0.01-10.00)
         Property("frequency", kPropertyTypeInteger, 20, 1, 100)     // 频率 (0.1-10.0 Hz)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         int amplitude_int = properties["amplitude"].value<int>();
         int frequency_int = properties["frequency"].value<int>();
@@ -456,7 +454,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
             
             // 启用呼吸灯效果（绿色呼吸灯表示正弦信号运行中）
             // 金色呼吸灯 (RGB: 255, 215, 0)
-            if (deep_motor_ && deep_motor_->enableBreatheEffect(motor_id, 255, 215, 0)) {
+            if (deep_motor && deep_motor->enableBreatheEffect(motor_id, 255, 215, 0)) {
                 ESP_LOGI(TAG, "电机%d呼吸灯效果已启用", motor_id);
             }
             
@@ -473,14 +471,14 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 停止正弦信号
     mcp_server.AddTool("self.motor.stop_sin_signal", "停止电机正弦信号", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::stopSinSignal(motor_id)) {
             ESP_LOGI(TAG, "停止正弦信号成功 - 电机ID: %d", motor_id);
             
             // 禁用呼吸灯效果，切换回角度指示器
-            if (deep_motor_ && deep_motor_->disableBreatheEffect(motor_id)) {
+            if (deep_motor && deep_motor->disableBreatheEffect(motor_id)) {
                 ESP_LOGI(TAG, "电机%d呼吸灯效果已禁用，切换回角度指示器", motor_id);
             }
             
@@ -497,10 +495,10 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 启用电机角度指示器
     mcp_server.AddTool("self.motor.enable_angle_indicator", "启用电机角度LED指示器（默认已启用）", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (deep_motor_ && deep_motor_->enableAngleIndicator(motor_id, true)) {
+        if (deep_motor && deep_motor->enableAngleIndicator(motor_id, true)) {
             ESP_LOGI(TAG, "启用电机%d角度指示器成功", motor_id);
             return std::string("启用电机" + std::to_string(motor_id) + "角度指示器成功（注意：电机初始化时已默认启用所有角度指示器）");
         } else {
@@ -512,10 +510,10 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 禁用电机角度指示器
     mcp_server.AddTool("self.motor.disable_angle_indicator", "禁用电机角度LED指示器", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (deep_motor_ && deep_motor_->disableAngleIndicator(motor_id)) {
+        if (deep_motor && deep_motor->disableAngleIndicator(motor_id)) {
             ESP_LOGI(TAG, "禁用电机%d角度指示器成功", motor_id);
             return std::string("禁用电机" + std::to_string(motor_id) + "角度指示器成功");
         } else {
@@ -529,7 +527,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255),  // 电机ID (1-255)
         Property("min_angle", kPropertyTypeInteger, -314, -314, 314),  // 最小角度 (0.01弧度)
         Property("max_angle", kPropertyTypeInteger, 314, -314, 314)    // 最大角度 (0.01弧度)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         int min_angle_int = properties["min_angle"].value<int>();
         int max_angle_int = properties["max_angle"].value<int>();
@@ -537,7 +535,7 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
         float min_angle = min_angle_int / 100.0f;  // 转换为弧度
         float max_angle = max_angle_int / 100.0f;  // 转换为弧度
         
-        if (deep_motor_ && deep_motor_->setAngleRange(motor_id, min_angle, max_angle)) {
+        if (deep_motor && deep_motor->setAngleRange(motor_id, min_angle, max_angle)) {
             ESP_LOGI(TAG, "设置电机%d角度范围: [%.2f, %.2f] rad", motor_id, min_angle, max_angle);
             return std::string("设置电机" + std::to_string(motor_id) + "角度范围: [" + 
                              std::to_string(min_angle) + ", " + std::to_string(max_angle) + "] rad");
@@ -550,13 +548,13 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 获取电机角度状态
     mcp_server.AddTool("self.motor.get_angle_status", "获取电机角度状态", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (deep_motor_) {
-            auto angle_state = deep_motor_->getAngleStatus(motor_id);
-            auto angle_range = deep_motor_->getAngleRange(motor_id);
-            bool indicator_enabled = deep_motor_->isAngleIndicatorEnabled(motor_id);
+        if (deep_motor) {
+            auto angle_state = deep_motor->getAngleStatus(motor_id);
+            auto angle_range = deep_motor->getAngleRange(motor_id);
+            bool indicator_enabled = deep_motor->isAngleIndicatorEnabled(motor_id);
             
             std::string result = "电机" + std::to_string(motor_id) + "角度状态:\n";
             result += "  当前角度: " + std::to_string(angle_state.current_angle) + " rad\n";
@@ -582,21 +580,21 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     // 获取电机软件版本号
     mcp_server.AddTool("self.motor.get_software_version", "获取电机软件版本号", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [this](const PropertyList& properties) -> ReturnValue {
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
         
-        if (!deep_motor_) {
+        if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
         
-        if (!deep_motor_->isMotorRegistered(motor_id)) {
+        if (!deep_motor->isMotorRegistered(motor_id)) {
             ESP_LOGW(TAG, "电机ID %d 未注册", motor_id);
             return std::string("电机ID " + std::to_string(motor_id) + " 未注册");
         }
         
         char version[16]; // 版本号缓冲区
-        if (deep_motor_->getMotorSoftwareVersion(motor_id, version, sizeof(version))) {
+        if (deep_motor->getMotorSoftwareVersion(motor_id, version, sizeof(version))) {
             std::string result = "电机ID " + std::to_string(motor_id) + " 软件版本: " + std::string(version);
             ESP_LOGI(TAG, "获取电机ID %d 软件版本成功: %s", motor_id, version);
             return result;
@@ -609,4 +607,11 @@ DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     ESP_LOGI(TAG, "深度电机控制MCP工具注册完成，包含模式控制、初始化、录制、正弦信号、角度指示器、软件版本查询等功能");
 }
 
-// 析构函数已在头文件中声明为 = default
+void RegisterMotorMcpTools(McpServer& mcp_server, DeepMotor* deep_motor) {
+    RegisterMotorMcpToolsImpl(mcp_server, deep_motor);
+}
+
+DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
+    : deep_motor_(deep_motor) {
+    RegisterMotorMcpTools(mcp_server, deep_motor);
+}

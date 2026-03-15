@@ -46,9 +46,11 @@
 #define UART_ECHO_RTS (-1)
 #define UART_ECHO_CTS (-1)
 
-// CAN总线 - 已验证可工作的配置
-#define CAN_TX_GPIO GPIO_NUM_38   // TX引脚，支持输出
-#define CAN_RX_GPIO GPIO_NUM_48   // RX引脚，支持输入
+// CAN总线 (TWAI)：ESP32-S3 通过 GPIO 矩阵连接 TWAI，TX/RX 可任意选可用 GPIO。
+// GPIO 38、48 为普通 I/O，非 Strapping，可作为 CAN TX/RX 使用。
+// 接线：ESP32 TX(38) -> 收发器 RXD；ESP32 RX(48) <- 收发器 TXD；共地；总线两端 120Ω 终端；波特率与从站一致（当前 1Mbps）。
+#define CAN_TX_GPIO GPIO_NUM_38   // TX -> 收发器 RXD
+#define CAN_RX_GPIO GPIO_NUM_48   // RX <- 收发器 TXD
 
 #define MOTOR_SPEED_MAX 100
 #define MOTOR_SPEED_80  80

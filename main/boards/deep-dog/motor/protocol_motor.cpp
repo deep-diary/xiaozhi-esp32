@@ -345,12 +345,16 @@ uint32_t MotorProtocol::buildCanId(uint8_t motor_id, motor_cmd_t cmd) {
 
 bool MotorProtocol::sendCanFrame(const CanFrame& frame) {
     // 打印CAN帧相关内容：id, 长度, data，全部按16进制格式打印
-    ESP_LOGI(TAG, ">>>>>>>>>>发送CAN帧: id=0x%08X, len=0x%02X, data=0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
-             frame.identifier,
+    ESP_LOGI(TAG, ">>>>>>>>>>发送CAN帧: id=0x%08lX, len=0x%02X, data=%02X %02X %02X %02X %02X %02X %02X %02X",
+             (unsigned long)frame.identifier,
              frame.data_length_code,
              frame.data[0], frame.data[1], frame.data[2], frame.data[3],
              frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
-    return ESP32Can.writeFrame(frame, MOTOR_CAN_TIMEOUT_MS);
+    bool ok = ESP32Can.writeFrame(frame, MOTOR_CAN_TIMEOUT_MS);
+    if (!ok) {
+        ESP_LOGE(TAG, "CAN 发送失败 (无ACK或超时 %dms)", (int)MOTOR_CAN_TIMEOUT_MS);
+    }
+    return ok;
 }
 
 uint16_t MotorProtocol::floatToUint16(float value, float min_val, float max_val, int bits) {

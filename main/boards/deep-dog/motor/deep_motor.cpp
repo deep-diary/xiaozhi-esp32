@@ -254,6 +254,14 @@ uint8_t DeepMotor::getRegisteredMotorIds(int8_t* motor_ids, uint8_t max_count) c
     return count;
 }
 
+bool DeepMotor::registerMotor(uint8_t motor_id) {
+    if (findMotorIndex(motor_id) != -1) {
+        ESP_LOGI(TAG, "电机ID %d 已注册", motor_id);
+        return true;
+    }
+    return registerMotorId(motor_id);
+}
+
 bool DeepMotor::isMotorRegistered(uint8_t motor_id) const {
     return findMotorIndex(motor_id) != -1;
 }
