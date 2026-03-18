@@ -10,6 +10,7 @@
 #include "motor/deep_motor.h"
 #include "motor/deep_motor_control.h"
 #include "leg/leg_control.h"
+#include "dog/dog_control.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -57,8 +58,8 @@ private:
     Display* display_;
     EspVideo* camera_;
     DeepMotor* deep_motor_ = nullptr;
-    LegControl leg_fl_;  // 单腿调试：前左
-    LegControl* leg_ptrs_[4] = { nullptr };  // 供 MCP 回调使用，生命周期与板一致，避免悬空引用
+    DogControl dog_;  // 整机：4 条腿，内部持有 4 个 LegControl
+    LegControl* leg_ptrs_[4] = { nullptr };  // 供单腿 MCP 回调使用，指向 dog_ 内 4 腿
     TaskHandle_t can_rx_task_handle_ = nullptr;
 
     static void CanRxTask(void* arg) {
@@ -222,12 +223,12 @@ private:
 
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
-        RegisterMotorMcpTools(mcp_server, deep_motor_);
-        leg_fl_.setDeepMotor(deep_motor_);
-        leg_fl_.setLegType(LegType::FL);
-        leg_ptrs_[0] = &leg_fl_;
-        leg_ptrs_[1] = leg_ptrs_[2] = leg_ptrs_[3] = nullptr;
-        RegisterLegMcpTools(mcp_server, leg_ptrs_);
+        // 临时屏蔽电机级 MCP（开源项目 MCP 上限约 32，优先测试腿/整机控制；需要单电机调试时取消注释）
+        // RegisterMotorMcpTools(mcp_server, deep_motor_);
+        dog_.setDeepMotor(deep_motor_);
+        dog_.getLegs(leg_ptrs_);  // leg_ptrs_[0..3] 指向 dog_ 内 4 条腿
+        RegisterLegMcpTools(mcp_server, leg_ptrs_);   // 单腿调试：self.leg.*
+        RegisterDogMcpTools(mcp_server, &dog_);        // 整机：self.dog.* / self.chassis.*
     }
 
 public:
@@ -239,7 +240,7 @@ public:
         InitializeCamera();
         InitializeCan();
         deep_motor_ = new DeepMotor(nullptr);
-        deep_motor_->registerMotor(DEEP_DOG_TEST_MOTOR_ID);
+        // 不再预注册电机 1：整机 12 个电机（11–13,21–23,51–53,61–63）由 dog.init() 时全部注册，槽位刚好 12，预注册会占满导致电机 63 无法注册
         InitializeTools();  // 内里会配置 leg_fl_ 并注册腿 MCP
         xTaskCreate(CanRxTask, "can_rx", CAN_RX_TASK_STACK, deep_motor_, CAN_RX_TASK_PRIO, &can_rx_task_handle_);
         GetBacklight()->RestoreBrightness();

@@ -20,8 +20,8 @@
  * 4. 提供电机状态查询接口
  */
 
-// 最大电机数量
-#define MAX_MOTOR_COUNT 8
+// 最大电机数量（机器狗 4 腿 × 3 关节 = 12）
+#define MAX_MOTOR_COUNT 13
 
 // 电机ID未注册标识
 #define MOTOR_ID_UNREGISTERED -1

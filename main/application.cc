@@ -250,8 +250,8 @@ void Application::Run() {
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
         
-            // Print debug info every 10 seconds
-            if (clock_ticks_ % 10 == 0) {
+            // Print debug info every 30 seconds
+            if (clock_ticks_ % 30 == 0) {
                 SystemInfo::PrintHeapStats();
             }
         }

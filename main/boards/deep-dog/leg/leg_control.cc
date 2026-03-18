@@ -86,7 +86,10 @@ bool LegControl::init() {
         uint8_t id = motor_ids_[i];
         if (id == 0) continue;
         if (!deep_motor_->isMotorRegistered(id)) {
-            deep_motor_->registerMotor(id);
+            if (!deep_motor_->registerMotor(id)) {
+                ESP_LOGE(TAG, "registerMotor fail id=%d (可能已满，最大 %d 个电机)", id, MAX_MOTOR_COUNT);
+                return false;
+            }
         }
         if (!MotorProtocol::setMotorPositionMode(id)) {
             ESP_LOGE(TAG, "setMotorPositionMode fail id=%d", id);
@@ -163,64 +166,88 @@ bool LegControl::stepBackward(float max_speed_rad_s) {
 }
 
 // --- MCP 工具注册 ---
-
+// leg_id 支持多种说法：英文 fl/fr/rl/rr，中文 前左/前右/后左/后右 或 左前/右前/左后/右后（可带「腿」），编号 1~4 或 1号腿…
 static int str_to_leg_index(const std::string& s) {
+    if (s.empty()) return -1;
+    // 英文缩写（小写）
     if (s == "fl") return 0;
     if (s == "fr") return 1;
     if (s == "rl") return 2;
     if (s == "rr") return 3;
+    // 中文：前左/前左腿、前右/前右腿、后左/后左腿、后右/后右腿
+    if (s == "前左" || s == "前左腿") return 0;
+    if (s == "前右" || s == "前右腿") return 1;
+    if (s == "后左" || s == "后左腿") return 2;
+    if (s == "后右" || s == "后右腿") return 3;
+    // 中文调换说法：左前/左前腿、右前/右前腿、左后/左后腿、右后/右后腿
+    if (s == "左前" || s == "左前腿") return 0;
+    if (s == "右前" || s == "右前腿") return 1;
+    if (s == "左后" || s == "左后腿") return 2;
+    if (s == "右后" || s == "右后腿") return 3;
+    // 编号：1号腿=前左 2号腿=前右 3号腿=后左 4号腿=后右
+    if (s == "1" || s == "1号" || s == "1号腿") return 0;
+    if (s == "2" || s == "2号" || s == "2号腿") return 1;
+    if (s == "3" || s == "3号" || s == "3号腿") return 2;
+    if (s == "4" || s == "4号" || s == "4号腿") return 3;
     return -1;
 }
 
+static const char* leg_index_to_name(int idx) {
+    switch (idx) { case 0: return "前左"; case 1: return "前右"; case 2: return "后左"; case 3: return "后右"; default: return "?"; }
+}
+
+// 单腿 MCP 的 leg_id 说明（供 LLM/语音填参）：支持 前左/前右/后左/后右 或 左前/右前/左后/右后（可带「腿」），或 1~4 号腿
+#define LEG_ID_DESC "leg_id：腿标识。支持 前左/前右/后左/后右 或 左前/右前/左后/右后（可带「腿」），或 1号腿/2号腿/3号腿/4号腿（1=前左 2=前右 3=后左 4=后右）"
+
 void RegisterLegMcpTools(McpServer& mcp_server, LegControl* legs[4]) {
-    mcp_server.AddTool("self.leg.init", "单腿初始化（使能3个电机）", PropertyList(std::vector<Property>{
-        Property("leg_id", kPropertyTypeString, std::string("fl"))
+    mcp_server.AddTool("self.leg.init", "单腿初始化（使能该腿3个电机）。用户说：初始化前左腿、前右腿初始化、初始化1号腿 等时调用。参数 " LEG_ID_DESC, PropertyList(std::vector<Property>{
+        Property("leg_id", kPropertyTypeString, std::string("前左"))
     }), [legs](const PropertyList& properties) -> ReturnValue {
         std::string lid = properties["leg_id"].value<std::string>();
         int idx = str_to_leg_index(lid);
-        if (idx < 0 || !legs[idx]) return std::string("无效 leg_id 或该腿未创建，请使用 fl/fr/rl/rr");
-        if (legs[idx]->init()) return std::string("腿 " + lid + " 初始化成功");
-        return std::string("腿 " + lid + " 初始化失败");
+        if (idx < 0 || !legs[idx]) return std::string("无效 leg_id 或该腿未创建，请使用：前左/前右/后左/后右 或 1号腿/2号腿/3号腿/4号腿");
+        if (legs[idx]->init()) return std::string(leg_index_to_name(idx)) + std::string("腿 初始化成功");
+        return std::string(leg_index_to_name(idx)) + std::string("腿 初始化失败");
     });
 
-    mcp_server.AddTool("self.leg.stand", "单腿站立/单腿站起/单腿回站立位。用户说：腿站起来、腿站立、站起、站立位 时调用", PropertyList(std::vector<Property>{
-        Property("leg_id", kPropertyTypeString, std::string("fl"))
+    mcp_server.AddTool("self.leg.stand", "单腿站立/单腿站起/回站立位。用户说：前左腿站立、前右腿站起来、2号腿站起 等时调用。参数 " LEG_ID_DESC, PropertyList(std::vector<Property>{
+        Property("leg_id", kPropertyTypeString, std::string("前左"))
     }), [legs](const PropertyList& properties) -> ReturnValue {
         std::string lid = properties["leg_id"].value<std::string>();
         int idx = str_to_leg_index(lid);
         if (idx < 0 || !legs[idx]) return std::string("无效 leg_id 或该腿未创建");
-        if (legs[idx]->goToStance()) return std::string("腿 " + lid + " 回站立位成功");
-        return std::string("腿 " + lid + " 回站立位失败");
+        if (legs[idx]->goToStance()) return std::string(leg_index_to_name(idx)) + std::string("腿 已站立");
+        return std::string(leg_index_to_name(idx)) + std::string("腿 站立失败");
     });
 
-    mcp_server.AddTool("self.leg.lie_down", "单腿卧倒/单腿趴下/单腿回零位。用户说：腿卧倒、卧倒、趴下、回零位、零位、腿放平、关节回零 时调用（注意：零位是机械零位，不是灵位）", PropertyList(std::vector<Property>{
-        Property("leg_id", kPropertyTypeString, std::string("fl"))
+    mcp_server.AddTool("self.leg.lie_down", "单腿卧倒/趴下/蹲下/回零位。用户说：前左腿卧倒、前右腿蹲下、3号腿趴下、回零位 等时调用（零位=机械零位，不是灵位）。参数 " LEG_ID_DESC, PropertyList(std::vector<Property>{
+        Property("leg_id", kPropertyTypeString, std::string("前左"))
     }), [legs](const PropertyList& properties) -> ReturnValue {
         std::string lid = properties["leg_id"].value<std::string>();
         int idx = str_to_leg_index(lid);
         if (idx < 0 || !legs[idx]) return std::string("无效 leg_id 或该腿未创建");
-        if (legs[idx]->goToZero()) return std::string("腿 " + lid + " 卧倒成功");
-        return std::string("腿 " + lid + " 卧倒失败");
+        if (legs[idx]->goToZero()) return std::string(leg_index_to_name(idx)) + std::string("腿 已卧倒");
+        return std::string(leg_index_to_name(idx)) + std::string("腿 卧倒失败");
     });
 
-    mcp_server.AddTool("self.leg.step_forward", "单腿向前迈一步", PropertyList(std::vector<Property>{
-        Property("leg_id", kPropertyTypeString, std::string("fl"))
+    mcp_server.AddTool("self.leg.step_forward", "单腿向前迈一步。用户说：前左腿向前迈一步、2号腿迈一步 等时调用。参数 " LEG_ID_DESC, PropertyList(std::vector<Property>{
+        Property("leg_id", kPropertyTypeString, std::string("前左"))
     }), [legs](const PropertyList& properties) -> ReturnValue {
         std::string lid = properties["leg_id"].value<std::string>();
         int idx = str_to_leg_index(lid);
         if (idx < 0 || !legs[idx]) return std::string("无效 leg_id 或该腿未创建");
-        if (legs[idx]->stepForward()) return std::string("腿 " + lid + " 向前迈一步成功");
-        return std::string("腿 " + lid + " 向前迈一步失败");
+        if (legs[idx]->stepForward()) return std::string(leg_index_to_name(idx)) + std::string("腿 向前迈一步成功");
+        return std::string(leg_index_to_name(idx)) + std::string("腿 向前迈一步失败");
     });
 
-    mcp_server.AddTool("self.leg.step_back", "单腿向后迈一步", PropertyList(std::vector<Property>{
-        Property("leg_id", kPropertyTypeString, std::string("fl"))
+    mcp_server.AddTool("self.leg.step_back", "单腿向后迈一步。用户说：前左腿向后迈一步 等时调用。参数 " LEG_ID_DESC, PropertyList(std::vector<Property>{
+        Property("leg_id", kPropertyTypeString, std::string("前左"))
     }), [legs](const PropertyList& properties) -> ReturnValue {
         std::string lid = properties["leg_id"].value<std::string>();
         int idx = str_to_leg_index(lid);
         if (idx < 0 || !legs[idx]) return std::string("无效 leg_id 或该腿未创建");
-        if (legs[idx]->stepBackward()) return std::string("腿 " + lid + " 向后迈一步成功");
-        return std::string("腿 " + lid + " 向后迈一步失败");
+        if (legs[idx]->stepBackward()) return std::string(leg_index_to_name(idx)) + std::string("腿 向后迈一步成功");
+        return std::string(leg_index_to_name(idx)) + std::string("腿 向后迈一步失败");
     });
 
     ESP_LOGI(TAG, "Leg MCP tools registered: self.leg.init, stand, lie_down, step_forward, step_back");
