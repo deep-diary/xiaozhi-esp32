@@ -28,6 +28,10 @@ void DogControl::getLegs(LegControl* out_legs[4]) {
 }
 
 bool DogControl::init() {
+    if (initialized_) {
+        ESP_LOGI(TAG, "dog init skipped: already initialized");
+        return true;
+    }
     if (!deep_motor_) {
         ESP_LOGE(TAG, "DeepMotor not set");
         return false;
@@ -39,6 +43,7 @@ bool DogControl::init() {
         }
     }
     ESP_LOGI(TAG, "dog init ok, 4 legs");
+    initialized_ = true;
     return true;
 }
 

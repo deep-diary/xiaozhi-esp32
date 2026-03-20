@@ -87,18 +87,46 @@ private:
                                 uint32_t baseline,
                                 uint32_t abs_diff) {
         switch (event) {
-            case TouchButtonEvent::kPress:
+            case TouchButtonEvent::kPress: {
                 ESP_LOGI(TAG, "Touch button %d pressed (value=%u baseline=%u abs_diff=%u)",
                          button_id, (unsigned)value, (unsigned)baseline, (unsigned)abs_diff);
-                break;
+
+                // 2号按下：站立
+                if (button_id == 2) {
+                    if (dog_.stand()) {
+                        ESP_LOGI(TAG, "Touch: dog stand success");
+                    } else {
+                        ESP_LOGE(TAG, "Touch: dog stand failed");
+                    }
+                }
+                // 3号按下：卧倒
+                if (button_id == 3) {
+                    if (dog_.lieDown()) {
+                        ESP_LOGI(TAG, "Touch: dog lieDown success");
+                    } else {
+                        ESP_LOGE(TAG, "Touch: dog lieDown failed");
+                    }
+                }
+            } break;
+
             case TouchButtonEvent::kRelease:
                 ESP_LOGI(TAG, "Touch button %d released (value=%u baseline=%u abs_diff=%u)",
                          button_id, (unsigned)value, (unsigned)baseline, (unsigned)abs_diff);
                 break;
-            case TouchButtonEvent::kLongPress:
+
+            case TouchButtonEvent::kLongPress: {
                 ESP_LOGI(TAG, "Touch button %d long-pressed (value=%u baseline=%u abs_diff=%u)",
                          button_id, (unsigned)value, (unsigned)baseline, (unsigned)abs_diff);
-                break;
+
+                // 1号长按：机器狗初始化
+                if (button_id == 1) {
+                    if (dog_.init()) {
+                        ESP_LOGI(TAG, "Touch: dog init success");
+                    } else {
+                        ESP_LOGE(TAG, "Touch: dog init failed");
+                    }
+                }
+            } break;
         }
     }
 

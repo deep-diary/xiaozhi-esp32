@@ -49,6 +49,10 @@ public:
 private:
     DeepMotor* deep_motor_ = nullptr;
     LegControl legs_[4];  // fl, fr, rl, rr，构造时按 LegType 配置
+    // 由于初始化会给每个电机重新设置零位并使能，
+    // 若重复调用可能导致机械抖动/意外转动。
+    // 因此这里做一次性标记：初始化成功后只允许执行一次。
+    bool initialized_ = false;
 };
 
 /**
