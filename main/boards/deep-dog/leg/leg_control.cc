@@ -91,12 +91,8 @@ bool LegControl::init() {
                 return false;
             }
         }
-        if (!MotorProtocol::setMotorPositionMode(id)) {
-            ESP_LOGE(TAG, "setMotorPositionMode fail id=%d", id);
-            return false;
-        }
-        if (!MotorProtocol::enableMotor(id)) {
-            ESP_LOGE(TAG, "enableMotor fail id=%d", id);
+        if (!MotorProtocol::initializeMotor(id, 1.0f)) {
+            ESP_LOGE(TAG, "initializeMotor fail id=%d", id);
             return false;
         }
     }

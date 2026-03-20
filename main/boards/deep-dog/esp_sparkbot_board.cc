@@ -11,6 +11,7 @@
 #include "motor/deep_motor_control.h"
 #include "leg/leg_control.h"
 #include "dog/dog_control.h"
+#include "touch_btn/touch_button_controller.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -55,6 +56,7 @@ class DeepDog : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
+    TouchButtonController touch_buttons_;
     Display* display_;
     EspVideo* camera_;
     DeepMotor* deep_motor_ = nullptr;
@@ -76,6 +78,27 @@ private:
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(1));
+        }
+    }
+
+    void HandleTouchButtonEvent(int button_id,
+                                TouchButtonEvent event,
+                                uint32_t value,
+                                uint32_t baseline,
+                                uint32_t abs_diff) {
+        switch (event) {
+            case TouchButtonEvent::kPress:
+                ESP_LOGI(TAG, "Touch button %d pressed (value=%u baseline=%u abs_diff=%u)",
+                         button_id, (unsigned)value, (unsigned)baseline, (unsigned)abs_diff);
+                break;
+            case TouchButtonEvent::kRelease:
+                ESP_LOGI(TAG, "Touch button %d released (value=%u baseline=%u abs_diff=%u)",
+                         button_id, (unsigned)value, (unsigned)baseline, (unsigned)abs_diff);
+                break;
+            case TouchButtonEvent::kLongPress:
+                ESP_LOGI(TAG, "Touch button %d long-pressed (value=%u baseline=%u abs_diff=%u)",
+                         button_id, (unsigned)value, (unsigned)baseline, (unsigned)abs_diff);
+                break;
         }
     }
 
@@ -133,6 +156,20 @@ private:
             }
             app.ToggleChatState();
         });
+    }
+
+    void InitializeTouchButtons() {
+        if (!touch_buttons_.Initialize(
+                TOUCH_BUTTON1_GPIO, TOUCH_BUTTON2_GPIO, TOUCH_BUTTON3_GPIO,
+                [this](int button_id,
+                       TouchButtonEvent event,
+                       uint32_t value,
+                       uint32_t baseline,
+                       uint32_t abs_diff) {
+                    HandleTouchButtonEvent(button_id, event, value, baseline, abs_diff);
+                })) {
+            ESP_LOGE(TAG, "Touch button controller init failed");
+        }
     }
 
     void InitializeDisplay() {
@@ -237,6 +274,7 @@ public:
         InitializeSpi();
         InitializeDisplay();
         InitializeButtons();
+        InitializeTouchButtons();
         InitializeCamera();
         InitializeCan();
         deep_motor_ = new DeepMotor(nullptr);

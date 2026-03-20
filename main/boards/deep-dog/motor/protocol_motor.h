@@ -242,18 +242,14 @@ public:
     static bool setMotorPositionMode(uint8_t motor_id);
 
     /**
-     * @brief 电机初始化函数
+     * @brief 电机初始化函数（含设置零位）
      * @param motor_id 电机ID
-     * @param max_speed 最大速度 (rad/s)，默认30.0
+     * @param max_speed 最大速度 (rad/s)，默认 1.0
      * @return true 成功, false 失败
-     * 
-     * 初始化流程：
-     * 1. 将电机切换到位置模式
-     * 2. 设置最大速度限制
-     * 3. 使能电机
-     * 4. 启动1秒定时状态查询任务
+     *
+     * 初始化流程：reset → 设置零位 → 位置模式 → 设置速度限制 → 使能
      */
-    static bool initializeMotor(uint8_t motor_id, float max_speed = 30.0f);
+    static bool initializeMotor(uint8_t motor_id, float max_speed = 1.0f);
 
     /**
      * @brief 设置电机参数

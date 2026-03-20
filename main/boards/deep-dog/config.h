@@ -102,4 +102,9 @@ typedef enum {
 #define SPARKBOT_CAMERA_SIOD      (GPIO_NUM_NC)
 #define SPARKBOT_CAMERA_SIOC      (GPIO_NUM_NC)
 
+/* 触摸按键 */
+#define TOUCH_BUTTON1_GPIO       (GPIO_NUM_1)
+#define TOUCH_BUTTON2_GPIO       (GPIO_NUM_2)
+#define TOUCH_BUTTON3_GPIO       (GPIO_NUM_3)
+
 #endif // _BOARD_CONFIG_H_
