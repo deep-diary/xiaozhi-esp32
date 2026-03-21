@@ -102,19 +102,57 @@ bool LegControl::init() {
 
 bool LegControl::disable() {
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !MotorProtocol::resetMotor(motor_ids_[i])) {
+        if (motor_ids_[i] == 0) {
+            continue;
+        }
+        if (!MotorProtocol::resetMotor(motor_ids_[i])) {
             ESP_LOGE(TAG, "resetMotor fail id=%d", motor_ids_[i]);
             return false;
+        }
+        if (deep_motor_) {
+            deep_motor_->invalidateMotorCommandCache(motor_ids_[i]);
         }
     }
     return true;
 }
 
+uint8_t LegControl::getMotorId(int joint_index) const {
+    if (joint_index < 0 || joint_index >= LEG_JOINT_COUNT) {
+        return 0;
+    }
+    return motor_ids_[joint_index];
+}
+
+float LegControl::getStanceTargetJoint(int joint_index) const {
+    if (joint_index < 0 || joint_index >= LEG_JOINT_COUNT) {
+        return 0.0f;
+    }
+    return clampJoint(joint_index, stance_position_[joint_index]);
+}
+
+void LegControl::fillCurrentStepPositions(float out[LEG_JOINT_COUNT], bool forward) const {
+    computeStepPosition(out, forward);
+}
+
+void LegControl::advanceStepForward() {
+    current_step_ = (current_step_ + 1) % total_steps_;
+}
+
+void LegControl::advanceStepBackward() {
+    current_step_ = (current_step_ == 0) ? total_steps_ - 1 : current_step_ - 1;
+}
+
 bool LegControl::goToZero(float max_speed_rad_s) {
     if (!deep_motor_) return false;
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPosition(motor_ids_[i], 0.0f, max_speed_rad_s)) {
-            ESP_LOGE(TAG, "goToZero setMotorPosition fail id=%d", motor_ids_[i]);
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
+            ESP_LOGE(TAG, "goToZero setMotorSpeedLimit fail id=%d", motor_ids_[i]);
+            return false;
+        }
+    }
+    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], 0.0f)) {
+            ESP_LOGE(TAG, "goToZero setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
             return false;
         }
     }
@@ -124,9 +162,15 @@ bool LegControl::goToZero(float max_speed_rad_s) {
 bool LegControl::goToStance(float max_speed_rad_s) {
     if (!deep_motor_) return false;
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
+            ESP_LOGE(TAG, "goToStance setMotorSpeedLimit fail id=%d", motor_ids_[i]);
+            return false;
+        }
+    }
+    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
         float pos = clampJoint(i, stance_position_[i]);
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPosition(motor_ids_[i], pos, max_speed_rad_s)) {
-            ESP_LOGE(TAG, "goToStance setMotorPosition fail id=%d", motor_ids_[i]);
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos)) {
+            ESP_LOGE(TAG, "goToStance setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
             return false;
         }
     }
@@ -135,12 +179,18 @@ bool LegControl::goToStance(float max_speed_rad_s) {
 
 bool LegControl::stepForward(float max_speed_rad_s) {
     if (!deep_motor_) return false;
-    current_step_ = (current_step_ + 1) % total_steps_;
+    advanceStepForward();
     float pos[LEG_JOINT_COUNT];
-    computeStepPosition(pos, true);
+    fillCurrentStepPositions(pos, true);
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPosition(motor_ids_[i], pos[i], max_speed_rad_s)) {
-            ESP_LOGE(TAG, "stepForward setMotorPosition fail id=%d", motor_ids_[i]);
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
+            ESP_LOGE(TAG, "stepForward setMotorSpeedLimit fail id=%d", motor_ids_[i]);
+            return false;
+        }
+    }
+    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
+            ESP_LOGE(TAG, "stepForward setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
             return false;
         }
     }
@@ -149,12 +199,18 @@ bool LegControl::stepForward(float max_speed_rad_s) {
 
 bool LegControl::stepBackward(float max_speed_rad_s) {
     if (!deep_motor_) return false;
-    current_step_ = (current_step_ == 0) ? total_steps_ - 1 : current_step_ - 1;
+    advanceStepBackward();
     float pos[LEG_JOINT_COUNT];
-    computeStepPosition(pos, false);
+    fillCurrentStepPositions(pos, false);
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPosition(motor_ids_[i], pos[i], max_speed_rad_s)) {
-            ESP_LOGE(TAG, "stepBackward setMotorPosition fail id=%d", motor_ids_[i]);
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
+            ESP_LOGE(TAG, "stepBackward setMotorSpeedLimit fail id=%d", motor_ids_[i]);
+            return false;
+        }
+    }
+    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
+            ESP_LOGE(TAG, "stepBackward setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
             return false;
         }
     }

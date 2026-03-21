@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-**机器狗单腿**抽象：一条腿 3 个关节（髋侧摆、髋前后、膝），对应 3 个无刷电机，由 `../motor` 驱动。本模块负责单腿的**步态相位**、**站立/卧倒**以及**迈一步**的目标位置计算，通过 DeepMotor 下发关节目标位置，不直接发 CAN。
+**机器狗单腿**抽象：一条腿 3 个关节（髋侧摆、髋前后、膝），对应 3 个无刷电机，由 `../motor` 中的 `DeepMotor` / `MotorProtocol` 驱动。本模块负责**步态相位**、**站立/卧倒**、**迈一步**的目标位置计算，并下发到电机；**不**直接操作 `ESP32Can`。
 
 ---
 
@@ -10,96 +10,86 @@
 
 | 文件 | 说明 |
 |------|------|
-| `leg_control.h` | 腿类型枚举 `LegType`、`LegControl` 类声明、关节索引与常量 |
-| `leg_control.cc` | `LegControl` 实现、正弦步态计算、`RegisterLegMcpTools()` MCP 注册 |
-
-**说明**：本目录仅包含 `leg_control.h` / `leg_control.cc`，无 `leg.h` / `leg.cc`；腿逻辑与单腿 MCP 工具均在此模块内。
+| `leg_control.h` | 腿类型 `LegType`、`LegControl`、关节索引与常量 |
+| `leg_control.cc` | 正弦步态、`RegisterLegMcpTools()` |
 
 ---
 
 ## 机械与关节（简要）
 
-每条腿三个关节在步态中的分工：
+| 关节 | 索引 | 说明 |
+|------|------|------|
+| 髋侧摆 (Hip AA) | `LEG_JOINT_HIP_AA` (0) | 站立时维持足端间距，可小幅摆动 |
+| 髋前后 (Hip FE) | `LEG_JOINT_HIP_FE` (1) | 前进/后退主动力 |
+| 膝 (Knee) | `LEG_JOINT_KNEE` (2) | 摆动相抬脚，支撑相承重 |
 
-| 关节 | 索引 | 说明 | 步态中作用 |
-|------|------|------|------------|
-| 髋侧摆 (Hip AA) | 0 | 外侧电机 | 站立时维持足端间距，可做小幅摆动 |
-| 髋前后 (Hip FE) | 1 | 中间电机 | 前进/后退的主要动力：摆动相前摆，支撑相后推 |
-| 膝 (Knee FE) | 2 | 远端电机 | 摆动相屈曲抬脚，支撑相伸展承重 |
-
-控制上下限 = 站立位置 ± 半活动范围，并夹在物理限位内。半活动范围与默认站立/限位见 `../dog/README.md`。
+默认站立位、行走范围与机械限位见 `../dog/README.md` 表格；本模块用 `clampJoint` 将目标夹在控制上下限内。
 
 ---
 
 ## LegControl 类
 
-### 属性
+### 配置
 
-- **腿类型**：`LegType`（fl / fr / rl / rr）
-- **电机 ID**：本腿 3 个电机 ID 数组 `motor_ids_[3]`
-- **站立位置**：3 关节站立位（弧度）`stance_position_[3]`
-- **控制上下限**：3 关节控制下限/上限（弧度）`limit_low_[3]`、`limit_high_[3]`
-- **步态**：总步数 `total_steps_`、当前步数 `current_step_`（用于正弦分相）
-- **依赖**：`DeepMotor*`，用于下发位置/使能
+- **腿类型**：`LegType`（fl / fr / rl / rr），决定默认 **3 个电机 ID** 与默认站立/限位（见 `LEG_DEFAULTS`）。
+- **电机 ID**：`motor_ids_[3]`，也可用 `setMotorIds(hip_aa, hip_fe, knee)` 覆盖。
+- **站立位 / 限位**：`setStancePosition`、`setLimits`。
+- **步态**：`total_steps_`、`current_step_`，`computeStepPosition` 正弦偏移。
 
-### 方法（接口）
+### 方法
 
 | 方法 | 说明 |
 |------|------|
-| `setMotorIds` | 设置本腿 3 个电机 ID |
-| `setLimits` | 设置 3 关节控制上下限（弧度） |
-| `setStancePosition` | 保存当前 3 关节目标为站立位（或直接写入给定值） |
-| `goToZero` | 三关节置 0（卧倒） |
-| `goToStance` | 驱动到已保存的站立位 |
-| `stepForward` | 当前步数 +1，目标位置 = 站立位 + 正弦偏移，并限幅 |
-| `stepBackward` | 当前步数 -1，同上 |
-| `init` | 3 电机使能（位置模式 + enable） |
-| `disable` | 3 电机失能（reset） |
-
-实际控制位置在写入 motor 前在关节限位内做夹紧（clamp）。
+| `setLegType` / `setMotorIds` / `setLimits` / `setStancePosition` | 配置 |
+| `init()` | 注册本腿 3 电机并 `MotorProtocol::initializeMotor`（每电机使能、位置模式等） |
+| `disable()` | 对 3 电机 `MotorProtocol::resetMotor`，并对已绑定的 `DeepMotor` 调用 `invalidateMotorCommandCache` |
+| `goToZero` | 先对 3 关节 `setMotorSpeedLimit`，再 `setMotorPositionRefOnly(0)` |
+| `goToStance` | 同上，位置为站立位（限幅后） |
+| `stepForward` / `stepBackward` | 步数 ±1，计算 3 关节目标，先限速再仅位置 |
+| `getMotorId(j)` | 关节 `j` 对应电机 ID |
+| `getStanceTargetJoint(j)` | 站立目标（已 clamp） |
+| `fillCurrentStepPositions(out, forward)` | 按当前 `current_step_` 填 3 关节目标（不改步数） |
+| `advanceStepForward` / `advanceStepBackward` | 仅修改步态相位（供整机同步迈步） |
+| `clampJoint` | 限幅 |
 
 ---
 
-## Leg MCP 控制
+## 与整机 `DogControl` 的配合
 
-通过 `RegisterLegMcpTools(McpServer&, LegControl* legs[4])` 注册单腿调试用 MCP 工具（可选只传部分腿，未用槽位传 `nullptr`）。工具与参数约定：
+- **`DogControl::stand` / `lieDown` / `goForward` / `goBack`** 不再按「一条腿跑完再下一条」串行调用单腿的 `goToStance`/`goToZero`/`stepForward`，而是：
+  - 先对 **12 个电机**统一 `setMotorSpeedLimit`（或等价流程），
+  - 再按 **关节维度**：同一关节的 **4 条腿**连续 `setMotorPositionRefOnly`，实现视觉上更同步。
+- 单腿 MCP / 调试仍使用 `LegControl::goToStance` 等，行为为 **本腿 3 关节**先全部限速再全部位置。
 
-| 工具名 | 说明 | 参数 |
-|--------|------|------|
-| `self.leg.init` | 单腿初始化（使能 3 电机） | `leg_id`，见下 |
-| `self.leg.stand` | 单腿站立/站起/回站立位 | 同上 |
-| `self.leg.lie_down` | 单腿卧倒/趴下/蹲下/回零位 | 同上 |
-| `self.leg.step_forward` | 单腿向前迈一步 | 同上 |
-| `self.leg.step_back` | 单腿向后迈一步 | 同上 |
+---
 
-**`leg_id` 与语音**：参数 `leg_id` 支持多种写法，便于语音/LLM 填参，解析时统一映射到四条腿：
+## Leg MCP 工具
 
-| 腿 | 英文 | 中文（可带「腿」） | 调换说法（左前/右后等） | 编号 |
-|----|------|-------------------|-------------------------|------|
-| 前左 | fl | 前左、前左腿 | 左前、左前腿 | 1、1号、1号腿 |
-| 前右 | fr | 前右、前右腿 | 右前、右前腿 | 2、2号、2号腿 |
-| 后左 | rl | 后左、后左腿 | 左后、左后腿 | 3、3号、3号腿 |
-| 后右 | rr | 后右、后右腿 | 右后、右后腿 | 4、4号、4号腿 |
+`RegisterLegMcpTools(McpServer&, LegControl* legs[4])`，板级传入 `dog_` 内四条腿指针。
 
-例如：「初始化前左腿」「左前腿站立」「右后腿蹲下」「2号腿向前迈一步」均可正确识别并执行。
+| 工具名 | 说明 |
+|--------|------|
+| `self.leg.init` | 单腿 3 电机初始化 |
+| `self.leg.stand` | 单腿回站立位 |
+| `self.leg.lie_down` | 单腿回零（卧倒） |
+| `self.leg.step_forward` / `self.leg.step_back` | 单腿迈一步 |
 
-板级在 `InitializeTools()` 中调用 `RegisterLegMcpTools(mcp_server, legs)`，并负责构造、配置 4 个（或 1 个调试用）`LegControl` 实例。
+参数 `leg_id`：支持 `fl`/`fr`/`rl`/`rr`、中文「前左」「左前」、以及 `1`–`4` 号腿等（见 `leg_control.cc` 中 `str_to_leg_index`）。
 
 ---
 
 ## 与上下层关系
 
-- **上层**：`dog` 调用 leg 的迈一步/站立/卧倒，并协调 4 条腿步序；板级或 MCP 可直接调单腿接口做调试。
-- **下层**：leg 通过 `DeepMotor::setMotorPosition`、`MotorProtocol::enableMotor` / `resetMotor` 与 motor 层交互。
-- **轨迹**：站立/卧倒过程若需平滑，可由 `../trajectory` 做点对点规划，leg 按点设置目标（后续扩展）。
+- **上层**：`../dog/dog_control` 持有 4×`LegControl`，编排站立/步态。
+- **下层**：通过 `DeepMotor::setMotorSpeedLimit`、`setMotorPositionRefOnly` 等下发；`init`/`disable` 仍直接使用 `MotorProtocol` 做初始化与 reset。
+- **轨迹**：若需平滑可在 `../trajectory` 扩展，由上层按点设置目标。
 
 ---
 
-## 开发计划
+## 开发状态（摘要）
 
-- [x] 实现 `LegControl` 类：属性与配置接口
-- [x] 实现站立位保存、零位（卧倒）、回站立位
-- [x] 实现基于正弦的迈一步（前进/后退），步数相位与限幅
-- [x] 单腿 MCP 工具注册 `RegisterLegMcpTools`
-- [ ] 与 motor 层联调：单腿 3 电机同步运动（依赖 3 电机硬件）
-- [ ] dog 层协调 4 腿步态时调用本模块
+- [x] `LegControl` 与单腿 MCP  
+- [x] 与 `DeepMotor` 限速 + 仅位置下发  
+- [x] 整机层关节同步站立/迈步（见 `dog_control.cc`）  
+
+更多电机编号与限位以 `../dog/README.md` 为准。

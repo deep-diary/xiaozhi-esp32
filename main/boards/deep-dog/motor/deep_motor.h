@@ -47,8 +47,22 @@ private:
     // 电机状态数组，索引对应registered_motor_ids_中的位置
     motor_status_t motor_statuses_[MAX_MOTOR_COUNT];
     
-    // 电机目标位置数组，索引对应registered_motor_ids_中的位置
+    // 电机目标位置（软件侧期望/用于 LED 等），索引与 registered_motor_ids_ 对齐
     float motor_target_angles_[MAX_MOTOR_COUNT];
+
+    /**
+     * 最近一次成功下发到驱动器的指令缓存（用于去重：与协议 PARAM_* 一致时再发则跳过）。
+     * position_known/speed_known/iq_known 为 false 表示尚未通过本类成功下发过对应量。
+     */
+    struct MotorCommandCache {
+        float position_rad;       // PARAM_LOC_REF
+        float speed_limit_rad_s;  // PARAM_LIMIT_SPD
+        float iq_ref;             // PARAM_IQ_REF（电流/力矩环目标，协议命名）
+        bool position_known;
+        bool speed_known;
+        bool iq_known;
+    };
+    MotorCommandCache motor_cmd_cache_[MAX_MOTOR_COUNT];
     
     // 当前活跃电机ID
     int8_t active_motor_id_;
@@ -70,6 +84,7 @@ private:
     
     // 查找电机ID在注册列表中的索引
     int8_t findMotorIndex(uint8_t motor_id) const;
+
     
     // 注册新电机ID
     bool registerMotorId(uint8_t motor_id);
@@ -122,12 +137,26 @@ public:
     bool setActiveMotorId(uint8_t motor_id);
     
     /**
-     * @brief 获取电机状态
+     * @brief 获取电机状态（含反馈：实际位置/速度/力矩等）
      * @param motor_id 电机ID
      * @param status 状态结构体指针
      * @return true 成功, false 失败（电机未注册）
      */
     bool getMotorStatus(uint8_t motor_id, motor_status_t* status) const;
+
+    /** 反馈：当前角度 (rad) */
+    bool getMotorActualPosition(uint8_t motor_id, float* rad) const;
+    /** 反馈：当前角速度 (rad/s) */
+    bool getMotorActualSpeed(uint8_t motor_id, float* rad_s) const;
+    /** 反馈：当前力矩 (N·m) */
+    bool getMotorActualTorque(uint8_t motor_id, float* torque_nm) const;
+
+    /**
+     * 最近一次成功下发的设定（与去重缓存一致）；若从未下发过对应项，*known 为 false。
+     */
+    bool getMotorLastSentPosition(uint8_t motor_id, float* rad, bool* known) const;
+    bool getMotorLastSentSpeedLimit(uint8_t motor_id, float* rad_s, bool* known) const;
+    bool getMotorLastSentIqRef(uint8_t motor_id, float* iq_ref, bool* known) const;
     
     /**
      * @brief 设置电机目标位置
@@ -153,6 +182,23 @@ public:
      * @return true 成功, false 失败
      */
     bool setMotorPosition(uint8_t motor_id, float position, float max_speed = 30.0f);
+
+    /** 仅下发速度限制（PARAM_LIMIT_SPD），用于批量动作前统一限速 */
+    bool setMotorSpeedLimit(uint8_t motor_id, float max_speed_rad_s);
+
+    /** 仅下发位置参考（PARAM_LOC_REF），不重复写速度；须保证限速已设或与 init 一致 */
+    bool setMotorPositionRefOnly(uint8_t motor_id, float position);
+
+    /**
+     * 仅下发电流/力矩环目标（PARAM_IQ_REF，与协议 setCurrent 一致）。
+     * 若与上次成功下发值一致则跳过 CAN。
+     */
+    bool setMotorIqRef(uint8_t motor_id, float iq_ref);
+
+    /**
+     * 若通过 MotorProtocol 直接 reset/改模式等，与本类缓存不一致时调用，强制后续指令重新下发。
+     */
+    void invalidateMotorCommandCache(uint8_t motor_id);
     
     /**
      * @brief 获取所有已注册电机ID

@@ -2,133 +2,110 @@
 
 ## 功能概述
 
-本模块提供了对深度电机(DeepMotor)的完整控制功能，包括：
-- 底层CAN通信协议
-- 电机状态管理
-- 多电机协调控制
-- LED状态反馈
-- MCP服务器接口
+本模块提供 **小米无刷关节电机** 的 CAN 协议封装与 **`DeepMotor` 多电机管理**：
+
+- **`MotorProtocol`**：静态方法组帧/发帧（位置、限速、电流、模式、使能等），解析反馈帧。
+- **`DeepMotor`**：电机注册、反馈状态缓存、**目标量与「上次成功下发」缓存**（可去重跳过相同 CAN）、录制/播放、LED 状态（可选）、与 MCP 工具对接（见 `deep_motor_control.cc`）。
+- **不直接**在业务层操作 `ESP32Can`，统一经 `MotorProtocol::sendCanFrame` → `ESP32Can.writeFrame`。
+
+---
 
 ## 文件说明
 
-### 核心文件
+| 文件 | 说明 |
+|------|------|
+| `protocol_motor.h` / `protocol_motor.cpp` | 29 位扩展帧 ID、参数索引（`PARAM_LOC_REF`、`PARAM_LIMIT_SPD`、`PARAM_IQ_REF` 等）、`initializeMotor`、`setPosition`/`setPositionOnly`、`setSpeed`、`setCurrent`、`controlMotor`、反馈解析 `parseMotorData` |
+| `deep_motor.h` / `deep_motor.cpp` | 多电机注册表、`motor_status_t[]` 反馈、`MotorCommandCache` 下发去重、`processCanFrame`、位置/限速/IQ 下发封装 |
+| `deep_motor_control.cc` / `deep_motor_control.h` | MCP 工具注册（`self.can.*`、`self.motor.*`），供语音/调试 |
+| `deep_motor_led_state.*` | 角度 LED 指示（需灯带） |
 
-- **protocol_motor.cpp/h**: 电机底层通信协议实现
-  - CAN帧格式定义
-  - 电机指令编码/解码
-  - 电机反馈数据解析
+---
 
-- **deep_motor.cpp/h**: 电机管理器
-  - 多电机注册与管理
-  - 电机状态查询
-  - 电机控制指令发送
-  - 集成LED状态显示
+## 数据与语义
 
-- **deep_motor_control.cc/h**: MCP控制接口
-  - 暴露MCP工具函数
-  - 提供用户友好的控制接口
-  - 支持位置/速度/力矩控制模式
+### 反馈（实际量，来自 CAN 反馈帧）
 
-- **deep_motor_led_state.cc/h**: 电机LED状态管理
-  - 根据电机状态自动更新LED颜色
-  - 支持多种状态显示（运动中、故障、空闲等）
+`motor_status_t`（见 `protocol_motor.h`）包含：`current_angle`（rad）、`current_speed`（rad/s）、`current_torque`（N·m）、温度、错误位、模式等。  
+`DeepMotor::processCanFrame` 解析后写入对应槽位。
 
-## 主要功能
+便捷读取：
 
-### 1. 电机注册
+- `getMotorStatus(motor_id, &status)`
+- `getMotorActualPosition` / `getMotorActualSpeed` / `getMotorActualTorque`
+
+### 软件目标位置
+
+- `motor_target_angles_[i]`：期望目标角（rad），用于 LED 等；`setMotorTargetAngle` / 各 `setMotor*` 会更新。
+
+### 上次成功下发的指令（用于去重）
+
+`MotorCommandCache`（每注册电机一份）记录最近一次 **成功发到总线** 的：
+
+- 位置参考 `PARAM_LOC_REF`
+- 限速 `PARAM_LIMIT_SPD`
+- 电流指令 `PARAM_IQ_REF`（与 `setCurrent` 一致，力矩/电流环目标）
+
+对应查询：`getMotorLastSentPosition` / `getMotorLastSentSpeedLimit` / `getMotorLastSentIqRef`（`*known == false` 表示尚未通过本类成功下发过该项）。
+
+若新指令与缓存值在容差内相等，则 **跳过该路 CAN**（仍返回 `true`）。  
+在 **`MotorProtocol` 侧直接 `resetMotor` 等** 后，须调用 `invalidateMotorCommandCache(motor_id)`，否则缓存可能与驱动器不一致（`LegControl::disable`、录制开始处已示例性调用）。
+
+---
+
+## DeepMotor 主要接口（摘要）
+
 ```cpp
-// 注册单个电机
+// 注册（未收到反馈前也可先发控制）
 deep_motor->registerMotor(motor_id);
 
-// 批量注册
-uint8_t motor_ids[] = {1, 2, 3, 4, 5, 6};
-for (int i = 0; i < 6; i++) {
-    deep_motor->registerMotor(motor_ids[i]);
-}
+// 位置 + 限速（内部分解为 setSpeed / setPositionOnly，各自可因去重跳过）
+deep_motor->setMotorPosition(motor_id, position_rad, max_speed_rad_s);
+
+// 仅限速 / 仅位置（整机站立等批量场景常用）
+deep_motor->setMotorSpeedLimit(motor_id, max_speed_rad_s);
+deep_motor->setMotorPositionRefOnly(motor_id, position_rad);
+
+// 电流环目标（PARAM_IQ_REF）
+deep_motor->setMotorIqRef(motor_id, iq_ref);
+
+// 外部协议直接改驱动状态后
+deep_motor->invalidateMotorCommandCache(motor_id);
 ```
 
-### 2. 电机控制
-```cpp
-// 使能/失能电机
-deep_motor->enable(motor_id);
-deep_motor->disable(motor_id);
+底层仍可直接调 `MotorProtocol::initializeMotor`、`resetMotor` 等（如 `LegControl::init`）；建议与 `invalidateMotorCommandCache` 策略保持一致。
 
-// 位置控制
-deep_motor->setTargetPosition(motor_id, angle, speed);
+---
 
-// 速度控制
-deep_motor->setTargetSpeed(motor_id, speed);
-```
+## 常量与容量
 
-### 3. 状态查询
-```cpp
-// 获取电机当前角度
-float angle = deep_motor->getCurrentAngle(motor_id);
+- `MAX_MOTOR_COUNT`：当前为 **13** 槽位（机器狗 12 电机 + 1 余量）；整机 ID 见 `../dog/README.md`（11–13, 21–23, 51–53, 61–63）。
+- `MOTOR_CAN_TIMEOUT_MS`：见 `protocol_motor.h`，`sendCanFrame` 调用 `ESP32Can.writeFrame(..., timeout)`。
+- 批量发送时，`sendCanFrame` 的详细 hex 使用 **`ESP_LOGD`**，避免默认日志级别下 UART 拖慢。
 
-// 获取电机状态
-MotorState state = deep_motor->getMotorState(motor_id);
+---
 
-// 检查是否在线
-bool online = deep_motor->isMotorOnline(motor_id);
-```
+## MCP 工具（`deep_motor_control.cc`）
 
-### 4. MCP工具使用
-通过MCP服务器可以使用以下工具：
-- `motor_enable`: 使能电机
-- `motor_disable`: 失能电机
-- `motor_set_position`: 设置目标位置
-- `motor_set_speed`: 设置目标速度
-- `motor_get_status`: 获取电机状态
+板级 `esp_sparkbot_board.cc` 的 `InitializeTools()` 中，**电机级 MCP 默认注释掉**（避免 MCP 工具数量过多），需要单电机调试时可取消 `RegisterMotorMcpTools(mcp_server, deep_motor_)` 的注释。
 
-## 使用示例
+当前文件中注册的工具包括但不限于（以代码为准）：
 
-### 基本控制流程
-```cpp
-// 1. 创建电机管理器
-DeepMotor* deep_motor = new DeepMotor(led_strip);
+| 前缀 | 示例工具名 |
+|------|------------|
+| `self.can.*` | `send_motor_position`、`enable_motor`、`reset_motor` |
+| `self.motor.*` | `get_status`、`set_position_mode`、`set_zero_position`、`initialize`、`start_status_task`、`stop_status_task`、录制/播放、正弦、角度 LED、版本号等 |
 
-// 2. 注册电机
-deep_motor->registerMotor(1);
+---
 
-// 3. 使能电机
-deep_motor->enable(1);
+## 依赖与在 deep-dog 中的角色
 
-// 4. 发送控制指令
-deep_motor->setTargetPosition(1, 90.0f, 10.0f);  // 移动到90度，速度10度/秒
+- **CAN**：`../can/ESP32-TWAI-CAN`，全局 `ESP32Can`。
+- **上层**：`../leg`、`../dog` 通过 `DeepMotor` 与 `MotorProtocol` 控制 12 个电机；**不**直接调用 `ESP32Can`。
 
-// 5. 查询状态
-float current_angle = deep_motor->getCurrentAngle(1);
-```
-
-### 创建MCP控制接口
-```cpp
-auto& mcp_server = McpServer::GetInstance();
-DeepMotorControl* motor_control = new DeepMotorControl(deep_motor, mcp_server);
-```
-
-## 依赖关系
-
-- **CAN模块**: 用于电机通信
-- **LED模块**: 用于状态显示（可选）
-- **MCP服务器**: 用于对外提供控制接口
-
-## 注意事项
-
-1. 使用前确保CAN总线已正确初始化
-2. 电机ID范围：1-255
-3. 电机状态更新依赖于CAN接收任务
-4. LED状态显示需要先初始化WS2812灯带
-5. 使能电机前请确保机械结构安全
-
-## 在 deep-dog 板中的角色
-
-- **12 个电机**：4 条腿 × 3 关节，电机 ID 分配见 `../dog/README.md`。本模块负责注册全部 12 个电机、使能/失能、位置与速度控制，并通过 `../can/` 发送 CAN 帧。
-- **上层**：`leg` 单腿控制、`dog` 整机控制只调用本模块接口，不直接碰 CAN。MCP 调试阶段可用现有 motor MCP 工具做单电机验证。
+---
 
 ## 相关文档
 
-详细的使用说明和示例请参考：
-- `../doc/motor_led_usage.md` - 电机LED使用说明（若存在）
-- `../doc/motor_zero_test_guide.md` - 电机零位测试指南（若存在）
-- `../doc/protocol_motor_example.md` - 协议使用示例（若存在）
-
+- `../dog/README.md` — 电机 ID 与腿/关节对应、整机 MCP。
+- `../leg/README.md` — 单腿控制与 `LegControl`。
+- `../can/README.md` — TWAI 初始化与硬件说明。

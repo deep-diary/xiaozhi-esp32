@@ -1,7 +1,17 @@
 #include "deep_motor.h"
 #include <esp_log.h>
+#include <math.h>
 
 static const char* TAG = "DeepMotor";
+
+/** 去重容差：与 float 量化及总线噪声匹配 */
+static constexpr float kMotorEpsPosRad = 1e-5f;
+static constexpr float kMotorEpsSpd = 1e-4f;
+static constexpr float kMotorEpsIq = 1e-4f;
+
+static inline bool motorNearlyEqual(float a, float b, float eps) {
+    return fabsf(a - b) <= eps;
+}
 
 DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registered_count_(0),
                          teaching_mode_(false), teaching_data_ready_(false),
@@ -12,7 +22,13 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
-        motor_target_angles_[i] = 0.0f;  // 初始化目标位置为0
+        motor_target_angles_[i] = 0.0f;
+        motor_cmd_cache_[i].position_rad = 0.0f;
+        motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
+        motor_cmd_cache_[i].iq_ref = 0.0f;
+        motor_cmd_cache_[i].position_known = false;
+        motor_cmd_cache_[i].speed_known = false;
+        motor_cmd_cache_[i].iq_known = false;
     }
     
     // 初始化录制数据数组
@@ -200,11 +216,18 @@ bool DeepMotor::registerMotorId(uint8_t motor_id) {
             // 初始化电机状态
             memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
             motor_statuses_[i].motor_id = motor_id;
-            
+            motor_cmd_cache_[i].position_known = false;
+            motor_cmd_cache_[i].speed_known = false;
+            motor_cmd_cache_[i].iq_known = false;
+            motor_cmd_cache_[i].position_rad = 0.0f;
+            motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
+            motor_cmd_cache_[i].iq_ref = 0.0f;
+            motor_target_angles_[i] = 0.0f;
+
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -235,6 +258,81 @@ bool DeepMotor::getMotorStatus(uint8_t motor_id, motor_status_t* status) const {
     }
     
     *status = motor_statuses_[motor_index];
+    return true;
+}
+
+bool DeepMotor::getMotorActualPosition(uint8_t motor_id, float* rad) const {
+    if (rad == nullptr) {
+        return false;
+    }
+    int8_t motor_index = findMotorIndex(motor_id);
+    if (motor_index == -1) {
+        return false;
+    }
+    *rad = motor_statuses_[motor_index].current_angle;
+    return true;
+}
+
+bool DeepMotor::getMotorActualSpeed(uint8_t motor_id, float* rad_s) const {
+    if (rad_s == nullptr) {
+        return false;
+    }
+    int8_t motor_index = findMotorIndex(motor_id);
+    if (motor_index == -1) {
+        return false;
+    }
+    *rad_s = motor_statuses_[motor_index].current_speed;
+    return true;
+}
+
+bool DeepMotor::getMotorActualTorque(uint8_t motor_id, float* torque_nm) const {
+    if (torque_nm == nullptr) {
+        return false;
+    }
+    int8_t motor_index = findMotorIndex(motor_id);
+    if (motor_index == -1) {
+        return false;
+    }
+    *torque_nm = motor_statuses_[motor_index].current_torque;
+    return true;
+}
+
+bool DeepMotor::getMotorLastSentPosition(uint8_t motor_id, float* rad, bool* known) const {
+    if (rad == nullptr || known == nullptr) {
+        return false;
+    }
+    int8_t motor_index = findMotorIndex(motor_id);
+    if (motor_index == -1) {
+        return false;
+    }
+    *known = motor_cmd_cache_[motor_index].position_known;
+    *rad = motor_cmd_cache_[motor_index].position_rad;
+    return true;
+}
+
+bool DeepMotor::getMotorLastSentSpeedLimit(uint8_t motor_id, float* rad_s, bool* known) const {
+    if (rad_s == nullptr || known == nullptr) {
+        return false;
+    }
+    int8_t motor_index = findMotorIndex(motor_id);
+    if (motor_index == -1) {
+        return false;
+    }
+    *known = motor_cmd_cache_[motor_index].speed_known;
+    *rad_s = motor_cmd_cache_[motor_index].speed_limit_rad_s;
+    return true;
+}
+
+bool DeepMotor::getMotorLastSentIqRef(uint8_t motor_id, float* iq_ref, bool* known) const {
+    if (iq_ref == nullptr || known == nullptr) {
+        return false;
+    }
+    int8_t motor_index = findMotorIndex(motor_id);
+    if (motor_index == -1) {
+        return false;
+    }
+    *known = motor_cmd_cache_[motor_index].iq_known;
+    *iq_ref = motor_cmd_cache_[motor_index].iq_ref;
     return true;
 }
 
@@ -274,11 +372,28 @@ void DeepMotor::clearAllMotors() {
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
+        motor_cmd_cache_[i].position_known = false;
+        motor_cmd_cache_[i].speed_known = false;
+        motor_cmd_cache_[i].iq_known = false;
+        motor_cmd_cache_[i].position_rad = 0.0f;
+        motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
+        motor_cmd_cache_[i].iq_ref = 0.0f;
+        motor_target_angles_[i] = 0.0f;
     }
     registered_count_ = 0;
     active_motor_id_ = -1;
-    
+
     ESP_LOGI(TAG, "清除所有电机注册信息");
+}
+
+void DeepMotor::invalidateMotorCommandCache(uint8_t motor_id) {
+    int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return;
+    }
+    motor_cmd_cache_[idx].position_known = false;
+    motor_cmd_cache_[idx].speed_known = false;
+    motor_cmd_cache_[idx].iq_known = false;
 }
 
 void DeepMotor::printAllMotorStatus() const {
@@ -352,8 +467,7 @@ void DeepMotor::playTask(void* parameter) {
         float position = motor_manager->teaching_positions_[i];
         
         // 发送位置指令
-        // MotorProtocol::setPosition(static_cast<uint8_t>(motor_id), position, 30.0f);
-        MotorProtocol::setPositionOnly(static_cast<uint8_t>(motor_id), position);
+        (void)motor_manager->setMotorPositionRefOnly(static_cast<uint8_t>(motor_id), position);
         
         ESP_LOGD(TAG, "播放录制点 %d/%d: 位置=%.3f rad", 
                  i + 1, motor_manager->teaching_point_count_, position);
@@ -384,7 +498,8 @@ bool DeepMotor::startTeaching(uint8_t motor_id) {
         ESP_LOGE(TAG, "停止电机失败");
         return false;
     }
-    
+    invalidateMotorCommandCache(motor_id);
+
     // 2. 设置录制标志位
     teaching_mode_ = true;
     teaching_data_ready_ = false;
@@ -685,7 +800,7 @@ bool DeepMotor::setMotorTargetAngle(uint8_t motor_id, float target_angle) {
     }
     
     motor_target_angles_[motor_index] = target_angle;
-    ESP_LOGI(TAG, "设置电机ID %d 目标位置: %.3f rad (%.1f°)", 
+    ESP_LOGD(TAG, "设置电机ID %d 目标位置: %.3f rad (%.1f°)",
              motor_id, target_angle, target_angle * 180.0f / 3.14159f);
     return true;
 }
@@ -703,25 +818,120 @@ bool DeepMotor::getMotorTargetAngle(uint8_t motor_id, float* target_angle) const
     }
     
     *target_angle = motor_target_angles_[motor_index];
-    ESP_LOGI(TAG, "电机ID %d 目标位置: %.3f rad (%.1f°)", 
+    ESP_LOGD(TAG, "电机ID %d 目标位置: %.3f rad (%.1f°)",
              motor_id, *target_angle, *target_angle * 180.0f / 3.14159f);
     return true;
 }
 
 bool DeepMotor::setMotorPosition(uint8_t motor_id, float position, float max_speed) {
-    // 先更新目标位置
     if (!setMotorTargetAngle(motor_id, position)) {
         ESP_LOGW(TAG, "设置电机ID %d 目标位置失败", motor_id);
         return false;
     }
-    
-    // 调用协议层方法设置电机位置
-    if (!MotorProtocol::setPosition(motor_id, position, max_speed)) {
+
+    int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return false;
+    }
+
+    const bool need_speed =
+        !motor_cmd_cache_[idx].speed_known ||
+        !motorNearlyEqual(motor_cmd_cache_[idx].speed_limit_rad_s, max_speed, kMotorEpsSpd);
+    const bool need_pos =
+        !motor_cmd_cache_[idx].position_known ||
+        !motorNearlyEqual(motor_cmd_cache_[idx].position_rad, position, kMotorEpsPosRad);
+
+    if (!need_speed && !need_pos) {
+        ESP_LOGD(TAG, "电机 %d setMotorPosition: 限速与位置均与缓存一致，跳过 CAN", motor_id);
+        return true;
+    }
+
+    if (need_speed && !MotorProtocol::setSpeed(motor_id, max_speed)) {
+        ESP_LOGW(TAG, "发送电机ID %d 限速失败", motor_id);
+        return false;
+    }
+    if (need_speed) {
+        motor_cmd_cache_[idx].speed_limit_rad_s = max_speed;
+        motor_cmd_cache_[idx].speed_known = true;
+    }
+
+    if (need_pos && !MotorProtocol::setPositionOnly(motor_id, position)) {
         ESP_LOGW(TAG, "发送电机ID %d 位置指令失败", motor_id);
         return false;
     }
-    
-    ESP_LOGI(TAG, "设置电机ID %d 位置: %.3f rad (%.1f°), 最大速度: %.1f rad/s", 
-             motor_id, position, position * 180.0f / 3.14159f, max_speed);
+    if (need_pos) {
+        motor_cmd_cache_[idx].position_rad = position;
+        motor_cmd_cache_[idx].position_known = true;
+    }
+
+    ESP_LOGD(TAG, "设置电机ID %d 位置: %.3f rad, 最大速度: %.1f rad/s (spd=%s pos=%s)",
+             motor_id, position, max_speed, need_speed ? "发" : "跳", need_pos ? "发" : "跳");
+    return true;
+}
+
+bool DeepMotor::setMotorSpeedLimit(uint8_t motor_id, float max_speed_rad_s) {
+    int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        ESP_LOGW(TAG, "setMotorSpeedLimit: 电机 %d 未注册", motor_id);
+        return false;
+    }
+
+    if (motor_cmd_cache_[idx].speed_known &&
+        motorNearlyEqual(motor_cmd_cache_[idx].speed_limit_rad_s, max_speed_rad_s, kMotorEpsSpd)) {
+        ESP_LOGD(TAG, "电机 %d setMotorSpeedLimit: %.4f rad/s 与缓存一致，跳过 CAN", motor_id, max_speed_rad_s);
+        return true;
+    }
+
+    if (!MotorProtocol::setSpeed(motor_id, max_speed_rad_s)) {
+        return false;
+    }
+    motor_cmd_cache_[idx].speed_limit_rad_s = max_speed_rad_s;
+    motor_cmd_cache_[idx].speed_known = true;
+    return true;
+}
+
+bool DeepMotor::setMotorPositionRefOnly(uint8_t motor_id, float position) {
+    if (!setMotorTargetAngle(motor_id, position)) {
+        return false;
+    }
+
+    int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return false;
+    }
+
+    if (motor_cmd_cache_[idx].position_known &&
+        motorNearlyEqual(motor_cmd_cache_[idx].position_rad, position, kMotorEpsPosRad)) {
+        ESP_LOGD(TAG, "电机 %d setMotorPositionRefOnly: 位置与缓存一致，跳过 CAN", motor_id);
+        return true;
+    }
+
+    if (!MotorProtocol::setPositionOnly(motor_id, position)) {
+        ESP_LOGW(TAG, "发送电机ID %d 仅位置指令失败", motor_id);
+        return false;
+    }
+    motor_cmd_cache_[idx].position_rad = position;
+    motor_cmd_cache_[idx].position_known = true;
+    return true;
+}
+
+bool DeepMotor::setMotorIqRef(uint8_t motor_id, float iq_ref) {
+    int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        ESP_LOGW(TAG, "setMotorIqRef: 电机 %d 未注册", motor_id);
+        return false;
+    }
+
+    if (motor_cmd_cache_[idx].iq_known && motorNearlyEqual(motor_cmd_cache_[idx].iq_ref, iq_ref, kMotorEpsIq)) {
+        ESP_LOGD(TAG, "电机 %d setMotorIqRef: 与缓存一致，跳过 CAN", motor_id);
+        return true;
+    }
+
+    if (!MotorProtocol::setCurrent(motor_id, iq_ref)) {
+        ESP_LOGW(TAG, "发送电机ID %d IQ 指令失败", motor_id);
+        return false;
+    }
+    motor_cmd_cache_[idx].iq_ref = iq_ref;
+    motor_cmd_cache_[idx].iq_known = true;
     return true;
 }

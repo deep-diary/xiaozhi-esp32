@@ -49,10 +49,31 @@ bool DogControl::init() {
 
 bool DogControl::stand(float max_speed_rad_s) {
     if (!deep_motor_) return false;
-    for (int i = 0; i < 4; i++) {
-        if (!legs_[i].goToStance(max_speed_rad_s)) {
-            ESP_LOGE(TAG, "leg %d goToStance failed", i);
-            return false;
+    // 1) 12 电机统一限速（每电机 1 帧，避免原先 setPosition 每关节 2 帧）
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
+                ESP_LOGE(TAG, "stand setMotorSpeedLimit leg=%d joint=%d id=%u", leg, j, (unsigned)id);
+                return false;
+            }
+        }
+    }
+    // 2) 按关节同步：同一关节 4 条腿连续下发位置参考，再下一关节（视觉上同时抬/落）
+    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+        for (int leg = 0; leg < 4; leg++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            float pos = legs_[leg].getStanceTargetJoint(j);
+            if (!deep_motor_->setMotorPositionRefOnly(id, pos)) {
+                ESP_LOGE(TAG, "stand setMotorPositionRefOnly leg=%d joint=%d id=%u", leg, j, (unsigned)id);
+                return false;
+            }
         }
     }
     return true;
@@ -60,10 +81,28 @@ bool DogControl::stand(float max_speed_rad_s) {
 
 bool DogControl::lieDown(float max_speed_rad_s) {
     if (!deep_motor_) return false;
-    for (int i = 0; i < 4; i++) {
-        if (!legs_[i].goToZero(max_speed_rad_s)) {
-            ESP_LOGE(TAG, "leg %d goToZero failed", i);
-            return false;
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
+                ESP_LOGE(TAG, "lieDown setMotorSpeedLimit leg=%d joint=%d id=%u", leg, j, (unsigned)id);
+                return false;
+            }
+        }
+    }
+    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+        for (int leg = 0; leg < 4; leg++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorPositionRefOnly(id, 0.0f)) {
+                ESP_LOGE(TAG, "lieDown setMotorPositionRefOnly leg=%d joint=%d id=%u", leg, j, (unsigned)id);
+                return false;
+            }
         }
     }
     return true;
@@ -72,9 +111,34 @@ bool DogControl::lieDown(float max_speed_rad_s) {
 bool DogControl::goForward(float max_speed_rad_s) {
     if (!deep_motor_) return false;
     for (int i = 0; i < 4; i++) {
-        if (!legs_[i].stepForward(max_speed_rad_s)) {
-            ESP_LOGE(TAG, "leg %d stepForward failed", i);
-            return false;
+        legs_[i].advanceStepForward();
+    }
+    float pos[4][LEG_JOINT_COUNT];
+    for (int i = 0; i < 4; i++) {
+        legs_[i].fillCurrentStepPositions(pos[i], true);
+    }
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
+                ESP_LOGE(TAG, "goForward setMotorSpeedLimit leg=%d joint=%d", leg, j);
+                return false;
+            }
+        }
+    }
+    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+        for (int leg = 0; leg < 4; leg++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorPositionRefOnly(id, pos[leg][j])) {
+                ESP_LOGE(TAG, "goForward setMotorPositionRefOnly leg=%d joint=%d", leg, j);
+                return false;
+            }
         }
     }
     return true;
@@ -83,9 +147,34 @@ bool DogControl::goForward(float max_speed_rad_s) {
 bool DogControl::goBack(float max_speed_rad_s) {
     if (!deep_motor_) return false;
     for (int i = 0; i < 4; i++) {
-        if (!legs_[i].stepBackward(max_speed_rad_s)) {
-            ESP_LOGE(TAG, "leg %d stepBackward failed", i);
-            return false;
+        legs_[i].advanceStepBackward();
+    }
+    float pos[4][LEG_JOINT_COUNT];
+    for (int i = 0; i < 4; i++) {
+        legs_[i].fillCurrentStepPositions(pos[i], false);
+    }
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
+                ESP_LOGE(TAG, "goBack setMotorSpeedLimit leg=%d joint=%d", leg, j);
+                return false;
+            }
+        }
+    }
+    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+        for (int leg = 0; leg < 4; leg++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorPositionRefOnly(id, pos[leg][j])) {
+                ESP_LOGE(TAG, "goBack setMotorPositionRefOnly leg=%d joint=%d", leg, j);
+                return false;
+            }
         }
     }
     return true;

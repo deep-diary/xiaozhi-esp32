@@ -85,6 +85,19 @@ public:
     /** 将角度夹在控制上下限内 */
     float clampJoint(int joint_index, float value) const;
 
+    /** 关节索引 0..LEG_JOINT_COUNT-1，对应电机 ID（0 表示未配置） */
+    uint8_t getMotorId(int joint_index) const;
+
+    /** 站立位目标（已按限幅），关节索引 0..2 */
+    float getStanceTargetJoint(int joint_index) const;
+
+    /** 在当前 current_step_ 下填充 3 关节目标（不修改步数） */
+    void fillCurrentStepPositions(float out[LEG_JOINT_COUNT], bool forward) const;
+
+    /** 步进相位 +1 / -1（供整机同步迈步前统一调用） */
+    void advanceStepForward();
+    void advanceStepBackward();
+
 private:
     DeepMotor* deep_motor_ = nullptr;
     LegType leg_type_ = LegType::FL;
