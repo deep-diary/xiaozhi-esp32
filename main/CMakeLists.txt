@@ -709,19 +709,29 @@ elseif(CONFIG_BOARD_TYPE_HU_087)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
 endif()
 
+# 收集板目录下全部源文件：根目录一层 + 任意深度子目录。
+# 仅 `boards/foo/*.cc` 不含子目录；仅 `**/*.cc` 在部分 CMake 上又不含 foo 根目录下的板级 .cc，
+# 故二者合并后再 list(REMOVE_DUPLICATES)。
 if(MANUFACTURER)
-    file(GLOB_RECURSE BOARD_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${MANUFACTURER}/${BOARD_TYPE}/*.cc
-        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${MANUFACTURER}/${BOARD_TYPE}/*.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${MANUFACTURER}/${BOARD_TYPE}/*.c
-    )
+    set(_BOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boards/${MANUFACTURER}/${BOARD_TYPE}")
 else()
-    file(GLOB_RECURSE BOARD_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
-        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
-    )
+    set(_BOARD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}")
 endif()
+file(GLOB _BOARD_TOP
+    "${_BOARD_DIR}/*.cc"
+    "${_BOARD_DIR}/*.cpp"
+    "${_BOARD_DIR}/*.c"
+)
+file(GLOB_RECURSE _BOARD_SUB
+    "${_BOARD_DIR}/**/*.cc"
+    "${_BOARD_DIR}/**/*.cpp"
+    "${_BOARD_DIR}/**/*.c"
+)
+set(BOARD_SOURCES ${_BOARD_TOP} ${_BOARD_SUB})
+list(REMOVE_DUPLICATES BOARD_SOURCES)
+unset(_BOARD_DIR)
+unset(_BOARD_TOP)
+unset(_BOARD_SUB)
 
 # 排除板级 ref 示例代码（例如 deep-thumble/ref/factory_demo_v1），
 # 这些代码可能依赖未引入的外部组件（如 esp_lv_decoder.h）

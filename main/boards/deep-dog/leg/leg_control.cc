@@ -13,17 +13,30 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
-// 各腿默认电机 ID、站立位、控制上下限（与 dog/README 一致）
+// 各腿默认：电机 ID、站立位、行走限位、机械限位（与 dog/README 表一致）
+// 行走 = 正常步态规划用 clamp；机械 = 下发前最后一道安全边界
 static const struct {
     uint8_t motor_ids[LEG_JOINT_COUNT];
     float stance[LEG_JOINT_COUNT];
     float limit_low[LEG_JOINT_COUNT];
     float limit_high[LEG_JOINT_COUNT];
+    float mech_low[LEG_JOINT_COUNT];
+    float mech_high[LEG_JOINT_COUNT];
 } LEG_DEFAULTS[] = {
-    { {11, 12, 13}, {0.0f, 0.2f, -1.16f}, {-0.2f, -0.3f, -1.86f}, {0.2f, 0.7f, -0.46f} },  // FL
-    { {21, 22, 23}, {0.0f, -0.2f, 1.16f}, {-0.2f, -0.7f, 0.46f}, {0.2f, 0.3f, 1.86f} },   // FR
-    { {51, 52, 53}, {0.0f, 0.2f, -1.16f}, {-0.2f, -0.3f, -1.86f}, {0.2f, 0.7f, -0.46f} },  // RL
-    { {61, 62, 63}, {0.0f, -0.2f, 1.16f}, {-0.2f, -0.7f, 0.46f}, {0.2f, 0.3f, 1.86f} },   // RR
+    // FL / RL：左前、后左
+    { {11, 12, 13}, {0.0f, 0.2f, -1.16f},
+      {-0.02f, -0.05f, -1.51f}, {0.02f, 0.45f, -0.81f},
+      {-0.3f, -0.6f, -2.26f}, {0.3f, 1.4f, 0.0f} },
+    // FR / RR：右前、后右（髋前后与膝符号与左侧对称）
+    { {21, 22, 23}, {0.0f, -0.2f, 1.16f},
+      {-0.02f, -0.45f, 0.81f}, {0.02f, 0.05f, 1.51f},
+      {-0.3f, -1.4f, 0.0f}, {0.3f, 0.6f, 2.26f} },
+    { {51, 52, 53}, {0.0f, 0.2f, -1.16f},
+      {-0.02f, -0.05f, -1.51f}, {0.02f, 0.45f, -0.81f},
+      {-0.3f, -0.6f, -2.26f}, {0.3f, 1.4f, 0.0f} },
+    { {61, 62, 63}, {0.0f, -0.2f, 1.16f},
+      {-0.02f, -0.45f, 0.81f}, {0.02f, 0.05f, 1.51f},
+      {-0.3f, -1.4f, 0.0f}, {0.3f, 0.6f, 2.26f} },
 };
 
 LegControl::LegControl() {
@@ -39,6 +52,8 @@ void LegControl::setLegType(LegType type) {
         memcpy(stance_position_, LEG_DEFAULTS[idx].stance, sizeof(stance_position_));
         memcpy(limit_low_, LEG_DEFAULTS[idx].limit_low, sizeof(limit_low_));
         memcpy(limit_high_, LEG_DEFAULTS[idx].limit_high, sizeof(limit_high_));
+        memcpy(mech_limit_low_, LEG_DEFAULTS[idx].mech_low, sizeof(mech_limit_low_));
+        memcpy(mech_limit_high_, LEG_DEFAULTS[idx].mech_high, sizeof(mech_limit_high_));
     }
     ESP_LOGI(TAG, "setLegType %d, motors %d %d %d", (int)type, motor_ids_[0], motor_ids_[1], motor_ids_[2]);
 }
@@ -65,9 +80,34 @@ float LegControl::clampJoint(int joint_index, float value) const {
     return value;
 }
 
-void LegControl::computeStepPosition(float out_position[LEG_JOINT_COUNT], bool forward) const {
-    float phase = 2.0f * (float)M_PI * (float)current_step_ / (float)total_steps_;
+float LegControl::clampJointMechanical(int joint_index, float value) const {
+    if (joint_index < 0 || joint_index >= LEG_JOINT_COUNT) return value;
+    if (value < mech_limit_low_[joint_index]) return mech_limit_low_[joint_index];
+    if (value > mech_limit_high_[joint_index]) return mech_limit_high_[joint_index];
+    return value;
+}
+
+void LegControl::clampJointPositionsMechanical(float pos[LEG_JOINT_COUNT]) const {
+    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+        float v = pos[j];
+        float c = clampJointMechanical(j, v);
+        if (c != v) {
+            ESP_LOGW(TAG, "机械限位裁剪 腿类型=%d 关节%d: %.4f -> %.4f rad", (int)leg_type_, j, v, c);
+        }
+        pos[j] = c;
+    }
+}
+
+void LegControl::computeStepPositionAt(uint16_t step_index, float out_position[LEG_JOINT_COUNT], bool forward) const {
+    if (total_steps_ == 0) {
+        memcpy(out_position, stance_position_, sizeof(float) * LEG_JOINT_COUNT);
+        return;
+    }
+    float phase = 2.0f * (float)M_PI * (float)step_index / (float)total_steps_;
     float s = sinf(phase);
+    if (!forward) {
+        s = -s;
+    }
     bool right_leg = (leg_type_ == LegType::FR || leg_type_ == LegType::RR);
     float hip_fe_sign = right_leg ? -1.0f : 1.0f;
     float knee_sign = right_leg ? -1.0f : 1.0f;
@@ -75,6 +115,14 @@ void LegControl::computeStepPosition(float out_position[LEG_JOINT_COUNT], bool f
     out_position[LEG_JOINT_HIP_AA] = clampJoint(LEG_JOINT_HIP_AA, stance_position_[LEG_JOINT_HIP_AA] + hip_aa_amp_ * s);
     out_position[LEG_JOINT_HIP_FE] = clampJoint(LEG_JOINT_HIP_FE, stance_position_[LEG_JOINT_HIP_FE] + hip_fe_sign * hip_fe_amp_ * s);
     out_position[LEG_JOINT_KNEE]   = clampJoint(LEG_JOINT_KNEE,   stance_position_[LEG_JOINT_KNEE]   + knee_sign * knee_amp_ * s);
+}
+
+void LegControl::computeStepPosition(float out_position[LEG_JOINT_COUNT], bool forward) const {
+    computeStepPositionAt(current_step_, out_position, forward);
+}
+
+void LegControl::fillStepPositionsAtStepIndex(uint16_t step_index, float out[LEG_JOINT_COUNT], bool forward) const {
+    computeStepPositionAt(step_index, out, forward);
 }
 
 bool LegControl::init() {
@@ -144,6 +192,8 @@ void LegControl::advanceStepBackward() {
 
 bool LegControl::goToZero(float max_speed_rad_s) {
     if (!deep_motor_) return false;
+    float pos[LEG_JOINT_COUNT] = {0.0f, 0.0f, 0.0f};
+    clampJointPositionsMechanical(pos);
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
         if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
             ESP_LOGE(TAG, "goToZero setMotorSpeedLimit fail id=%d", motor_ids_[i]);
@@ -151,7 +201,7 @@ bool LegControl::goToZero(float max_speed_rad_s) {
         }
     }
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], 0.0f)) {
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
             ESP_LOGE(TAG, "goToZero setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
             return false;
         }
@@ -161,6 +211,11 @@ bool LegControl::goToZero(float max_speed_rad_s) {
 
 bool LegControl::goToStance(float max_speed_rad_s) {
     if (!deep_motor_) return false;
+    float pos[LEG_JOINT_COUNT];
+    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
+        pos[i] = clampJoint(i, stance_position_[i]);
+    }
+    clampJointPositionsMechanical(pos);
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
         if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
             ESP_LOGE(TAG, "goToStance setMotorSpeedLimit fail id=%d", motor_ids_[i]);
@@ -168,8 +223,7 @@ bool LegControl::goToStance(float max_speed_rad_s) {
         }
     }
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        float pos = clampJoint(i, stance_position_[i]);
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos)) {
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
             ESP_LOGE(TAG, "goToStance setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
             return false;
         }
@@ -182,6 +236,7 @@ bool LegControl::stepForward(float max_speed_rad_s) {
     advanceStepForward();
     float pos[LEG_JOINT_COUNT];
     fillCurrentStepPositions(pos, true);
+    clampJointPositionsMechanical(pos);
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
         if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
             ESP_LOGE(TAG, "stepForward setMotorSpeedLimit fail id=%d", motor_ids_[i]);
@@ -202,6 +257,7 @@ bool LegControl::stepBackward(float max_speed_rad_s) {
     advanceStepBackward();
     float pos[LEG_JOINT_COUNT];
     fillCurrentStepPositions(pos, false);
+    clampJointPositionsMechanical(pos);
     for (int i = 0; i < LEG_JOINT_COUNT; i++) {
         if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
             ESP_LOGE(TAG, "stepBackward setMotorSpeedLimit fail id=%d", motor_ids_[i]);

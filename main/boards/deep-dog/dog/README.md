@@ -8,8 +8,45 @@
 
 ## 目录与文件
 
-- `dog_control.h`：整机接口、状态枚举（可选）
-- `dog_control.cc`：实现，内部创建并协调 4 个 `LegControl`
+- `dog_control.h` / `dog_control.cc`：整机接口，持有 4×`LegControl`、**`GaitPlanner`** 与 **`DogStateMachine`**
+- `dog_state_machine.h`：整机姿态/任务状态枚举与轻量状态机（无 CAN）
+- `gait_planner.h` / `gait_planner.cc`：**步态规划**（全局周期索引 + 各腿相位偏移），无 URDF
+
+---
+
+## 姿态状态机（`DogPoseState` / `DogStateMachine`）
+
+| 状态 | 含义 |
+|------|------|
+| `Uninitialized` | 未执行整机 `init`，或已 `disable` |
+| `UnknownPose` | 行走下发失败等导致**姿态不确定**（与 init 默认态无关） |
+| `Lying` | 已卧倒（趴下），**待机**。整机若在趴姿下完成 init（写零位），**`init` 成功后即为此状态** |
+| `Standing` | 已站立，**可安全行走** |
+| `Moving` | 正在执行前进/后退（单步或连续步整段） |
+
+**行为约定**
+
+- **趴下后误发前进/后退**：不会直接按卧姿去“迈一步”。`goForward` / `goBack` / `goForwardSteps` / `goBackSteps` 会先调用 **`ensureStandingForWalk()`**：若当前为 `Lying` 或 `UnknownPose`，先 **`stand()`**，再迈步。
+- **板级扩展**：可通过 `DogControl::getPoseState()` 读取状态，驱动灯带/屏显（例如 `Standing` 常亮、`Moving` 流水、`Lying` 呼吸灯等）。
+
+---
+
+## 限位与初始化说明
+
+- **行走上下限**（上表「行走下/上极限」）：在 `LegControl` 内用于步态规划时的 `clampJoint`，正常步态幅度应落在此范围内。
+- **机械上下限**（上表「机械下/上极限」）：在 **`setMotorPositionRefOnly` 之前** 由 `LegControl::clampJointPositionsMechanical` 再夹紧一道，防止异常目标角顶机械。
+- **电机初始化**（`LegControl::init` → `MotorProtocol::initializeMotor`）：协议侧当前下发的是 **位置模式、速度限制 `PARAM_LIMIT_SPD` 等**，**未向电机关节驱动写入位置软限位参数**（`protocol_motor.h` 中无对应 `PARAM`）。因此 **关节安全以本仓库软件限位为主**；若后续固件支持位置限位寄存器，再在 `initializeMotor` 中补充。
+
+---
+
+## 步态规划（`GaitPlanner`）
+
+- **全局变量**：`cycle_index ∈ [0, total_steps-1]`，每次 `goForward` / `goBack` 只 **±1**（一个离散节拍），不再四腿各 `advanceStep` 各迈一格。
+- **每条腿的有效步数**：`effectiveStepForLeg(leg) = (cycle_index + offset_leg) % total_steps`，用于 `LegControl::fillStepPositionsAtStepIndex` 中的 `sin(2π·step/total_steps)`。
+- **默认 `QuadrupedGaitType::Trot`（对角小跑）**：FL(0) 与 RR(3) 同相；FR(1) 与 RL(2) 相对 **半周期**（`total_steps/2`）。
+- **`QuadrupedGaitType::SyncAllLegs`**：四腿 `offset=0`，与旧版「四腿同相」一致；可通过 `DogControl::setQuadrupedGaitType(...)` 切换。
+- **`total_steps`**：与 `LegControl::total_steps_` 一致，构造时设为 `LEG_DEFAULT_TOTAL_STEPS`（偶数，便于半周期）；`GaitPlanner::setTotalSteps` 若为奇数会 **自动 +1**。
+- **站立 / 卧倒 / init 成功**：`resetCycle()`，并把各腿 `current_step_` 设为当前 `effectiveStepForLeg`，便于单腿 MCP 与调试一致。
 
 ---
 
@@ -32,8 +69,8 @@
 | 后右 rr | 髋前后 | 62 | 0 | -0.2 | -0.45 | 0.05 | -1.4(前极限) | 0.6(后极限) |
 | 后右 rr | 膝 | 63 | 0 | 1.16 | 0.81 | 1.51 | 0(弯曲) | 2.26(伸直) |
 
-- **行走上下极限**：正常行走时关节活动范围，= 站立位置 ± 默认步态幅度（髋侧摆 0.02、髋前后 0.25、膝 0.35 rad，见 `leg_control.h`）。膝关节不经过零位。
-- **机械上下极限**：实测机械限位（数值为下极限 ≤ 上极限；括号内为方向：内/外、前极限/后极限、弯曲/伸直）。
+- **行走上下极限**：正常行走时关节活动范围（与 `leg_control.cc` 中 `LEG_DEFAULTS` 的 `limit_low`/`limit_high` 一致）。步态正弦项叠加后再经 `clampJoint`。
+- **机械上下极限**：实测机械限位（`mech_limit_low`/`mech_limit_high`）；**下发前**再经 `clampJointPositionsMechanical`。
 
 ---
 
@@ -44,8 +81,8 @@
 | 初始化 | CAN + 12 电机使能、各腿初始化 |
 | 站立 | 4 条腿回到站立位 |
 | 卧倒 | 4 条腿回零位 |
-| 前进 | 循环步态：按步序让各腿“向前迈一步” |
-| 后退 | 同上，迈步方向相反 |
+| 前进 | 推进全局周期并按当前步态（默认 Trot）下发各腿目标 |
+| 后退 | 周期反向，关节正弦项取反（`forward=false`） |
 | 向左 / 向右 | 步态上差速或身体偏转（可后续实现） |
 | 跳舞 | 预定义动作序列（关键帧 + 可选 trajectory 插值） |
 
@@ -68,7 +105,8 @@
 
 - [x] 定义 `DogControl` 类，持有 4 个 `LegControl` 及 motor/CAN 依赖。
 - [x] 实现初始化、站立、卧倒（调用各腿接口）。
-- [x] 实现前进/后退：当前为简单同步步态（四腿同时 stepForward/stepBackward），后续可改为对角步态等。
+- [x] 实现前进/后退：`GaitPlanner` 对角 Trot + 可切换 SyncAllLegs；`LegControl` 支持按显式 `step_index` 计算正弦目标。
 - [x] 在 `esp_sparkbot_board.cc` 中注册 MCP 并改为调用 `DogControl`（`RegisterDogMcpTools`）；保留单腿 `RegisterLegMcpTools` 用于调试。
 - [x] 实现跳舞：简单序列（站立 → 前进四步 → 后退四步 → 站立），后续可改为关键帧+插值。
 - [ ] 可选：左转/右转、步幅/速度参数。
+- [x] 姿态状态机（趴下后前进先站立、软件机械限位、`getPoseState()` 供 LED 扩展）。

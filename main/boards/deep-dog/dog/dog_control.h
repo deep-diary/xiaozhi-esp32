@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 #include "leg/leg_control.h"
+#include "gait_planner.h"
+#include "dog_state_machine.h"
 
 class DeepMotor;
 
@@ -22,6 +24,14 @@ public:
     /** 获取 4 条腿指针，用于单腿 MCP 或调试；索引 0=fl, 1=fr, 2=rl, 3=rr */
     void getLegs(LegControl* legs[4]);
 
+    /** 步态规划（正弦相位 + 周期索引）；默认 Trot 对角步态 */
+    GaitPlanner& gaitPlanner() { return gait_planner_; }
+    const GaitPlanner& gaitPlanner() const { return gait_planner_; }
+    void setQuadrupedGaitType(QuadrupedGaitType t) { gait_planner_.setGaitType(t); }
+
+    /** 整机姿态状态（趴下/站立/行走中等），供板级 LED 等使用 */
+    DogPoseState getPoseState() const { return state_machine_.state(); }
+
     /** 整机初始化：4 条腿各 3 电机使能、位置模式 */
     bool init();
 
@@ -31,11 +41,15 @@ public:
     /** 整机卧倒：4 条腿回零位 */
     bool lieDown(float max_speed_rad_s = 1.0f);
 
-    /** 整机向前一步：4 条腿各 stepForward 一次（简单同步步态） */
+    /** 整机向前一步：推进 GaitPlanner 周期并按当前步态类型下发各腿目标（默认 Trot） */
     bool goForward(float max_speed_rad_s = 1.0f);
 
-    /** 整机向后一步：4 条腿各 stepBackward 一次 */
+    /** 整机向后一步：周期反向，摆动方向取反（见 LegControl::fillStepPositionsAtStepIndex） */
     bool goBack(float max_speed_rad_s = 1.0f);
+
+    /** 连续前/后若干步（每步一次完整 goForward/goBack） */
+    bool goForwardSteps(int steps, float max_speed_rad_s = 1.0f);
+    bool goBackSteps(int steps, float max_speed_rad_s = 1.0f);
 
     /** 整机失能：4 条腿电机 reset */
     bool disable();
@@ -49,6 +63,21 @@ public:
 private:
     DeepMotor* deep_motor_ = nullptr;
     LegControl legs_[4];  // fl, fr, rl, rr，构造时按 LegType 配置
+    GaitPlanner gait_planner_;
+    DogStateMachine state_machine_;
+
+    /** 趴下或姿态未知时先站立，再允许迈步 */
+    bool ensureStandingForWalk(float max_speed_rad_s);
+
+    bool goForwardStepNoEnsure(float max_speed_rad_s);
+    bool goBackStepNoEnsure(float max_speed_rad_s);
+
+    /** 12 关节目标统一做机械限位裁剪（README 机械列） */
+    void clampLegsMechanical(float pos[4][LEG_JOINT_COUNT]);
+
+    /** 下发前打印 12 关节目标角（rad/°），不打印 CAN 报文 */
+    void logJointTargetsBeforeSend(const char* motion_label, const float pos[4][LEG_JOINT_COUNT]) const;
+
     // 由于初始化会给每个电机重新设置零位并使能，
     // 若重复调用可能导致机械抖动/意外转动。
     // 因此这里做一次性标记：初始化成功后只允许执行一次。

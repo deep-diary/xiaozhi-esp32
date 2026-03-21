@@ -97,7 +97,8 @@ void TouchButtonController::TouchButtonsTask(void* arg) {
     const float baseline_alpha = 0.01f;
     const float baseline_update_abs_ratio = 0.12f;
     const uint32_t baseline_update_abs_offset = 200;
-    const uint16_t long_press_cycles = 12;
+    // 长按判定：每轮任务周期约 50ms（见末尾 vTaskDelay），cycles * 50ms ≈ 长按时长
+    const uint16_t long_press_cycles = 20;  // ≈ 1s
 
     // 仅打印按键状态变化（pressed/released/long-pressed）
     // 如需再次打开“raw/baseline/abs_diff”调试，把 enable_raw_debug 改为 true。

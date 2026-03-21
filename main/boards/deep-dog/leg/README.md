@@ -59,7 +59,8 @@
 - **`DogControl::stand` / `lieDown` / `goForward` / `goBack`** 不再按「一条腿跑完再下一条」串行调用单腿的 `goToStance`/`goToZero`/`stepForward`，而是：
   - 先对 **12 个电机**统一 `setMotorSpeedLimit`（或等价流程），
   - 再按 **关节维度**：同一关节的 **4 条腿**连续 `setMotorPositionRefOnly`，实现视觉上更同步。
-- 单腿 MCP / 调试仍使用 `LegControl::goToStance` 等，行为为 **本腿 3 关节**先全部限速再全部位置。
+- **前进/后退**：整机使用 **`../dog/gait_planner`**（`GaitPlanner`）维护全局周期索引，每腿调用 **`fillStepPositionsAtStepIndex(step_index, …)`**，`step_index` 由步态类型（默认 Trot 对角）决定；与单腿 `current_step_` 独立推进的旧逻辑不同。
+- 单腿 MCP / 调试仍使用 `LegControl::goToStance`、`stepForward` 等，行为为 **本腿 3 关节**先全部限速再全部位置（仍用 `current_step_`）。
 
 ---
 

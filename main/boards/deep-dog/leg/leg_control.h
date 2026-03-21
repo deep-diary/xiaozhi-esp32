@@ -85,6 +85,15 @@ public:
     /** 将角度夹在控制上下限内 */
     float clampJoint(int joint_index, float value) const;
 
+    /**
+     * 机械限位（README 机械下/上极限）：最后一道安全边界，下发前必须再夹紧一次。
+     * 与行走用的 limit_low_/high_ 独立；行走范围应窄于机械范围。
+     */
+    float clampJointMechanical(int joint_index, float value) const;
+
+    /** 就地夹紧 3 关节到机械限位；若有裁剪打一条警告日志 */
+    void clampJointPositionsMechanical(float pos[LEG_JOINT_COUNT]) const;
+
     /** 关节索引 0..LEG_JOINT_COUNT-1，对应电机 ID（0 表示未配置） */
     uint8_t getMotorId(int joint_index) const;
 
@@ -94,7 +103,13 @@ public:
     /** 在当前 current_step_ 下填充 3 关节目标（不修改步数） */
     void fillCurrentStepPositions(float out[LEG_JOINT_COUNT], bool forward) const;
 
-    /** 步进相位 +1 / -1（供整机同步迈步前统一调用） */
+    /**
+     * 使用指定周期内步数索引计算正弦步态目标（不修改 current_step_）。
+     * 供整机 GaitPlanner 按腿分配不同相位。
+     */
+    void fillStepPositionsAtStepIndex(uint16_t step_index, float out[LEG_JOINT_COUNT], bool forward) const;
+
+    /** 步进相位 +1 / -1（单腿 MCP / 旧版同步步态用） */
     void advanceStepForward();
     void advanceStepBackward();
 
@@ -105,6 +120,8 @@ private:
     float stance_position_[LEG_JOINT_COUNT] = {0.0f, 0.0f, 0.0f};
     float limit_low_[LEG_JOINT_COUNT] = {-0.2f, -0.5f, -1.0f};
     float limit_high_[LEG_JOINT_COUNT] = {0.2f, 0.5f, 1.0f};
+    float mech_limit_low_[LEG_JOINT_COUNT] = {-0.3f, -0.6f, -2.26f};
+    float mech_limit_high_[LEG_JOINT_COUNT] = {0.3f, 1.4f, 0.0f};
     uint16_t total_steps_ = LEG_DEFAULT_TOTAL_STEPS;
     uint16_t current_step_ = 0;
 
@@ -113,7 +130,9 @@ private:
     float knee_amp_ = LEG_DEFAULT_KNEE_AMP;
     float hip_aa_amp_ = LEG_DEFAULT_HIP_AA_AMP;
 
-    /** 根据当前步数计算 3 关节目标位置（弧度），写入 out_position，并做限幅 */
+    /** 根据步数索引计算 3 关节目标（弧度）；forward=false 时正弦项取反，表示后退摆动方向 */
+    void computeStepPositionAt(uint16_t step_index, float out_position[LEG_JOINT_COUNT], bool forward) const;
+
     void computeStepPosition(float out_position[LEG_JOINT_COUNT], bool forward) const;
 };
 
