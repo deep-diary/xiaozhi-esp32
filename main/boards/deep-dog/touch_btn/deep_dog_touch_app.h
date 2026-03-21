@@ -31,6 +31,17 @@ private:
     bool btn3_touching_ = false;
     bool btn3_long_fired_ = false;
 
+    /** 2/3 键是否仍按下（含非组合模式），用于双键短按停止持续行走 */
+    bool btn2_down_ = false;
+    bool btn3_down_ = false;
+
+    /** 本手势内是否已触发长按（用于 2+3 短按停走时排除长按） */
+    bool gesture_long2_ = false;
+    bool gesture_long3_ = false;
+
+    /** 两键曾同时按下（在短按窗口内），释放时若仍为短按且正在持续行走则停走 */
+    bool dual_stop_armed_ = false;
+
     static constexpr int kComboWindowMs = 3000;
 
     bool ComboArmed() const;
@@ -45,4 +56,6 @@ private:
     void OnLongPress3();
     void OnRelease2();
     void OnRelease3();
+
+    void MaybeDualShortStopOnBothReleased();
 };

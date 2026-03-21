@@ -16,6 +16,9 @@ enum class DogPoseState : uint8_t {
     Lying,    ///< 卧倒、待机（**整机初始化在趴姿下完成并写零位后，init 成功即为此状态**）
     Standing, ///< 站立，可安全行走
     Moving,   ///< 正在执行行走指令（单步或连续步序列）
+    /** 长按触摸键触发的持续前进/后退（由 DogControl 后台任务迈步，直至停止） */
+    WalkingForward,
+    WalkingBackward,
 };
 
 /**
@@ -48,6 +51,27 @@ public:
     /** 行走序列结束；失败时保守标为 UnknownPose（姿态不确定） */
     void endMove(bool success) {
         if (state_ == DogPoseState::Moving) {
+            state_ = success ? DogPoseState::Standing : DogPoseState::UnknownPose;
+        }
+    }
+
+    /** 持续前进开始（仅自 Standing） */
+    void beginContinuousForward() {
+        if (state_ == DogPoseState::Standing) {
+            state_ = DogPoseState::WalkingForward;
+        }
+    }
+
+    /** 持续后退开始（仅自 Standing） */
+    void beginContinuousBackward() {
+        if (state_ == DogPoseState::Standing) {
+            state_ = DogPoseState::WalkingBackward;
+        }
+    }
+
+    /** 持续行走结束：成功则回到站立（关节保持最后下发姿态）；失败为 UnknownPose */
+    void endContinuousLocomotion(bool success) {
+        if (state_ == DogPoseState::WalkingForward || state_ == DogPoseState::WalkingBackward) {
             state_ = success ? DogPoseState::Standing : DogPoseState::UnknownPose;
         }
     }

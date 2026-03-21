@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+static bool IsContinuousWalkingPose(DogPoseState s) {
+    return s == DogPoseState::WalkingForward || s == DogPoseState::WalkingBackward;
+}
+
 #define TAG "DogControl"
 
 #ifndef M_PI
@@ -57,6 +61,9 @@ bool DogControl::ensureStandingForWalk(float max_speed_rad_s) {
         ESP_LOGW(TAG, "行走被拒绝：请先执行整机初始化 (self.dog.init)");
         return false;
     }
+    if (IsContinuousWalkingPose(state_machine_.state())) {
+        return true;
+    }
     if (!state_machine_.needsStandBeforeWalk()) {
         return true;
     }
@@ -104,6 +111,7 @@ bool DogControl::init() {
 
 bool DogControl::stand(float max_speed_rad_s) {
     if (!deep_motor_) return false;
+    stopContinuousLocomotionIfNeeded();
     gait_planner_.resetCycle();
     for (int i = 0; i < 4; i++) {
         legs_[i].setCurrentStep(gait_planner_.effectiveStepForLeg(i));
@@ -150,6 +158,7 @@ bool DogControl::stand(float max_speed_rad_s) {
 
 bool DogControl::lieDown(float max_speed_rad_s) {
     if (!deep_motor_) return false;
+    stopContinuousLocomotionIfNeeded();
     gait_planner_.resetCycle();
     for (int i = 0; i < 4; i++) {
         legs_[i].setCurrentStep(gait_planner_.effectiveStepForLeg(i));
@@ -226,6 +235,10 @@ bool DogControl::goForwardStepNoEnsure(float max_speed_rad_s) {
 }
 
 bool DogControl::goForward(float max_speed_rad_s) {
+    if (IsContinuousWalkingPose(state_machine_.state())) {
+        ESP_LOGW(TAG, "单步前进被拒绝：当前为持续前进/后退，请先停止");
+        return false;
+    }
     if (!ensureStandingForWalk(max_speed_rad_s)) {
         return false;
     }
@@ -275,6 +288,10 @@ bool DogControl::goBackStepNoEnsure(float max_speed_rad_s) {
 }
 
 bool DogControl::goBack(float max_speed_rad_s) {
+    if (IsContinuousWalkingPose(state_machine_.state())) {
+        ESP_LOGW(TAG, "单步后退被拒绝：当前为持续前进/后退，请先停止");
+        return false;
+    }
     if (!ensureStandingForWalk(max_speed_rad_s)) {
         return false;
     }
@@ -286,6 +303,10 @@ bool DogControl::goBack(float max_speed_rad_s) {
 
 bool DogControl::goForwardSteps(int steps, float max_speed_rad_s) {
     if (!deep_motor_) {
+        return false;
+    }
+    if (IsContinuousWalkingPose(state_machine_.state())) {
+        ESP_LOGW(TAG, "goForwardSteps 被拒绝：当前为持续前进/后退，请先停止");
         return false;
     }
     if (steps <= 0) {
@@ -315,6 +336,10 @@ bool DogControl::goBackSteps(int steps, float max_speed_rad_s) {
     if (!deep_motor_) {
         return false;
     }
+    if (IsContinuousWalkingPose(state_machine_.state())) {
+        ESP_LOGW(TAG, "goBackSteps 被拒绝：当前为持续前进/后退，请先停止");
+        return false;
+    }
     if (steps <= 0) {
         return true;
     }
@@ -338,7 +363,135 @@ bool DogControl::goBackSteps(int steps, float max_speed_rad_s) {
     return true;
 }
 
+void DogControl::ensureContinuousWalkTask() {
+    if (continuous_task_handle_) {
+        return;
+    }
+    const BaseType_t ok =
+        xTaskCreate(ContinuousWalkTask, "dog_cont_walk", 4096, this, 5, &continuous_task_handle_);
+    if (ok != pdPASS) {
+        ESP_LOGE(TAG, "创建连续行走任务失败");
+        continuous_task_handle_ = nullptr;
+    }
+}
+
+void DogControl::ContinuousWalkTask(void* arg) {
+    DogControl* self = static_cast<DogControl*>(arg);
+    if (!self) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    const TickType_t step_delay = pdMS_TO_TICKS(80);
+    const TickType_t idle_delay = pdMS_TO_TICKS(30);
+    for (;;) {
+        const uint8_t mode = self->continuous_mode_.load(std::memory_order_relaxed);
+        if (mode == 1) {
+            if (!self->goForwardStepNoEnsure(self->continuous_speed_rad_s_)) {
+                self->stopContinuousLocomotionInternal(false);
+            }
+            vTaskDelay(step_delay);
+        } else if (mode == 2) {
+            if (!self->goBackStepNoEnsure(self->continuous_speed_rad_s_)) {
+                self->stopContinuousLocomotionInternal(false);
+            }
+            vTaskDelay(step_delay);
+        } else {
+            vTaskDelay(idle_delay);
+        }
+    }
+}
+
+void DogControl::stopContinuousLocomotionInternal(bool success) {
+    continuous_mode_.store(0, std::memory_order_relaxed);
+    state_machine_.endContinuousLocomotion(success);
+}
+
+void DogControl::stopContinuousLocomotionIfNeeded() {
+    if (IsContinuousWalkingPose(state_machine_.state()) || continuous_mode_.load(std::memory_order_relaxed) != 0) {
+        stopContinuousLocomotionInternal(true);
+    }
+}
+
+void DogControl::stopContinuousLocomotion() {
+    stopContinuousLocomotionIfNeeded();
+}
+
+bool DogControl::isContinuousLocomotionActive() const {
+    return IsContinuousWalkingPose(state_machine_.state());
+}
+
+bool DogControl::startContinuousForward(float max_speed_rad_s) {
+    if (!deep_motor_) {
+        return false;
+    }
+    ensureContinuousWalkTask();
+    if (!continuous_task_handle_) {
+        return false;
+    }
+    DogPoseState s = state_machine_.state();
+    if (s == DogPoseState::WalkingForward) {
+        continuous_speed_rad_s_ = max_speed_rad_s;
+        return true;
+    }
+    if (s == DogPoseState::WalkingBackward) {
+        stopContinuousLocomotionInternal(true);
+        s = state_machine_.state();
+    }
+    if (s != DogPoseState::Standing) {
+        ESP_LOGW(TAG, "持续前进被拒绝：需先站立（当前非站立/持续态）");
+        return false;
+    }
+    if (!ensureStandingForWalk(max_speed_rad_s)) {
+        return false;
+    }
+    if (state_machine_.state() != DogPoseState::Standing) {
+        ESP_LOGW(TAG, "持续前进被拒绝：未能进入站立");
+        return false;
+    }
+    continuous_speed_rad_s_ = max_speed_rad_s;
+    state_machine_.beginContinuousForward();
+    continuous_mode_.store(1, std::memory_order_relaxed);
+    ESP_LOGI(TAG, "持续前进已启动");
+    return true;
+}
+
+bool DogControl::startContinuousBackward(float max_speed_rad_s) {
+    if (!deep_motor_) {
+        return false;
+    }
+    ensureContinuousWalkTask();
+    if (!continuous_task_handle_) {
+        return false;
+    }
+    DogPoseState s = state_machine_.state();
+    if (s == DogPoseState::WalkingBackward) {
+        continuous_speed_rad_s_ = max_speed_rad_s;
+        return true;
+    }
+    if (s == DogPoseState::WalkingForward) {
+        stopContinuousLocomotionInternal(true);
+        s = state_machine_.state();
+    }
+    if (s != DogPoseState::Standing) {
+        ESP_LOGW(TAG, "持续后退被拒绝：需先站立（当前非站立/持续态）");
+        return false;
+    }
+    if (!ensureStandingForWalk(max_speed_rad_s)) {
+        return false;
+    }
+    if (state_machine_.state() != DogPoseState::Standing) {
+        ESP_LOGW(TAG, "持续后退被拒绝：未能进入站立");
+        return false;
+    }
+    continuous_speed_rad_s_ = max_speed_rad_s;
+    state_machine_.beginContinuousBackward();
+    continuous_mode_.store(2, std::memory_order_relaxed);
+    ESP_LOGI(TAG, "持续后退已启动");
+    return true;
+}
+
 bool DogControl::disable() {
+    stopContinuousLocomotionIfNeeded();
     for (int i = 0; i < 4; i++) {
         if (!legs_[i].disable()) {
             ESP_LOGE(TAG, "leg %d disable failed", i);

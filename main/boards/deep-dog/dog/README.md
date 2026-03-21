@@ -22,12 +22,15 @@
 | `UnknownPose` | 行走下发失败等导致**姿态不确定**（与 init 默认态无关） |
 | `Lying` | 已卧倒（趴下），**待机**。整机若在趴姿下完成 init（写零位），**`init` 成功后即为此状态** |
 | `Standing` | 已站立，**可安全行走** |
-| `Moving` | 正在执行前进/后退（单步或连续步整段） |
+| `Moving` | 正在执行前进/后退（**单步**或 `goForwardSteps` / `goBackSteps` **整段**） |
+| `WalkingForward` | **持续前进**（触摸长按 2 等触发，由后台任务循环迈步，直至 `stopContinuousLocomotion`） |
+| `WalkingBackward` | **持续后退**（触摸长按 3 等触发，同上） |
 
 **行为约定**
 
 - **趴下后误发前进/后退**：不会直接按卧姿去“迈一步”。`goForward` / `goBack` / `goForwardSteps` / `goBackSteps` 会先调用 **`ensureStandingForWalk()`**：若当前为 `Lying` 或 `UnknownPose`，先 **`stand()`**，再迈步。
-- **板级扩展**：可通过 `DogControl::getPoseState()` 读取状态，驱动灯带/屏显（例如 `Standing` 常亮、`Moving` 流水、`Lying` 呼吸灯等）。
+- **持续前进/后退**与单步 `goForward` / `goBack` 互斥；停止持续行走时**不再下发新目标**，关节保持**最后一次下发的姿态**（`stopContinuousLocomotion`）。
+- **板级扩展**：可通过 `DogControl::getPoseState()` 读取状态，驱动灯带/屏显（例如 `Standing` 常亮、`Moving` 流水、`WalkingForward`/`WalkingBackward` 不同闪烁、`Lying` 呼吸灯等）。
 
 ---
 

@@ -46,70 +46,143 @@ void DeepDogTouchApp::OnPress2() {
     if (!dog_) {
         return;
     }
-    if (!ComboArmed()) {
-        if (dog_->goForward()) {
-            ESP_LOGI(TAG, "Touch: goForward 1 step ok");
-        } else {
-            ESP_LOGE(TAG, "Touch: goForward failed");
+    btn2_down_ = true;
+    gesture_long2_ = false;
+
+    if (ComboArmed()) {
+        btn2_touching_ = true;
+        btn2_long_fired_ = false;
+        return;
+    }
+
+    btn2_long_fired_ = false;
+
+    if (dog_->isContinuousLocomotionActive()) {
+        if (btn3_down_) {
+            dual_stop_armed_ = true;
         }
         return;
     }
-    btn2_touching_ = true;
-    btn2_long_fired_ = false;
+
+    if (btn3_down_) {
+        dual_stop_armed_ = true;
+    }
+
+    if (dog_->goForward()) {
+        ESP_LOGI(TAG, "Touch: goForward 1 step ok");
+    } else {
+        ESP_LOGE(TAG, "Touch: goForward failed");
+    }
 }
 
 void DeepDogTouchApp::OnPress3() {
     if (!dog_) {
         return;
     }
-    if (!ComboArmed()) {
-        if (dog_->goBack()) {
-            ESP_LOGI(TAG, "Touch: goBack 1 step ok");
-        } else {
-            ESP_LOGE(TAG, "Touch: goBack failed");
+    btn3_down_ = true;
+    gesture_long3_ = false;
+
+    if (ComboArmed()) {
+        btn3_touching_ = true;
+        btn3_long_fired_ = false;
+        return;
+    }
+
+    btn3_long_fired_ = false;
+
+    if (dog_->isContinuousLocomotionActive()) {
+        if (btn2_down_) {
+            dual_stop_armed_ = true;
         }
         return;
     }
-    btn3_touching_ = true;
-    btn3_long_fired_ = false;
+
+    if (btn2_down_) {
+        dual_stop_armed_ = true;
+    }
+
+    if (dog_->goBack()) {
+        ESP_LOGI(TAG, "Touch: goBack 1 step ok");
+    } else {
+        ESP_LOGE(TAG, "Touch: goBack failed");
+    }
 }
 
 void DeepDogTouchApp::OnLongPress2() {
     btn2_long_fired_ = true;
+    gesture_long2_ = true;
+    dual_stop_armed_ = false;
     if (!dog_) {
         return;
     }
-    if (dog_->goForwardSteps(5)) {
-        ESP_LOGI(TAG, "Touch: goForwardSteps(5) ok");
+    if (ComboArmed()) {
+        if (dog_->goForwardSteps(5)) {
+            ESP_LOGI(TAG, "Touch: goForwardSteps(5) ok (combo 窗口内长按2)");
+        } else {
+            ESP_LOGE(TAG, "Touch: goForwardSteps(5) failed");
+        }
+        return;
+    }
+    if (dog_->startContinuousForward()) {
+        ESP_LOGI(TAG, "Touch: 持续前进（长按2）");
     } else {
-        ESP_LOGE(TAG, "Touch: goForwardSteps(5) failed");
+        ESP_LOGE(TAG, "Touch: 持续前进启动失败");
     }
 }
 
 void DeepDogTouchApp::OnLongPress3() {
     btn3_long_fired_ = true;
+    gesture_long3_ = true;
+    dual_stop_armed_ = false;
     if (!dog_) {
         return;
     }
-    if (dog_->goBackSteps(5)) {
-        ESP_LOGI(TAG, "Touch: goBackSteps(5) ok");
+    if (ComboArmed()) {
+        if (dog_->goBackSteps(5)) {
+            ESP_LOGI(TAG, "Touch: goBackSteps(5) ok (combo 窗口内长按3)");
+        } else {
+            ESP_LOGE(TAG, "Touch: goBackSteps(5) failed");
+        }
+        return;
+    }
+    if (dog_->startContinuousBackward()) {
+        ESP_LOGI(TAG, "Touch: 持续后退（长按3）");
     } else {
-        ESP_LOGE(TAG, "Touch: goBackSteps(5) failed");
+        ESP_LOGE(TAG, "Touch: 持续后退启动失败");
     }
 }
 
-void DeepDogTouchApp::OnRelease2() {
-    if (!btn2_touching_) {
-        return;
-    }
-    btn2_touching_ = false;
-    const bool was_short = !btn2_long_fired_;
-    btn2_long_fired_ = false;
-
+void DeepDogTouchApp::MaybeDualShortStopOnBothReleased() {
     if (!dog_) {
         return;
     }
-    if (ComboArmed() && was_short) {
+    if (btn2_down_ || btn3_down_) {
+        return;
+    }
+    if (dual_stop_armed_ && !gesture_long2_ && !gesture_long3_) {
+        if (dog_->isContinuousLocomotionActive()) {
+            dog_->stopContinuousLocomotion();
+            ESP_LOGI(TAG, "Touch: 短按 2+3 → 停止持续行走（保持当前姿态）");
+        }
+    }
+    dual_stop_armed_ = false;
+    gesture_long2_ = false;
+    gesture_long3_ = false;
+}
+
+void DeepDogTouchApp::OnRelease2() {
+    if (!dog_) {
+        return;
+    }
+    btn2_down_ = false;
+    const bool was_combo_touch = btn2_touching_;
+    const bool was_short = !btn2_long_fired_;
+    if (was_combo_touch) {
+        btn2_touching_ = false;
+    }
+    btn2_long_fired_ = false;
+
+    if (ComboArmed() && was_combo_touch && was_short) {
         if (dog_->stand()) {
             ESP_LOGI(TAG, "Touch: 组合键 长按1→短按2 → stand ok");
         } else {
@@ -117,20 +190,22 @@ void DeepDogTouchApp::OnRelease2() {
         }
         DisarmCombo();
     }
+    MaybeDualShortStopOnBothReleased();
 }
 
 void DeepDogTouchApp::OnRelease3() {
-    if (!btn3_touching_) {
-        return;
-    }
-    btn3_touching_ = false;
-    const bool was_short = !btn3_long_fired_;
-    btn3_long_fired_ = false;
-
     if (!dog_) {
         return;
     }
-    if (ComboArmed() && was_short) {
+    btn3_down_ = false;
+    const bool was_combo_touch = btn3_touching_;
+    const bool was_short = !btn3_long_fired_;
+    if (was_combo_touch) {
+        btn3_touching_ = false;
+    }
+    btn3_long_fired_ = false;
+
+    if (ComboArmed() && was_combo_touch && was_short) {
         if (dog_->lieDown()) {
             ESP_LOGI(TAG, "Touch: 组合键 长按1→短按3 → lieDown ok");
         } else {
@@ -138,6 +213,7 @@ void DeepDogTouchApp::OnRelease3() {
         }
         DisarmCombo();
     }
+    MaybeDualShortStopOnBothReleased();
 }
 
 void DeepDogTouchApp::OnTouchEvent(int button_id,

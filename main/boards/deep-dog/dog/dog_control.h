@@ -2,6 +2,9 @@
 #define DOG_CONTROL_H
 
 #include <stdbool.h>
+#include <atomic>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "leg/leg_control.h"
 #include "gait_planner.h"
 #include "dog_state_machine.h"
@@ -51,6 +54,15 @@ public:
     bool goForwardSteps(int steps, float max_speed_rad_s = 1.0f);
     bool goBackSteps(int steps, float max_speed_rad_s = 1.0f);
 
+    /**
+     * 持续前进/后退（后台任务循环迈步，直至 stopContinuousLocomotion 或其它动作打断）。
+     * 与单步 goForward/goBack 互斥；与「长按1 组合窗口」内长按 2/3 连发 5 步无关（由触摸层区分）。
+     */
+    bool startContinuousForward(float max_speed_rad_s = 1.0f);
+    bool startContinuousBackward(float max_speed_rad_s = 1.0f);
+    void stopContinuousLocomotion();
+    bool isContinuousLocomotionActive() const;
+
     /** 整机失能：4 条腿电机 reset */
     bool disable();
 
@@ -71,6 +83,16 @@ private:
 
     bool goForwardStepNoEnsure(float max_speed_rad_s);
     bool goBackStepNoEnsure(float max_speed_rad_s);
+
+    static void ContinuousWalkTask(void* arg);
+    void ensureContinuousWalkTask();
+    void stopContinuousLocomotionInternal(bool success);
+    void stopContinuousLocomotionIfNeeded();
+
+    /** 0=无 1=前进 2=后退 */
+    std::atomic<uint8_t> continuous_mode_{0};
+    float continuous_speed_rad_s_ = 1.0f;
+    TaskHandle_t continuous_task_handle_ = nullptr;
 
     /** 12 关节目标统一做机械限位裁剪（README 机械列） */
     void clampLegsMechanical(float pos[4][LEG_JOINT_COUNT]);
