@@ -93,14 +93,15 @@
 
 ## 与板级入口的对接
 
-在 `esp_sparkbot_board.cc` 中，MCP 工具应调用本模块，而不是 UART：
+在 `esp_sparkbot_board.cc` 中，MCP 工具应调用本模块，而不是 UART（`RegisterDogMcpTools`）：
 
-- `self.chassis.go_forward` → `DogControl::GoForward()` 或等价
-- `self.chassis.go_back` → `DogControl::GoBack()`
-- `self.chassis.dance` → `DogControl::Dance()`
-- `self.chassis.stand` / `lie_down`（若提供）→ 站立 / 卧倒
+- `self.dog.init` / `self.dog.stand` / `self.dog.lie_down`
+- `self.chassis.forward_big` / `backward_big`（一大步，参数 `speed`×100=rad/s、`step_delay_ms`）
+- `self.chassis.start_forward` / `start_backward`（持续前进/后退，参数 `speed`、`step_period_ms`）
+- `self.chassis.stop`（停持续行走）、`self.chassis.status`（中文状态）、`self.chassis.set_speed`（调速+步频）
+- `self.chassis.dance` → `DogControl::dance()`
 
-语音识别后由主项目 MCP 分发到上述工具，实现“语音控制前进、后退、跳舞”。
+内部仍保留 `goForward`/`goBack`/`goForwardSteps` 等 API，供内部序列与调试使用；**跳舞**为站立 → **2× 前进一大步** → **2× 后退一大步** → 站立；触摸无组合窗时短按 2/3 为一小步。整机 `init()` 成功后打印 `[init 后反馈]` 核对各电机是否近零位。语音侧优先用上述 MCP 名称。
 
 ---
 
@@ -110,6 +111,7 @@
 - [x] 实现初始化、站立、卧倒（调用各腿接口）。
 - [x] 实现前进/后退：`GaitPlanner` 对角 Trot + 可切换 SyncAllLegs；`LegControl` 支持按显式 `step_index` 计算正弦目标。
 - [x] 在 `esp_sparkbot_board.cc` 中注册 MCP 并改为调用 `DogControl`（`RegisterDogMcpTools`）；保留单腿 `RegisterLegMcpTools` 用于调试。
-- [x] 实现跳舞：简单序列（站立 → 前进四步 → 后退四步 → 站立），后续可改为关键帧+插值。
-- [ ] 可选：左转/右转、步幅/速度参数。
+- [x] 实现跳舞：站立 → 2×`goForwardBigStep` → 2×`goBackBigStep` → 站立；后续可改为关键帧+插值。
+- [ ] 可选：左转/右转。
+- [x] **一大步** `goForwardBigStep`/`goBackBigStep`（半周期小步+延时）；`start_forward`/`backward` 可调速与步频（MCP 整型 `speed`÷100=rad/s）。
 - [x] 姿态状态机（趴下后前进先站立、软件机械限位、`getPoseState()` 供 LED 扩展）。

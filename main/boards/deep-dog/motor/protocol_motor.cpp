@@ -204,7 +204,7 @@ bool MotorProtocol::initializeMotor(uint8_t motor_id, float max_speed) {
         ESP_LOGE(TAG, "设置电机%d零位失败", motor_id);
         return false;
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     // 3. 将电机切换到位置模式
     ESP_LOGI(TAG, "步骤1: 设置电机%d为位置模式", motor_id);
@@ -214,7 +214,7 @@ bool MotorProtocol::initializeMotor(uint8_t motor_id, float max_speed) {
     }
     
     // 等待模式切换完成
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(10));
     
     // 4. 设置最大速度限制
     ESP_LOGI(TAG, "步骤2: 设置电机%d最大速度限制为%.2f rad/s", motor_id, max_speed);
@@ -224,7 +224,7 @@ bool MotorProtocol::initializeMotor(uint8_t motor_id, float max_speed) {
     }
     
     // 等待参数设置完成
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(10));
     
     // 5. 使能电机
     ESP_LOGI(TAG, "步骤3: 使能电机%d", motor_id);

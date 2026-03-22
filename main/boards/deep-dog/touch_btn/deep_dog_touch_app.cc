@@ -17,7 +17,9 @@ bool DeepDogTouchApp::ComboArmed() const {
 
 void DeepDogTouchApp::ArmComboAfterLongPress1() {
     combo_deadline_us_ = (int64_t)esp_timer_get_time() + (int64_t)kComboWindowMs * 1000;
-    ESP_LOGI(TAG, "组合键窗口：长按1 后 %d ms 内短按2=站立 / 短按3=趴下", kComboWindowMs);
+    ESP_LOGI(TAG,
+             "组合键窗口：长按1 后 %d ms 内 短按2/3=前进/后退一大步；长按2=站立 长按3=趴下",
+             kComboWindowMs);
 }
 
 void DeepDogTouchApp::DisarmCombo() {
@@ -69,7 +71,7 @@ void DeepDogTouchApp::OnPress2() {
     }
 
     if (dog_->goForward()) {
-        ESP_LOGI(TAG, "Touch: goForward 1 step ok");
+        ESP_LOGI(TAG, "Touch: goForward 一小步 ok（短按2）");
     } else {
         ESP_LOGE(TAG, "Touch: goForward failed");
     }
@@ -102,7 +104,7 @@ void DeepDogTouchApp::OnPress3() {
     }
 
     if (dog_->goBack()) {
-        ESP_LOGI(TAG, "Touch: goBack 1 step ok");
+        ESP_LOGI(TAG, "Touch: goBack 一小步 ok（短按3）");
     } else {
         ESP_LOGE(TAG, "Touch: goBack failed");
     }
@@ -116,11 +118,12 @@ void DeepDogTouchApp::OnLongPress2() {
         return;
     }
     if (ComboArmed()) {
-        if (dog_->goForwardSteps(5)) {
-            ESP_LOGI(TAG, "Touch: goForwardSteps(5) ok (combo 窗口内长按2)");
+        if (dog_->stand()) {
+            ESP_LOGI(TAG, "Touch: 组合键 长按1→长按2 → stand ok");
         } else {
-            ESP_LOGE(TAG, "Touch: goForwardSteps(5) failed");
+            ESP_LOGE(TAG, "Touch: stand failed（组合窗口内长按2）");
         }
+        DisarmCombo();
         return;
     }
     if (dog_->startContinuousForward()) {
@@ -138,11 +141,12 @@ void DeepDogTouchApp::OnLongPress3() {
         return;
     }
     if (ComboArmed()) {
-        if (dog_->goBackSteps(5)) {
-            ESP_LOGI(TAG, "Touch: goBackSteps(5) ok (combo 窗口内长按3)");
+        if (dog_->lieDown()) {
+            ESP_LOGI(TAG, "Touch: 组合键 长按1→长按3 → lieDown ok");
         } else {
-            ESP_LOGE(TAG, "Touch: goBackSteps(5) failed");
+            ESP_LOGE(TAG, "Touch: lieDown failed（组合窗口内长按3）");
         }
+        DisarmCombo();
         return;
     }
     if (dog_->startContinuousBackward()) {
@@ -183,10 +187,10 @@ void DeepDogTouchApp::OnRelease2() {
     btn2_long_fired_ = false;
 
     if (ComboArmed() && was_combo_touch && was_short) {
-        if (dog_->stand()) {
-            ESP_LOGI(TAG, "Touch: 组合键 长按1→短按2 → stand ok");
+        if (dog_->goForwardBigStep(1.0f, 40)) {
+            ESP_LOGI(TAG, "Touch: 组合键 长按1→短按2 → goForwardBigStep ok");
         } else {
-            ESP_LOGE(TAG, "Touch: stand failed");
+            ESP_LOGE(TAG, "Touch: goForwardBigStep failed");
         }
         DisarmCombo();
     }
@@ -206,10 +210,10 @@ void DeepDogTouchApp::OnRelease3() {
     btn3_long_fired_ = false;
 
     if (ComboArmed() && was_combo_touch && was_short) {
-        if (dog_->lieDown()) {
-            ESP_LOGI(TAG, "Touch: 组合键 长按1→短按3 → lieDown ok");
+        if (dog_->goBackBigStep(1.0f, 40)) {
+            ESP_LOGI(TAG, "Touch: 组合键 长按1→短按3 → goBackBigStep ok");
         } else {
-            ESP_LOGE(TAG, "Touch: lieDown failed");
+            ESP_LOGE(TAG, "Touch: goBackBigStep failed");
         }
         DisarmCombo();
     }

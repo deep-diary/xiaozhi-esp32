@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <atomic>
+#include <string>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "leg/leg_control.h"
@@ -50,18 +51,33 @@ public:
     /** 整机向后一步：周期反向，摆动方向取反（见 LegControl::fillStepPositionsAtStepIndex） */
     bool goBack(float max_speed_rad_s = 1.0f);
 
-    /** 连续前/后若干步（每步一次完整 goForward/goBack） */
+    /** 连续前/后若干「小步」（每步推进一个周期采样索引，共 total_steps 步为一正弦周期） */
     bool goForwardSteps(int steps, float max_speed_rad_s = 1.0f);
     bool goBackSteps(int steps, float max_speed_rad_s = 1.0f);
 
     /**
-     * 持续前进/后退（后台任务循环迈步，直至 stopContinuousLocomotion 或其它动作打断）。
-     * 与单步 goForward/goBack 互斥；与「长按1 组合窗口」内长按 2/3 连发 5 步无关（由触摸层区分）。
+     * 一大步：沿相位连续走 **半个正弦周期**（total_steps/2 个小步），小步之间可插延时。
+     * 例如 total_steps=20 时一大步 = 10 个小步。
      */
-    bool startContinuousForward(float max_speed_rad_s = 1.0f);
-    bool startContinuousBackward(float max_speed_rad_s = 1.0f);
+    bool goForwardBigStep(float max_speed_rad_s = 1.0f, int inter_step_delay_ms = 40);
+    bool goBackBigStep(float max_speed_rad_s = 1.0f, int inter_step_delay_ms = 40);
+
+    /**
+     * 持续前进/后退（后台任务循环小步，直至 stopContinuousLocomotion 或其它动作打断）。
+     * step_period_ms：相邻小步之间的节拍间隔（影响「走得快慢」观感，与电机限速 speed 独立）。
+     */
+    bool startContinuousForward(float max_speed_rad_s = 1.0f, int step_period_ms = 80);
+    bool startContinuousBackward(float max_speed_rad_s = 1.0f, int step_period_ms = 80);
+    /** 持续行走中调节电机限速（rad/s） */
+    void setContinuousSpeed(float max_speed_rad_s);
+    /** 持续行走中调节小步间隔（ms） */
+    void setContinuousStepPeriodMs(int ms);
+
     void stopContinuousLocomotion();
     bool isContinuousLocomotionActive() const;
+
+    /** 供 MCP/语音反馈：中文状态摘要（含持续行走时的限速与步频） */
+    std::string getChassisStatusString() const;
 
     /** 整机失能：4 条腿电机 reset */
     bool disable();
@@ -92,6 +108,7 @@ private:
     /** 0=无 1=前进 2=后退 */
     std::atomic<uint8_t> continuous_mode_{0};
     float continuous_speed_rad_s_ = 1.0f;
+    int continuous_step_period_ms_ = 80;
     TaskHandle_t continuous_task_handle_ = nullptr;
 
     /** 12 关节目标统一做机械限位裁剪（README 机械列） */
@@ -99,6 +116,9 @@ private:
 
     /** 下发前打印 12 关节目标角（rad/°），不打印 CAN 报文 */
     void logJointTargetsBeforeSend(const char* motion_label, const float pos[4][LEG_JOINT_COUNT]) const;
+
+    /** 各腿 init 后读反馈角，核对是否在近零位（趴姿写零后应接近 0） */
+    void logMotorActualPositionsAfterInit();
 
     // 由于初始化会给每个电机重新设置零位并使能，
     // 若重复调用可能导致机械抖动/意外转动。
