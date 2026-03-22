@@ -1,4 +1,5 @@
 #include "dog_control.h"
+#include "config.h"
 #include "motor/deep_motor.h"
 #include "mcp_server.h"
 #include <esp_log.h>
@@ -49,6 +50,10 @@ DogControl::DogControl() {
     legs_[1].setLegType(LegType::FR);
     legs_[2].setLegType(LegType::RL);
     legs_[3].setLegType(LegType::RR);
+
+#if DEEP_DOG_MIT_VALIDATE_FL_ONLY
+    mit_fl_only_ = true;
+#endif
 
     gait_planner_.setTotalSteps(LEG_DEFAULT_TOTAL_STEPS);
     for (int i = 0; i < 4; i++) {
@@ -106,6 +111,55 @@ void DogControl::logJointTargetsBeforeSend(const char* motion_label, const float
     }
 }
 
+bool DogControl::sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], float max_speed_rad_s) {
+    if (!deep_motor_) {
+        return false;
+    }
+    for (int leg = 0; leg < 4; leg++) {
+        if (mit_fl_only_ && leg != 0) {
+            continue;
+        }
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
+                ESP_LOGE(TAG, "sendAllLegJointTargets setMotorSpeedLimit leg=%d joint=%d id=%u", leg, j,
+                         (unsigned)id);
+                return false;
+            }
+        }
+    }
+    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+        for (int leg = 0; leg < 4; leg++) {
+            if (mit_fl_only_ && leg != 0) {
+                continue;
+            }
+            uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            float pj = pos[leg][j];
+#if DEEP_DOG_USE_MIT_WALK
+            if (!deep_motor_->setMotorMitCommand(id, pj, 0.0f, DEEP_DOG_MIT_DEFAULT_KP, DEEP_DOG_MIT_DEFAULT_KD,
+                                               DEEP_DOG_MIT_DEFAULT_TAU_FF)) {
+                ESP_LOGE(TAG, "sendAllLegJointTargets setMotorMitCommand leg=%d joint=%d id=%u", leg, j,
+                         (unsigned)id);
+                return false;
+            }
+#else
+            if (!deep_motor_->setMotorPositionRefOnly(id, pj)) {
+                ESP_LOGE(TAG, "sendAllLegJointTargets setMotorPositionRefOnly leg=%d joint=%d id=%u", leg, j,
+                         (unsigned)id);
+                return false;
+            }
+#endif
+        }
+    }
+    return true;
+}
+
 bool DogControl::init() {
     if (initialized_) {
         ESP_LOGI(TAG, "dog init skipped: already initialized");
@@ -115,13 +169,25 @@ bool DogControl::init() {
         ESP_LOGE(TAG, "DeepMotor not set");
         return false;
     }
+#if DEEP_DOG_USE_MIT_WALK
+    ESP_LOGI(TAG, "整机 init：关节下发为运控帧 (kp=%.2f kd=%.2f tau_ff=%.2f，见 config.h)",
+             (double)DEEP_DOG_MIT_DEFAULT_KP, (double)DEEP_DOG_MIT_DEFAULT_KD, (double)DEEP_DOG_MIT_DEFAULT_TAU_FF);
+#else
+    ESP_LOGI(TAG, "整机 init：关节下发为位置参考 PARAM_LOC_REF");
+#endif
+#if DEEP_DOG_MIT_VALIDATE_FL_ONLY
+    ESP_LOGW(TAG, "MIT 台架模式：仅初始化/驱动左前腿(FL)");
+#endif
     for (int i = 0; i < 4; i++) {
+        if (mit_fl_only_ && i != 0) {
+            continue;
+        }
         if (!legs_[i].init()) {
             ESP_LOGE(TAG, "leg %d init failed", i);
             return false;
         }
     }
-    ESP_LOGI(TAG, "dog init ok, 4 legs");
+    ESP_LOGI(TAG, "dog init ok%s", mit_fl_only_ ? " (FL only)" : ", 4 legs");
     gait_planner_.resetCycle();
     for (int i = 0; i < 4; i++) {
         legs_[i].setCurrentStep(gait_planner_.effectiveStepForLeg(i));
@@ -144,6 +210,9 @@ void DogControl::logMotorActualPositionsAfterInit() {
     ESP_LOGI(TAG, "[init 后反馈] 各电机实际角（宜在零位附近），容差 ±%.3f rad", kZeroTolRad);
     int abnormal = 0;
     for (int leg = 0; leg < 4; leg++) {
+        if (mit_fl_only_ && leg != 0) {
+            continue;
+        }
         for (int j = 0; j < LEG_JOINT_COUNT; j++) {
             const uint8_t id = legs_[leg].getMotorId(j);
             if (id == 0) {
@@ -190,32 +259,8 @@ bool DogControl::stand(float max_speed_rad_s) {
     clampLegsMechanical(pos);
     logJointTargetsBeforeSend("stand", pos);
 
-    // 1) 12 电机统一限速（每电机 1 帧，避免原先 setPosition 每关节 2 帧）
-    for (int leg = 0; leg < 4; leg++) {
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
-                ESP_LOGE(TAG, "stand setMotorSpeedLimit leg=%d joint=%d id=%u", leg, j, (unsigned)id);
-                return false;
-            }
-        }
-    }
-    // 2) 按关节同步：同一关节 4 条腿连续下发位置参考，再下一关节（视觉上同时抬/落）
-    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-        for (int leg = 0; leg < 4; leg++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            float pj = pos[leg][j];
-            if (!deep_motor_->setMotorPositionRefOnly(id, pj)) {
-                ESP_LOGE(TAG, "stand setMotorPositionRefOnly leg=%d joint=%d id=%u", leg, j, (unsigned)id);
-                return false;
-            }
-        }
+    if (!sendAllLegJointTargets(pos, max_speed_rad_s)) {
+        return false;
     }
     state_machine_.onStandSuccess();
     return true;
@@ -232,29 +277,8 @@ bool DogControl::lieDown(float max_speed_rad_s) {
     clampLegsMechanical(pos_zero);
     logJointTargetsBeforeSend("lie_down", pos_zero);
 
-    for (int leg = 0; leg < 4; leg++) {
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
-                ESP_LOGE(TAG, "lieDown setMotorSpeedLimit leg=%d joint=%d id=%u", leg, j, (unsigned)id);
-                return false;
-            }
-        }
-    }
-    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-        for (int leg = 0; leg < 4; leg++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorPositionRefOnly(id, pos_zero[leg][j])) {
-                ESP_LOGE(TAG, "lieDown setMotorPositionRefOnly leg=%d joint=%d id=%u", leg, j, (unsigned)id);
-                return false;
-            }
-        }
+    if (!sendAllLegJointTargets(pos_zero, max_speed_rad_s)) {
+        return false;
     }
     state_machine_.onLieDownSuccess();
     return true;
@@ -272,31 +296,7 @@ bool DogControl::goForwardStepNoEnsure(float max_speed_rad_s) {
     clampLegsMechanical(pos);
     logJointTargetsBeforeSend("go_forward", pos);
 
-    for (int leg = 0; leg < 4; leg++) {
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
-                ESP_LOGE(TAG, "goForward setMotorSpeedLimit leg=%d joint=%d", leg, j);
-                return false;
-            }
-        }
-    }
-    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-        for (int leg = 0; leg < 4; leg++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorPositionRefOnly(id, pos[leg][j])) {
-                ESP_LOGE(TAG, "goForward setMotorPositionRefOnly leg=%d joint=%d", leg, j);
-                return false;
-            }
-        }
-    }
-    return true;
+    return sendAllLegJointTargets(pos, max_speed_rad_s);
 }
 
 bool DogControl::goForward(float max_speed_rad_s) {
@@ -325,31 +325,7 @@ bool DogControl::goBackStepNoEnsure(float max_speed_rad_s) {
     clampLegsMechanical(pos);
     logJointTargetsBeforeSend("go_back", pos);
 
-    for (int leg = 0; leg < 4; leg++) {
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
-                ESP_LOGE(TAG, "goBack setMotorSpeedLimit leg=%d joint=%d", leg, j);
-                return false;
-            }
-        }
-    }
-    for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-        for (int leg = 0; leg < 4; leg++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorPositionRefOnly(id, pos[leg][j])) {
-                ESP_LOGE(TAG, "goBack setMotorPositionRefOnly leg=%d joint=%d", leg, j);
-                return false;
-            }
-        }
-    }
-    return true;
+    return sendAllLegJointTargets(pos, max_speed_rad_s);
 }
 
 bool DogControl::goBack(float max_speed_rad_s) {
@@ -693,6 +669,9 @@ bool DogControl::startContinuousBackward(float max_speed_rad_s, int step_period_
 bool DogControl::disable() {
     stopContinuousLocomotionIfNeeded();
     for (int i = 0; i < 4; i++) {
+        if (mit_fl_only_ && i != 0) {
+            continue;
+        }
         if (!legs_[i].disable()) {
             ESP_LOGE(TAG, "leg %d disable failed", i);
             return false;

@@ -1,4 +1,5 @@
 #include "leg_control.h"
+#include "../config.h"
 #include "motor/deep_motor.h"
 #include "motor/protocol_motor.h"
 #include "mcp_server.h"
@@ -139,12 +140,23 @@ bool LegControl::init() {
                 return false;
             }
         }
+#if DEEP_DOG_USE_MIT_WALK
+        if (!MotorProtocol::initializeMotorMitMode(id, DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S)) {
+            ESP_LOGE(TAG, "initializeMotorMitMode fail id=%d", id);
+            return false;
+        }
+#else
         if (!MotorProtocol::initializeMotor(id, 1.0f)) {
             ESP_LOGE(TAG, "initializeMotor fail id=%d", id);
             return false;
         }
+#endif
     }
-    ESP_LOGI(TAG, "leg init ok type=%d", (int)leg_type_);
+#if DEEP_DOG_USE_MIT_WALK
+    ESP_LOGI(TAG, "leg init ok type=%d (MIT)", (int)leg_type_);
+#else
+    ESP_LOGI(TAG, "leg init ok type=%d (位置模式)", (int)leg_type_);
+#endif
     return true;
 }
 
@@ -190,23 +202,41 @@ void LegControl::advanceStepBackward() {
     current_step_ = (current_step_ == 0) ? total_steps_ - 1 : current_step_ - 1;
 }
 
+bool LegControl::sendThreeJointsPositionOrMit(const float pos[LEG_JOINT_COUNT], float max_speed_rad_s) {
+    if (!deep_motor_) {
+        return false;
+    }
+    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
+        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
+            ESP_LOGE(TAG, "setMotorSpeedLimit fail id=%d", motor_ids_[i]);
+            return false;
+        }
+    }
+    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
+        if (motor_ids_[i] == 0) {
+            continue;
+        }
+#if DEEP_DOG_USE_MIT_WALK
+        if (!deep_motor_->setMotorMitCommand(motor_ids_[i], pos[i], 0.0f, DEEP_DOG_MIT_DEFAULT_KP,
+                                             DEEP_DOG_MIT_DEFAULT_KD, DEEP_DOG_MIT_DEFAULT_TAU_FF)) {
+            ESP_LOGE(TAG, "setMotorMitCommand fail id=%d", motor_ids_[i]);
+            return false;
+        }
+#else
+        if (!deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
+            ESP_LOGE(TAG, "setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
+            return false;
+        }
+#endif
+    }
+    return true;
+}
+
 bool LegControl::goToZero(float max_speed_rad_s) {
     if (!deep_motor_) return false;
     float pos[LEG_JOINT_COUNT] = {0.0f, 0.0f, 0.0f};
     clampJointPositionsMechanical(pos);
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
-            ESP_LOGE(TAG, "goToZero setMotorSpeedLimit fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
-            ESP_LOGE(TAG, "goToZero setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    return true;
+    return sendThreeJointsPositionOrMit(pos, max_speed_rad_s);
 }
 
 bool LegControl::goToStance(float max_speed_rad_s) {
@@ -216,19 +246,7 @@ bool LegControl::goToStance(float max_speed_rad_s) {
         pos[i] = clampJoint(i, stance_position_[i]);
     }
     clampJointPositionsMechanical(pos);
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
-            ESP_LOGE(TAG, "goToStance setMotorSpeedLimit fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
-            ESP_LOGE(TAG, "goToStance setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    return true;
+    return sendThreeJointsPositionOrMit(pos, max_speed_rad_s);
 }
 
 bool LegControl::stepForward(float max_speed_rad_s) {
@@ -237,19 +255,7 @@ bool LegControl::stepForward(float max_speed_rad_s) {
     float pos[LEG_JOINT_COUNT];
     fillCurrentStepPositions(pos, true);
     clampJointPositionsMechanical(pos);
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
-            ESP_LOGE(TAG, "stepForward setMotorSpeedLimit fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
-            ESP_LOGE(TAG, "stepForward setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    return true;
+    return sendThreeJointsPositionOrMit(pos, max_speed_rad_s);
 }
 
 bool LegControl::stepBackward(float max_speed_rad_s) {
@@ -258,19 +264,7 @@ bool LegControl::stepBackward(float max_speed_rad_s) {
     float pos[LEG_JOINT_COUNT];
     fillCurrentStepPositions(pos, false);
     clampJointPositionsMechanical(pos);
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorSpeedLimit(motor_ids_[i], max_speed_rad_s)) {
-            ESP_LOGE(TAG, "stepBackward setMotorSpeedLimit fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    for (int i = 0; i < LEG_JOINT_COUNT; i++) {
-        if (motor_ids_[i] != 0 && !deep_motor_->setMotorPositionRefOnly(motor_ids_[i], pos[i])) {
-            ESP_LOGE(TAG, "stepBackward setMotorPositionRefOnly fail id=%d", motor_ids_[i]);
-            return false;
-        }
-    }
-    return true;
+    return sendThreeJointsPositionOrMit(pos, max_speed_rad_s);
 }
 
 // --- MCP 工具注册 ---

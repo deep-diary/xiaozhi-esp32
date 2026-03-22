@@ -99,8 +99,8 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
     uint8_t master_id = RX_29ID_DISASSEMBLE_MASTER_ID(can_frame.identifier);
 
     
-    ESP_LOGI(TAG, "<<<<<<<<<<<收到电机反馈帧: ID=0x%08lX, 电机ID=%d, 主机ID=%d", 
-             can_frame.identifier, motor_id, master_id);
+    ESP_LOGD(TAG, "<<<<<<<<<<<收到电机反馈帧: ID=0x%08lX, 电机ID=%d, 主机ID=%d",
+             (unsigned long)can_frame.identifier, motor_id, master_id);
 
     // 查找或注册电机
     int8_t motor_index = findMotorIndex(motor_id);
@@ -145,13 +145,9 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
             led_state.is_error = (motor_statuses_[motor_index].error_status != 0);
             led_state.valid_range = {0.0f, 0.0f, false}; // 默认无效范围
             
-            // 添加调试日志
-            ESP_LOGI(TAG, "更新电机%d LED状态: 角度=%.3f rad (%.1f°), 移动=%s, 错误=%s", 
-                     motor_id, 
-                     led_state.current_angle, 
-                     led_state.current_angle * 180.0f / 3.14159f,
-                     led_state.is_moving ? "是" : "否",
-                     led_state.is_error ? "是" : "否");
+            ESP_LOGD(TAG, "更新电机%d LED状态: 角度=%.3f rad (%.1f°), 移动=%s, 错误=%s", motor_id,
+                     led_state.current_angle, led_state.current_angle * 180.0f / 3.14159f,
+                     led_state.is_moving ? "是" : "否", led_state.is_error ? "是" : "否");
             
             led_state_manager_->SetMotorAngleState(motor_id, led_state);
         }
@@ -432,8 +428,7 @@ void DeepMotor::initStatusTask(void* parameter) {
     
     while (true) {
         if (motor_id != MOTOR_ID_UNREGISTERED) {
-            // 发送位置模式查询，获取电机状态
-            MotorProtocol::setMotorPositionMode(static_cast<uint8_t>(motor_id));
+            (void)MotorProtocol::sendRunModeForStatusQuery(static_cast<uint8_t>(motor_id));
         }
         vTaskDelay(pdMS_TO_TICKS(INIT_STATUS_RATE_MS));
     }
@@ -447,8 +442,7 @@ void DeepMotor::recordingTask(void* parameter) {
     
     while (motor_manager->teaching_mode_) {
         if (motor_id != MOTOR_ID_UNREGISTERED) {
-            // 发送位置模式查询，获取实时位置
-            MotorProtocol::setMotorPositionMode(static_cast<uint8_t>(motor_id));
+            (void)MotorProtocol::sendRunModeForStatusQuery(static_cast<uint8_t>(motor_id));
         }
         vTaskDelay(pdMS_TO_TICKS(TEACHING_SAMPLE_RATE_MS));
     }
@@ -933,5 +927,21 @@ bool DeepMotor::setMotorIqRef(uint8_t motor_id, float iq_ref) {
     }
     motor_cmd_cache_[idx].iq_ref = iq_ref;
     motor_cmd_cache_[idx].iq_known = true;
+    return true;
+}
+
+bool DeepMotor::setMotorMitCommand(uint8_t motor_id, float position_rad, float velocity_rad_s, float kp, float kd,
+                                   float torque_ff) {
+    int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        ESP_LOGW(TAG, "setMotorMitCommand: 电机 %d 未注册", motor_id);
+        return false;
+    }
+    (void)setMotorTargetAngle(motor_id, position_rad);
+    if (!MotorProtocol::controlMotor(motor_id, position_rad, velocity_rad_s, kp, kd, torque_ff)) {
+        ESP_LOGW(TAG, "setMotorMitCommand: 电机 %d 运控帧发送失败", motor_id);
+        return false;
+    }
+    invalidateMotorCommandCache(motor_id);
     return true;
 }

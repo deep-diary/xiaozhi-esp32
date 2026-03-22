@@ -144,13 +144,13 @@
 
 | 子步 | 内容 | 实现要点 |
 |------|------|----------|
-| 7.3 | 协议层封装运控发送 | `protocol_motor` 已有 `MOTOR_CTRL_MODE` 等；`DeepMotor` 增加统一「运控下发表」接口 |
-| 7.4 | 上层适配 | `LegControl` / `DogControl` 输出不仅目标角，还有可选 kp/kd/前馈；**默认参数表**按关节标定 |
+| 7.3 | 协议层封装运控发送 | ✅ `MotorProtocol::controlMotor`（p/v/kp/kd）+ `initializeMotorMitMode`；`DeepMotor::setMotorMitCommand` |
+| 7.4 | 上层适配 | ✅ `LegControl`/`DogControl` 内 `#if DEEP_DOG_USE_MIT_WALK` + `DEEP_DOG_MIT_DEFAULT_*`；`config.h`：`DEEP_DOG_USE_MIT_WALK`、`DEEP_DOG_MIT_VALIDATE_FL_ONLY` |
 
 **测试与验证**
 
 - 对比示波/录包：同一大步，插值前后机身冲击与电流尖峰。
-- 运控：阶跃与斜坡下超调、稳态误差；与现位置模式 A/B 对比。
+- 运控：阶跃与斜坡下超调、稳态误差；与现位置模式 A/B 对比；**台架**可仅 FL：`DEEP_DOG_MIT_VALIDATE_FL_ONLY`，初始化后站立，按键 2/3 单步前/后验证帧与动作。
 - 压力：高插值频率下 CPU 占用与 CAN 负载率。
 
 ---

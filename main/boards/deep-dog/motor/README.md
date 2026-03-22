@@ -7,6 +7,7 @@
 - **`MotorProtocol`**：静态方法组帧/发帧（位置、限速、电流、模式、使能等），解析反馈帧。
 - **`DeepMotor`**：电机注册、反馈状态缓存、**目标量与「上次成功下发」缓存**（可去重跳过相同 CAN）、录制/播放、LED 状态（可选）、与 MCP 工具对接（见 `deep_motor_control.cc`）。
 - **不直接**在业务层操作 `ESP32Can`，统一经 `MotorProtocol::sendCanFrame` → `ESP32Can.writeFrame`。
+- 核对报文：`config.h` 中 **`DEEP_DOG_CAN_HEX_LOG`** 为 1 时，`MotorProtocol::sendCanFrame` 与板级 `CanRxTask` 以 **INFO** 打印 **CAN TX/RX** 的扩展 id、dlc、8 字节 HEX；调完改为 0。
 
 ---
 
@@ -14,7 +15,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `protocol_motor.h` / `protocol_motor.cpp` | 29 位扩展帧 ID、参数索引（`PARAM_LOC_REF`、`PARAM_LIMIT_SPD`、`PARAM_IQ_REF` 等）、`initializeMotor`、`setPosition`/`setPositionOnly`、`setSpeed`、`setCurrent`、`controlMotor`、反馈解析 `parseMotorData` |
+| `protocol_motor.h` / `protocol_motor.cpp` | 29 位扩展帧 ID、参数索引（`PARAM_LOC_REF`、`PARAM_LIMIT_SPD`、`PARAM_IQ_REF` 等）、`initializeMotor`、`setPosition`/`setPositionOnly`、`setSpeed`、`setCurrent`、`controlMotor`、反馈解析 `parseMotorData`；**`sendRunModeForStatusQuery`**：按 `DEEP_DOG_USE_MIT_WALK` 周期性写 RUN_MODE（MIT 或位置）以配合反馈 |
 | `deep_motor.h` / `deep_motor.cpp` | 多电机注册表、`motor_status_t[]` 反馈、`MotorCommandCache` 下发去重、`processCanFrame`、位置/限速/IQ 下发封装 |
 | `deep_motor_control.cc` / `deep_motor_control.h` | MCP 工具注册（`self.can.*`、`self.motor.*`），供语音/调试 |
 | `deep_motor_led_state.*` | 角度 LED 指示（需灯带） |
@@ -68,9 +69,26 @@ deep_motor->setMotorPositionRefOnly(motor_id, position_rad);
 // 电流环目标（PARAM_IQ_REF）
 deep_motor->setMotorIqRef(motor_id, iq_ref);
 
+// 运控帧（角/角速/Kp/Kd，量程在 protocol 内裁剪）；发后会 invalidate 位置类缓存
+deep_motor->setMotorMitCommand(motor_id, position_rad, velocity_rad_s, kp, kd, torque_ff /* N·m，编码入 CAN ID */);
+
 // 外部协议直接改驱动状态后
 deep_motor->invalidateMotorCommandCache(motor_id);
 ```
+
+### 运控（MIT）通信类型 1（EL05）
+
+- **29 位 ID**：bit24–28=命令类型 `0x1`；**bit8–23=前馈力矩**（uint16，±6 N·m）；bit0–7=电机 ID。`buildMitControlCanId`。
+- **8 字节数据**：目标角、目标角速度、Kp、Kd；各 16 位 **大端**，`floatToUint16` 按 `P_MIN/P_MAX`（±12.57 rad）、`V_MIN/V_MAX`（±50 rad/s）、`KP_*`、`KD_*` 裁剪。
+
+`initializeMotorMitMode`：`reset` → `setMotorZero` → `setMotorControlMode` → `PARAM_LIMIT_SPD` → `enableMotor` → 一帧运控保持（τ=0）。
+
+整机验证：`config.h` 中 `DEEP_DOG_USE_MIT_WALK` + 可选 `DEEP_DOG_MIT_VALIDATE_FL_ONLY`；腿/整机初始化与下发均由 **`DEEP_DOG_USE_MIT_WALK`** 与 **`DEEP_DOG_MIT_DEFAULT_*`** 统一控制（见 `leg_control.cc` / `dog_control.cc`）。
+
+### MCP 单电机 MIT（`deep_motor_control.cc`）
+
+- `self.motor.initialize_mit`：`motor_id`、`max_speed`（整数 ÷10 = rad/s，默认 10 → 1 rad/s，上限 50 rad/s）→ `MotorProtocol::initializeMotorMitMode`，并 `registerMotor`。
+- `self.can.control_motor`：`position_x10`、`velocity_x10`、`kp_x10`、`kd_x10`、`tau_ff_x10` 均为 **整数÷10** 得 rad、rad/s、kp、kd、τ → `DeepMotor::setMotorMitCommand`（会先注册）。默认除扭矩外 **物理量 1.0**（对应 `_x10` 均为 10，`tau_ff_x10` 默认 0）。
 
 底层仍可直接调 `MotorProtocol::initializeMotor`、`resetMotor` 等（如 `LegControl::init`）；建议与 `invalidateMotorCommandCache` 策略保持一致。
 

@@ -71,10 +71,17 @@ private:
         CanFrame frame;
         while (1) {
             if (ESP32Can.readFrame(&frame, 50)) {
-                ESP_LOGI(TAG, "CAN RX: id=0x%08lX extd=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X",
-                         (unsigned long)frame.identifier, frame.extd ? 1 : 0, frame.data_length_code,
-                         frame.data[0], frame.data[1], frame.data[2], frame.data[3],
-                         frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+#if DEEP_DOG_CAN_HEX_LOG
+                ESP_LOGI(TAG, "CAN RX ext id=0x%08lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+                         (unsigned long)frame.identifier, (unsigned)frame.data_length_code, frame.data[0],
+                         frame.data[1], frame.data[2], frame.data[3], frame.data[4], frame.data[5], frame.data[6],
+                         frame.data[7]);
+#else
+                ESP_LOGD(TAG, "CAN RX id=0x%08lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+                         (unsigned long)frame.identifier, (unsigned)frame.data_length_code, frame.data[0],
+                         frame.data[1], frame.data[2], frame.data[3], frame.data[4], frame.data[5], frame.data[6],
+                         frame.data[7]);
+#endif
                 if (motor) {
                     motor->processCanFrame(frame);
                 }
@@ -241,12 +248,12 @@ private:
 
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
-        // 临时屏蔽电机级 MCP（开源项目 MCP 上限约 32，优先测试腿/整机控制；需要单电机调试时取消注释）
-        // RegisterMotorMcpTools(mcp_server, deep_motor_);
         dog_.setDeepMotor(deep_motor_);
-        dog_.getLegs(leg_ptrs_);  // leg_ptrs_[0..3] 指向 dog_ 内 4 条腿
-        RegisterLegMcpTools(mcp_server, leg_ptrs_);   // 单腿调试：self.leg.*
-        RegisterDogMcpTools(mcp_server, &dog_);        // 整机：self.dog.* / self.chassis.*
+        dog_.getLegs(leg_ptrs_);
+        // MCP 数量上限约 32：单电机/MIT 调试时只开电机工具，腿/整机先注释，需要整机时再改回
+        RegisterMotorMcpTools(mcp_server, deep_motor_);
+        // RegisterLegMcpTools(mcp_server, leg_ptrs_);
+        RegisterDogMcpTools(mcp_server, &dog_);
     }
 
 public:

@@ -181,7 +181,7 @@ public:
      * @param max_speed 最大速度（弧度/秒）
      * @return true 成功, false 失败
      */
-    bool setMotorPosition(uint8_t motor_id, float position, float max_speed = 30.0f);
+    bool setMotorPosition(uint8_t motor_id, float position, float max_speed = 50.0f);
 
     /** 仅下发速度限制（PARAM_LIMIT_SPD），用于批量动作前统一限速 */
     bool setMotorSpeedLimit(uint8_t motor_id, float max_speed_rad_s);
@@ -194,6 +194,13 @@ public:
      * 若与上次成功下发值一致则跳过 CAN。
      */
     bool setMotorIqRef(uint8_t motor_id, float iq_ref);
+
+    /**
+     * 运控帧下发（位置+速度+Kp+Kd+前馈力矩；力矩编码在 29 位 CAN ID bit8–23，见 protocol_motor）。
+     * 会 invalidate 位置/速度参数缓存，避免与后续位置模式指令混淆。
+     */
+    bool setMotorMitCommand(uint8_t motor_id, float position_rad, float velocity_rad_s, float kp, float kd,
+                            float torque_ff = 0.0f);
 
     /**
      * 若通过 MotorProtocol 直接 reset/改模式等，与本类缓存不一致时调用，强制后续指令重新下发。

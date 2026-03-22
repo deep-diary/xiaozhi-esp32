@@ -8,10 +8,7 @@
 #include "../can/ESP32-TWAI-CAN.hpp"
 
 /**
- * @brief 电机协议层 - 用于构建和发送CAN帧控制小米电机
- * 
- * 支持多电机控制，每个电机通过唯一的ID进行标识
- * 提供统一的接口来构建各种控制命令的CAN帧
+ * @brief 电机协议层（EL05 说明书：通信类型 1 运控帧等）
  */
 
 // CAN配置常量
@@ -23,24 +20,24 @@
 #define MOTOR_PI 3.14159265359f
 #endif
 
-// 常量定义
-#define P_MIN           -12.5f 
-#define P_MAX           12.5f 
-#define V_MIN           -30.0f 
-#define V_MAX           30.0f 
-#define KP_MIN          0.0f 
-#define KP_MAX          500.0f 
-#define KD_MIN          0.0f 
-#define KD_MAX          5.0f 
-#define T_MIN           -12.0f 
-#define T_MAX           12.0f
+// 运控 8 字节数据区：各量 16 位线性映射（与 EL05 说明书一致）
+#define P_MIN           -12.57f
+#define P_MAX           12.57f
+#define V_MIN           -50.0f
+#define V_MAX           50.0f
+#define KP_MIN          0.0f
+#define KP_MAX          500.0f
+#define KD_MIN          0.0f
+#define KD_MAX          5.0f
+/** 运控 CAN ID bit8–23：前馈力矩，线性 ±6 N·m；反馈数据区力矩同量程 */
+#define T_FF_MIN        -6.0f
+#define T_FF_MAX         6.0f
 #define I_MIN           -23.0f
 #define I_MAX           23.0f
 
-// 转换系数
-#define INT2ANGLE       0.000383501049f  // angle = data * 8PI/65535 - 4PI
-#define INT2SPEED       0.000915541314f  // speed = data * 60/65535 - 30
-#define INT2TORQUE      0.000366216526f  // torque = data * 24/65535 - 12
+/** 兼容旧命名 */
+#define T_MIN           T_FF_MIN
+#define T_MAX           T_FF_MAX
 
 // 宏定义用于解析29位ID
 // 29位CAN ID布局：
@@ -152,23 +149,24 @@ public:
     static bool setMotorZero(uint8_t motor_id);
 
     /**
-     * @brief 运控模式控制
-     * @param motor_id 电机ID
-     * @param torque 扭矩 (-12.0 ~ +12.0 N·m)
-     * @param position 位置 (-12.5 ~ +12.5 rad)
-     * @param speed 速度 (-30.0 ~ +30.0 rad/s)
-     * @param kp 位置Kp (0.0 ~ 500.0)
-     * @param kd 位置Kd (0.0 ~ 5.0)
-     * @return true 成功, false 失败
+     * @brief 运控模式（通信类型 1）
+     * - 29 位 ID：bit24–28=0x1；bit8–23=前馈力矩（uint16，T_FF_MIN～T_FF_MAX）；bit0–7=电机 ID。
+     * - 8 字节数据：目标角、目标角速度、Kp、Kd；各 16 位 **大端**（高字节在前）。
      */
-    static bool controlMotor(uint8_t motor_id, float torque, float position, 
-                           float speed, float kp, float kd);
+    static bool controlMotor(uint8_t motor_id, float position, float velocity, float kp, float kd,
+                             float torque_ff = 0.0f);
+
+    /**
+     * @brief 运控模式初始化：写零 → 切 MOTOR_CTRL_MODE → 限速 → 使能 → 发一帧运控保持（p=0,v=0,kp/kd 默认 2/0.5）。
+     * 许多驱动在仅 enable、无运控帧时不上扭矩；保持帧与位置模式 init 后立即可抱闸相当。
+     */
+    static bool initializeMotorMitMode(uint8_t motor_id, float max_speed_rad_s);
 
     /**
      * @brief 设置电机位置
      * @param motor_id 电机ID
-     * @param position 目标位置 (-12.5 ~ +12.5 rad)
-     * @param max_speed 最大速度 (0.0 ~ 30.0 rad/s)
+     * @param position 目标位置 (P_MIN～P_MAX rad)
+     * @param max_speed 最大速度 (0.0 ~ 50.0 rad/s，与 V_MAX 一致)
      * @return true 成功, false 失败
      */
     static bool setPosition(uint8_t motor_id, float position, float max_speed);
@@ -176,7 +174,7 @@ public:
     /**
      * @brief 只设置电机位置（不设置速度限制）
      * @param motor_id 电机ID
-     * @param position 目标位置 (-12.5 ~ +12.5 rad)
+     * @param position 目标位置 (P_MIN～P_MAX rad)
      * @return true 成功, false 失败
      */
     static bool setPositionOnly(uint8_t motor_id, float position);
@@ -184,7 +182,7 @@ public:
     /**
      * @brief 设置电机速度
      * @param motor_id 电机ID
-     * @param speed 目标速度 (-30.0 ~ +30.0 rad/s)
+     * @param speed 目标速度 (-50.0 ~ +50.0 rad/s)
      * @return true 成功, false 失败
      */
     static bool setSpeed(uint8_t motor_id, float speed);
@@ -242,6 +240,12 @@ public:
     static bool setMotorPositionMode(uint8_t motor_id);
 
     /**
+     * @brief 周期性「状态查询」占位：发送 SET_PARAM 写 RUN_MODE，与当前工程协议一致以触发/维持反馈。
+     *        由 config.h `DEEP_DOG_USE_MIT_WALK` 决定写 **运控(MIT)** 还是 **位置模式**（非独立读寄存器帧）。
+     */
+    static bool sendRunModeForStatusQuery(uint8_t motor_id);
+
+    /**
      * @brief 电机初始化函数（含设置零位）
      * @param motor_id 电机ID
      * @param max_speed 最大速度 (rad/s)，默认 1.0
@@ -293,12 +297,14 @@ public:
 
 private:
     /**
-     * @brief 构建CAN帧ID
-     * @param motor_id 电机ID
-     * @param cmd 命令类型
-     * @return 29位CAN ID
+     * @brief 构建CAN帧ID（非运控：主机号 MOTOR_MASTER_ID 在 bit8–15）
      */
     static uint32_t buildCanId(uint8_t motor_id, motor_cmd_t cmd);
+
+    /**
+     * @brief 运控模式（通信类型 1）29 位 ID：cmd|扭矩(16bit)|motor_id
+     */
+    static uint32_t buildMitControlCanId(uint8_t motor_id, float torque_ff_nm);
 
     /**
      * @brief 发送CAN帧

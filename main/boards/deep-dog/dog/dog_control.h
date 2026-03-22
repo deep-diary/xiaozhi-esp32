@@ -36,7 +36,7 @@ public:
     /** 整机姿态状态（趴下/站立/行走中等），供板级 LED 等使用 */
     DogPoseState getPoseState() const { return state_machine_.state(); }
 
-    /** 整机初始化：4 条腿各 3 电机使能、位置模式 */
+    /** 整机初始化：4 条腿各调用 LegControl::init（电机模式由 DEEP_DOG_USE_MIT_WALK 决定） */
     bool init();
 
     /** 整机站立：4 条腿回站立位 */
@@ -114,6 +114,9 @@ private:
     /** 12 关节目标统一做机械限位裁剪（README 机械列） */
     void clampLegsMechanical(float pos[4][LEG_JOINT_COUNT]);
 
+    /** 12 电机：先统一限速，再按关节同步下发；模式与 LegControl 一致（DEEP_DOG_USE_MIT_WALK） */
+    bool sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], float max_speed_rad_s);
+
     /** 下发前打印 12 关节目标角（rad/°），不打印 CAN 报文 */
     void logJointTargetsBeforeSend(const char* motion_label, const float pos[4][LEG_JOINT_COUNT]) const;
 
@@ -124,6 +127,8 @@ private:
     // 若重复调用可能导致机械抖动/意外转动。
     // 因此这里做一次性标记：初始化成功后只允许执行一次。
     bool initialized_ = false;
+
+    bool mit_fl_only_ = false;
 };
 
 /**

@@ -1,9 +1,15 @@
 #include "protocol_motor.h"
+#include "../config.h"
 #include <esp_log.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 static const char* TAG = "MotorProtocol";
+
+/** MIT 模式：仅 enable 时许多驱动仍不上扭矩，需至少一帧运控指令后才进入闭环保持 */
+static constexpr float kMitInitHoldVel = 0.0f;
+static constexpr float kMitInitHoldKp = 1.0f;
+static constexpr float kMitInitHoldKd = 1.0f;
 
 
 
@@ -84,40 +90,80 @@ bool MotorProtocol::setMotorZero(uint8_t motor_id) {
     return sendCanFrame(frame);
 }
 
-bool MotorProtocol::controlMotor(uint8_t motor_id, float torque, float position, 
-                                float speed, float kp, float kd) {
+bool MotorProtocol::controlMotor(uint8_t motor_id, float position, float velocity, float kp, float kd,
+                                 float torque_ff) {
     CanFrame frame;
     memset(&frame, 0, sizeof(frame));
-    
-    frame.identifier = buildCanId(motor_id, MOTOR_CMD_CONTROL);
+
+    // EL05：通信类型 1，bit8–23 为前馈力矩（±6 N·m），bit0–7 为电机 ID；勿再用固定主机字节 0xFD 占位
+    frame.identifier = buildMitControlCanId(motor_id, torque_ff);
     frame.extd = 1;
     frame.rtr = 0;
     frame.ss = 0;
     frame.self = 0;
     frame.dlc_non_comp = 0;
     frame.data_length_code = 8;
-    
-    // 设置扭矩数据（大端序）
-    uint16_t torque_data = floatToUint16(torque, T_MIN, T_MAX, 16);
-    frame.data[0] = torque_data & 0xFF;
-    frame.data[1] = (torque_data >> 8) & 0xFF;
-    
-    // 设置位置数据（大端序）
+
+    // 8 字节：目标角、角速度、Kp、Kd；各 16 位 **大端**（高字节在前）。
     uint16_t pos_data = floatToUint16(position, P_MIN, P_MAX, 16);
-    frame.data[2] = pos_data & 0xFF;
-    frame.data[3] = (pos_data >> 8) & 0xFF;
-    
-    // 设置速度数据（大端序）
-    uint16_t speed_data = floatToUint16(speed, V_MIN, V_MAX, 16);
-    frame.data[4] = speed_data & 0xFF;
-    frame.data[5] = (speed_data >> 8) & 0xFF;
-    
-    // 设置Kp数据（大端序）
+    frame.data[0] = (pos_data >> 8) & 0xFF;
+    frame.data[1] = pos_data & 0xFF;
+
+    uint16_t vel_data = floatToUint16(velocity, V_MIN, V_MAX, 16);
+    frame.data[2] = (vel_data >> 8) & 0xFF;
+    frame.data[3] = vel_data & 0xFF;
+
     uint16_t kp_data = floatToUint16(kp, KP_MIN, KP_MAX, 16);
-    frame.data[6] = kp_data & 0xFF;
-    frame.data[7] = (kp_data >> 8) & 0xFF;
-    
+    frame.data[4] = (kp_data >> 8) & 0xFF;
+    frame.data[5] = kp_data & 0xFF;
+
+    uint16_t kd_data = floatToUint16(kd, KD_MIN, KD_MAX, 16);
+    frame.data[6] = (kd_data >> 8) & 0xFF;
+    frame.data[7] = kd_data & 0xFF;
+
     return sendCanFrame(frame);
+}
+
+uint32_t MotorProtocol::buildMitControlCanId(uint8_t motor_id, float torque_ff_nm) {
+    uint16_t torque_u16 = floatToUint16(torque_ff_nm, T_FF_MIN, T_FF_MAX, 16);
+    uint32_t id = 0;
+    id |= ((uint32_t)MOTOR_CMD_CONTROL << 24);
+    id |= ((uint32_t)torque_u16 << 8);
+    id |= (uint32_t)motor_id;
+    return id & 0x1FFFFFFFu;
+}
+
+bool MotorProtocol::initializeMotorMitMode(uint8_t motor_id, float max_speed_rad_s) {
+    ESP_LOGI(TAG, "MIT 模式初始化电机%d，限速 %.2f rad/s", motor_id, max_speed_rad_s);
+    resetMotor(motor_id);
+    if (!setMotorZero(motor_id)) {
+        ESP_LOGE(TAG, "MIT init: 电机%d 写零失败", motor_id);
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    if (!setMotorControlMode(motor_id)) {
+        ESP_LOGE(TAG, "MIT init: 电机%d 切运控模式失败", motor_id);
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    if (!setMotorParameter(motor_id, PARAM_LIMIT_SPD, max_speed_rad_s)) {
+        ESP_LOGE(TAG, "MIT init: 电机%d 限速失败", motor_id);
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    if (!enableMotor(motor_id)) {
+        ESP_LOGE(TAG, "MIT init: 电机%d 使能失败", motor_id);
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    // 刚写完机械零，目标角 0 = 保持当前姿态；v=0 与前馈速度为 0 对齐
+    if (!controlMotor(motor_id, 0.0f, kMitInitHoldVel, kMitInitHoldKp, kMitInitHoldKd, 0.0f)) {
+        ESP_LOGE(TAG, "MIT init: 电机%d 初始运控保持帧发送失败", motor_id);
+        return false;
+    }
+    ESP_LOGI(TAG, "MIT 模式电机%d 初始化完成（已发保持帧 p=0 v=%.1f kp=%.1f kd=%.1f）", motor_id, kMitInitHoldVel,
+             kMitInitHoldKp, kMitInitHoldKd);
+    return true;
 }
 
 bool MotorProtocol::setPosition(uint8_t motor_id, float position, float max_speed) {
@@ -190,6 +236,14 @@ bool MotorProtocol::setMotorSpeedMode(uint8_t motor_id) {
 
 bool MotorProtocol::setMotorPositionMode(uint8_t motor_id) {
     return setMotorRunMode(motor_id, MOTOR_POS_MODE);
+}
+
+bool MotorProtocol::sendRunModeForStatusQuery(uint8_t motor_id) {
+#if DEEP_DOG_USE_MIT_WALK
+    return setMotorControlMode(motor_id);
+#else
+    return setMotorPositionMode(motor_id);
+#endif
 }
 
 bool MotorProtocol::initializeMotor(uint8_t motor_id, float max_speed) {
@@ -344,12 +398,15 @@ uint32_t MotorProtocol::buildCanId(uint8_t motor_id, motor_cmd_t cmd) {
 }
 
 bool MotorProtocol::sendCanFrame(const CanFrame& frame) {
-    // 批量运动时帧频高，用 DEBUG 避免 UART 打印拖慢总线节奏
-    ESP_LOGD(TAG, ">>>>>>>>>>发送CAN帧: id=0x%08lX, len=0x%02X, data=%02X %02X %02X %02X %02X %02X %02X %02X",
-             (unsigned long)frame.identifier,
-             frame.data_length_code,
-             frame.data[0], frame.data[1], frame.data[2], frame.data[3],
-             frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+#if DEEP_DOG_CAN_HEX_LOG
+    ESP_LOGI(TAG, "CAN TX ext id=0x%08lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+             (unsigned long)frame.identifier, (unsigned)frame.data_length_code, frame.data[0], frame.data[1],
+             frame.data[2], frame.data[3], frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+#else
+    ESP_LOGD(TAG, "CAN TX id=0x%08lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+             (unsigned long)frame.identifier, (unsigned)frame.data_length_code, frame.data[0], frame.data[1],
+             frame.data[2], frame.data[3], frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+#endif
     bool ok = ESP32Can.writeFrame(frame, MOTOR_CAN_TIMEOUT_MS);
     if (!ok) {
         ESP_LOGE(TAG, "CAN 发送失败 (无ACK或超时 %dms)", (int)MOTOR_CAN_TIMEOUT_MS);
@@ -368,12 +425,11 @@ uint16_t MotorProtocol::floatToUint16(float value, float min_val, float max_val,
 }
 
 void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* status) {
-    // 解析29位ID
-    uint8_t cmd_type = RX_29ID_DISASSEMBLE_CMD_TYPE(can_frame.identifier);
-    ESP_LOGI(TAG, "电机%d命令类型: %d", status->motor_id, cmd_type);
-    
+    const uint8_t cmd_type = RX_29ID_DISASSEMBLE_CMD_TYPE(can_frame.identifier);
     status->master_id = RX_29ID_DISASSEMBLE_MASTER_ID(can_frame.identifier);
     status->motor_id = RX_29ID_DISASSEMBLE_MOTOR_ID(can_frame.identifier);
+    ESP_LOGD(TAG, "电机%d命令类型: %d", status->motor_id, cmd_type);
+
     status->error_status = RX_29ID_DISASSEMBLE_ERR_STA(can_frame.identifier);
     status->hall_error = RX_29ID_DISASSEMBLE_HALL_ERR(can_frame.identifier);
     status->magnet_error = RX_29ID_DISASSEMBLE_MAGNET_ERR(can_frame.identifier);
@@ -384,12 +440,20 @@ void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* st
     
     // 解析数据
     switch (cmd_type) {
-        case MOTOR_CMD_FEEDBACK:
-            status->current_angle = RX_DATA_DISASSEMBLE_CUR_ANGLE(can_frame.data) * INT2ANGLE - 4 * MOTOR_PI;
-            status->current_speed = RX_DATA_DISASSEMBLE_CUR_SPEED(can_frame.data) * INT2SPEED - 30;
-            status->current_torque = RX_DATA_DISASSEMBLE_CUR_TORQUE(can_frame.data) * INT2TORQUE - 12;
+        case MOTOR_CMD_FEEDBACK: {
+            // 与运控指令相同：8 字节内各量 16 位大端、线性映射（EL05）
+            const uint16_t raw_a = RX_DATA_DISASSEMBLE_CUR_ANGLE(can_frame.data);
+            const uint16_t raw_s = RX_DATA_DISASSEMBLE_CUR_SPEED(can_frame.data);
+            const uint16_t raw_t = RX_DATA_DISASSEMBLE_CUR_TORQUE(can_frame.data);
+            const float span_p = (P_MAX - P_MIN);
+            const float span_v = (V_MAX - V_MIN);
+            const float span_t = (T_FF_MAX - T_FF_MIN);
+            status->current_angle = P_MIN + (float)raw_a * span_p / 65535.0f;
+            status->current_speed = V_MIN + (float)raw_s * span_v / 65535.0f;
+            status->current_torque = T_FF_MIN + (float)raw_t * span_t / 65535.0f;
             status->current_temp = RX_DATA_DISASSEMBLE_CUR_TEMP(can_frame.data) / 10.0f;
             break;
+        }
         case MOTOR_CMD_VERSION:
             RX_DATA_DISASSEMBLE_VERSION_STR(can_frame.data, status->version, sizeof(status->version));
             // 打印 can_frame.data

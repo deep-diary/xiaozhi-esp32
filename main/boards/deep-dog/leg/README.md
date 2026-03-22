@@ -77,6 +77,10 @@
 
 参数 `leg_id`：支持 `fl`/`fr`/`rl`/`rr`、中文「前左」「左前」、以及 `1`–`4` 号腿等（见 `leg_control.cc` 中 `str_to_leg_index`）。
 
+**电机模式（统一）**：由 `config.h` 中 **`DEEP_DOG_USE_MIT_WALK`** 一处决定整条链路：`LegControl::init` / `sendThreeJointsPositionOrMit` 与 `DogControl::sendAllLegJointTargets` 均用 `#if` 选择 **MIT** 或 **位置模式**；运控增益为 **`DEEP_DOG_MIT_DEFAULT_KP/KD/TAU_FF`**（默认 1/1/0，与单电机 MCP 对齐），MIT 初始化限速为 **`DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S`**。无需再在各层 `setMitMode`。
+
+**建议单腿台架测试顺序**：机身可靠支撑 → 选一条腿 → `self.leg.init`（观察该腿 3 轴 CAN 与日志）→ `self.leg.stand` → 小幅度 `step_forward` / `step_back` → `self.leg.lie_down` 或 `self.motor.reset_motor`（单电机 MCP）按需失能。**期望**：无报错字符串；关节按站立/步态/卧倒方向平滑运动，且被机械限位夹紧时日志有 `机械限位裁剪`。
+
 ---
 
 ## 与上下层关系
@@ -90,7 +94,7 @@
 ## 开发状态（摘要）
 
 - [x] `LegControl` 与单腿 MCP  
-- [x] 与 `DeepMotor` 限速 + 仅位置下发  
+- [x] 与 `DeepMotor` 限速 + 运控/位置参考下发（见 `DEEP_DOG_USE_MIT_WALK`）  
 - [x] 整机层关节同步站立/迈步（见 `dog_control.cc`）  
 
 更多电机编号与限位以 `../dog/README.md` 为准。

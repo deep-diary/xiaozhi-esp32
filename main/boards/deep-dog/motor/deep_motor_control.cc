@@ -6,28 +6,28 @@
 
 static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_motor) {
     // CAN控制工具
-    mcp_server.AddTool("self.can.send_motor_position", "发送电机位置控制指令", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
-        Property("position", kPropertyTypeInteger, 200, -314, 314)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
-        int position_int = properties["position"].value<int>();
-        float position = position_int / 100.0f; // 转换为浮点数（保留2位小数）
+    // mcp_server.AddTool("self.can.send_motor_position", "发送电机位置控制指令", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
+    //     Property("position", kPropertyTypeInteger, 200, -314, 314)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
+    //     int position_int = properties["position"].value<int>();
+    //     float position = position_int / 100.0f; // 转换为浮点数（保留2位小数）
         
-        if (!deep_motor) {
-            ESP_LOGW(TAG, "深度电机管理器未初始化");
-            return std::string("深度电机管理器未初始化");
-        }
+    //     if (!deep_motor) {
+    //         ESP_LOGW(TAG, "深度电机管理器未初始化");
+    //         return std::string("深度电机管理器未初始化");
+    //     }
         
-        // 使用电机类方法发送位置控制指令，自动保存目标位置
-        if (deep_motor->setMotorPosition(motor_id, position, 10.0f)) {
-            ESP_LOGI(TAG, "发送电机位置控制指令成功 - 电机ID: %d, 位置: %.2f 弧度", motor_id, position);
-            return std::string("电机ID " + std::to_string(motor_id) + " 位置设置成功: " + std::to_string(position) + " 弧度");
-        } else {
-            ESP_LOGE(TAG, "发送电机位置控制指令失败 - 电机ID: %d", motor_id);
-            return std::string("电机ID " + std::to_string(motor_id) + " 位置设置失败");
-        }
-    });
+    //     // 使用电机类方法发送位置控制指令，自动保存目标位置
+    //     if (deep_motor->setMotorPosition(motor_id, position, 10.0f)) {
+    //         ESP_LOGI(TAG, "发送电机位置控制指令成功 - 电机ID: %d, 位置: %.2f 弧度", motor_id, position);
+    //         return std::string("电机ID " + std::to_string(motor_id) + " 位置设置成功: " + std::to_string(position) + " 弧度");
+    //     } else {
+    //         ESP_LOGE(TAG, "发送电机位置控制指令失败 - 电机ID: %d", motor_id);
+    //         return std::string("电机ID " + std::to_string(motor_id) + " 位置设置失败");
+    //     }
+    // });
 
     // // 电机速度控制工具
     // mcp_server.AddTool("self.can.send_motor_speed", "发送电机速度控制指令", PropertyList(std::vector<Property>{
@@ -77,31 +77,47 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         }
     });
 
-    // // 电机运控模式工具
-    // mcp_server.AddTool("self.can.control_motor", "电机运控模式控制", PropertyList(std::vector<Property>{
-    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
-    //     Property("torque", kPropertyTypeInteger, 0, -120, 120),
-    //     Property("position", kPropertyTypeInteger, 0, -125, 125),
-    //     Property("speed", kPropertyTypeInteger, 0, -300, 300),
-    //     Property("kp", kPropertyTypeInteger, 30, 0, 500),
-    //     Property("kd", kPropertyTypeInteger, 0, 0, 50)
-    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-    //     int motor_id = properties["motor_id"].value<int>();
-    //     float torque = properties["torque"].value<int>() / 10.0f;
-    //     float position = properties["position"].value<int>() / 10.0f;
-    //     float speed = properties["speed"].value<int>() / 10.0f;
-    //     float kp = properties["kp"].value<int>();
-    //     float kd = properties["kd"].value<int>() / 10.0f;
-        
-    //     if (MotorProtocol::controlMotor(motor_id, torque, position, speed, kp, kd)) {
-    //         ESP_LOGI(TAG, "电机运控模式控制成功 - 电机ID: %d, 扭矩: %.1f, 位置: %.1f, 速度: %.1f", 
-    //                  motor_id, torque, position, speed);
-    //         return true;
-    //     } else {
-    //         ESP_LOGE(TAG, "电机运控模式控制失败 - 电机ID: %d", motor_id);
-    //         return false;
-    //     }
-    // });
+    // 位置/角速/kp/kd/τ：一律「参数÷10 = 物理量」，与语音整数对齐
+    mcp_server.AddTool(
+        "self.can.control_motor",
+        "MIT 运控（先 registerMotor）。position_x10 等参数=物理量×10，设备上再÷10；不是用户念的数字原样放大。"
+        "例：目标 2rad 必须填 20；1rad→10；勿把「2弧度」填成 200（会超 ±125）。角速 2rad/s→20；kp=0.5→5；kd=0.5→5。"
+        "默认：除扭矩外均为物理量 1.0（position/velocity/kp/kd 的 _x10 默认 10，tau_ff 默认 0）。"
+        "position_x10 ±125；velocity_x10 ±500（÷10 后 ±50rad/s）；kp_x10 0～5000→kp 0～500；kd_x10 0～50→kd 0～5。",
+        PropertyList(std::vector<Property>{
+            Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
+            Property("position_x10", kPropertyTypeInteger, 10, -125, 125),
+            Property("velocity_x10", kPropertyTypeInteger, 10, -500, 500),
+            Property("kp_x10", kPropertyTypeInteger, 10, 0, 5000),
+            Property("kd_x10", kPropertyTypeInteger, 10, 0, 50),
+            Property("tau_ff_x10", kPropertyTypeInteger, 0, -60, 60),
+        }),
+        [deep_motor](const PropertyList& properties) -> ReturnValue {
+            const int motor_id = properties["motor_id"].value<int>();
+            const int pos_raw = properties["position_x10"].value<int>();
+            const float position = static_cast<float>(pos_raw) / 10.0f;
+            const float velocity = properties["velocity_x10"].value<int>() / 10.0f;
+            const float kp = properties["kp_x10"].value<int>() / 10.0f;
+            const float kd = properties["kd_x10"].value<int>() / 10.0f;
+            const float tau_ff = properties["tau_ff_x10"].value<int>() / 10.0f;
+
+            if (!deep_motor) {
+                return std::string("DeepMotor 未初始化");
+            }
+            const uint8_t mid = static_cast<uint8_t>(motor_id);
+            if (!deep_motor->isMotorRegistered(mid)) {
+                if (!deep_motor->registerMotor(mid)) {
+                    return std::string("registerMotor 失败（槽位已满或错误）");
+                }
+            }
+            if (deep_motor->setMotorMitCommand(mid, position, velocity, kp, kd, tau_ff)) {
+                ESP_LOGI(TAG, "MIT 下发成功 id=%d pos_x10=%d -> p=%.3f rad v=%.3f kp=%.2f kd=%.2f", motor_id, pos_raw,
+                         position, velocity, kp, kd);
+                return std::string("MIT 下发成功: id=" + std::to_string(motor_id));
+            }
+            ESP_LOGE(TAG, "MIT 下发失败 id=%d", motor_id);
+            return std::string("MIT 下发失败 id=" + std::to_string(motor_id));
+        });
 
     // 电机状态查询工具
     mcp_server.AddTool("self.motor.get_status", "获取电机状态", PropertyList(std::vector<Property>{
@@ -213,35 +229,35 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
     //     }
     // });
 
-    // 设置电机位置模式
-    mcp_server.AddTool("self.motor.set_position_mode", "设置电机为位置模式", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
+    // // 设置电机位置模式
+    // mcp_server.AddTool("self.motor.set_position_mode", "设置电机为位置模式", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
         
-        if (MotorProtocol::setMotorPositionMode(motor_id)) {
-            ESP_LOGI(TAG, "设置电机%d为位置模式成功", motor_id);
-            return std::string("设置电机" + std::to_string(motor_id) + "为位置模式成功");
-        } else {
-            ESP_LOGE(TAG, "设置电机%d为位置模式失败", motor_id);
-            return std::string("设置电机" + std::to_string(motor_id) + "为位置模式失败");
-        }
-    });
+    //     if (MotorProtocol::setMotorPositionMode(motor_id)) {
+    //         ESP_LOGI(TAG, "设置电机%d为位置模式成功", motor_id);
+    //         return std::string("设置电机" + std::to_string(motor_id) + "为位置模式成功");
+    //     } else {
+    //         ESP_LOGE(TAG, "设置电机%d为位置模式失败", motor_id);
+    //         return std::string("设置电机" + std::to_string(motor_id) + "为位置模式失败");
+    //     }
+    // });
 
-    // 设置电机零位
-    mcp_server.AddTool("self.motor.set_zero_position", "设置电机零位", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
+    // // 设置电机零位
+    // mcp_server.AddTool("self.motor.set_zero_position", "设置电机零位", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
         
-        if (MotorProtocol::setMotorZero(motor_id)) {
-            ESP_LOGI(TAG, "设置电机%d零位成功", motor_id);
-            return std::string("设置电机" + std::to_string(motor_id) + "零位成功");
-        } else {
-            ESP_LOGE(TAG, "设置电机%d零位失败", motor_id);
-            return std::string("设置电机" + std::to_string(motor_id) + "零位失败");
-        }
-    });
+    //     if (MotorProtocol::setMotorZero(motor_id)) {
+    //         ESP_LOGI(TAG, "设置电机%d零位成功", motor_id);
+    //         return std::string("设置电机" + std::to_string(motor_id) + "零位成功");
+    //     } else {
+    //         ESP_LOGE(TAG, "设置电机%d零位失败", motor_id);
+    //         return std::string("设置电机" + std::to_string(motor_id) + "零位失败");
+    //     }
+    // });
 
     // // 设置电机速度模式
     // mcp_server.AddTool("self.motor.set_speed_mode", "设置电机为速度模式", PropertyList(std::vector<Property>{
@@ -294,22 +310,48 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
 
     // ========== 电机初始化工具 ==========
     
-    // 电机初始化工具
-    mcp_server.AddTool("self.motor.initialize", "初始化电机", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
-        Property("max_speed", kPropertyTypeInteger, 300, 10, 300)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
-        int max_speed_int = properties["max_speed"].value<int>();
-        float max_speed = max_speed_int / 10.0f; // 转换为浮点数（保留1位小数）
+    // // 电机初始化工具（位置模式）
+    // mcp_server.AddTool("self.motor.initialize", "初始化电机（位置模式）", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
+    //     Property("max_speed", kPropertyTypeInteger, 300, 10, 300)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
+    //     int max_speed_int = properties["max_speed"].value<int>();
+    //     float max_speed = max_speed_int / 10.0f; // 转换为浮点数（保留1位小数）
         
-        if (MotorProtocol::initializeMotor(motor_id, max_speed)) {
-            ESP_LOGI(TAG, "电机%d初始化成功，最大速度: %.1f rad/s", motor_id, max_speed);
-            return std::string("电机" + std::to_string(motor_id) + "初始化成功，最大速度: " + std::to_string(max_speed) + " rad/s");
-        } else {
-            ESP_LOGE(TAG, "电机%d初始化失败", motor_id);
-            return std::string("电机" + std::to_string(motor_id) + "初始化失败");
+    //     if (MotorProtocol::initializeMotor(motor_id, max_speed)) {
+    //         ESP_LOGI(TAG, "电机%d初始化成功，最大速度: %.1f rad/s", motor_id, max_speed);
+    //         return std::string("电机" + std::to_string(motor_id) + "初始化成功，最大速度: " + std::to_string(max_speed) + " rad/s");
+    //     } else {
+    //         ESP_LOGE(TAG, "电机%d初始化失败", motor_id);
+    //         return std::string("电机" + std::to_string(motor_id) + "初始化失败");
+    //     }
+    // });
+
+    // MIT 运控模式初始化（写零、切运控、限速、使能、首帧保持）
+    mcp_server.AddTool("self.motor.initialize_mit", "初始化电机为MIT运控模式：reset、写零、运控模式、限速、使能、发保持帧。max_speed÷10=rad/s。", PropertyList(std::vector<Property>{
+        Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
+        // 默认 10 → 1.0 rad/s，须在 [10,500] 内（÷10 后 ≤50 rad/s），否则 Property 构造抛异常会导致整机 abort 重启
+        Property("max_speed", kPropertyTypeInteger, 10, 10, 500)
+    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+        const int motor_id = properties["motor_id"].value<int>();
+        const int max_speed_int = properties["max_speed"].value<int>();
+        const float max_speed = max_speed_int / 10.0f;
+        if (!deep_motor) {
+            return std::string("DeepMotor 未初始化");
         }
+        const uint8_t mid = static_cast<uint8_t>(motor_id);
+        if (!deep_motor->isMotorRegistered(mid)) {
+            if (!deep_motor->registerMotor(mid)) {
+                return std::string("registerMotor 失败");
+            }
+        }
+        if (MotorProtocol::initializeMotorMitMode(mid, max_speed)) {
+            ESP_LOGI(TAG, "电机%d MIT 初始化成功，限速 %.2f rad/s", motor_id, max_speed);
+            return std::string("电机 " + std::to_string(motor_id) + " MIT 初始化成功，限速 " + std::to_string(max_speed) + " rad/s");
+        }
+        ESP_LOGE(TAG, "电机%d MIT 初始化失败", motor_id);
+        return std::string("电机 " + std::to_string(motor_id) + " MIT 初始化失败");
     });
 
     // ========== 状态查询任务工具 ==========
@@ -434,175 +476,175 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         return result;
     });
 
-    // ========== 正弦信号控制工具 ==========
+    // // ========== 正弦信号控制工具 ==========
     
-    // 开始正弦信号
-    mcp_server.AddTool("self.motor.start_sin_signal", "开始电机正弦信号", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
-        Property("amplitude", kPropertyTypeInteger, 200, 1, 1000),  // 幅度 (0.01-10.00)
-        Property("frequency", kPropertyTypeInteger, 20, 1, 100)     // 频率 (0.1-10.0 Hz)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
-        int amplitude_int = properties["amplitude"].value<int>();
-        int frequency_int = properties["frequency"].value<int>();
+    // // 开始正弦信号
+    // mcp_server.AddTool("self.motor.start_sin_signal", "开始电机正弦信号", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
+    //     Property("amplitude", kPropertyTypeInteger, 200, 1, 1000),  // 幅度 (0.01-10.00)
+    //     Property("frequency", kPropertyTypeInteger, 20, 1, 100)     // 频率 (0.1-10.0 Hz)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
+    //     int amplitude_int = properties["amplitude"].value<int>();
+    //     int frequency_int = properties["frequency"].value<int>();
         
-        float amplitude = amplitude_int / 100.0f;  // 转换为浮点数（保留2位小数）
-        float frequency = frequency_int / 10.0f;   // 转换为浮点数（保留1位小数）
+    //     float amplitude = amplitude_int / 100.0f;  // 转换为浮点数（保留2位小数）
+    //     float frequency = frequency_int / 10.0f;   // 转换为浮点数（保留1位小数）
         
-        if (MotorProtocol::startSinSignal(motor_id, amplitude, frequency)) {
-            ESP_LOGI(TAG, "开始正弦信号成功 - 电机ID: %d, 幅度: %.2f, 频率: %.1f Hz", motor_id, amplitude, frequency);
+    //     if (MotorProtocol::startSinSignal(motor_id, amplitude, frequency)) {
+    //         ESP_LOGI(TAG, "开始正弦信号成功 - 电机ID: %d, 幅度: %.2f, 频率: %.1f Hz", motor_id, amplitude, frequency);
             
-            // 启用呼吸灯效果（绿色呼吸灯表示正弦信号运行中）
-            // 金色呼吸灯 (RGB: 255, 215, 0)
-            if (deep_motor && deep_motor->enableBreatheEffect(motor_id, 255, 215, 0)) {
-                ESP_LOGI(TAG, "电机%d呼吸灯效果已启用", motor_id);
-            }
+    //         // 启用呼吸灯效果（绿色呼吸灯表示正弦信号运行中）
+    //         // 金色呼吸灯 (RGB: 255, 215, 0)
+    //         if (deep_motor && deep_motor->enableBreatheEffect(motor_id, 255, 215, 0)) {
+    //             ESP_LOGI(TAG, "电机%d呼吸灯效果已启用", motor_id);
+    //         }
             
-            return std::string("开始正弦信号成功 - 电机ID: " + std::to_string(motor_id) + 
-                             ", 幅度: " + std::to_string(amplitude) + 
-                             ", 频率: " + std::to_string(frequency) + " Hz" +
-                             " (呼吸灯已启用)");
-        } else {
-            ESP_LOGE(TAG, "开始正弦信号失败 - 电机ID: %d", motor_id);
-            return std::string("开始正弦信号失败 - 电机ID: " + std::to_string(motor_id));
-        }
-    });
+    //         return std::string("开始正弦信号成功 - 电机ID: " + std::to_string(motor_id) + 
+    //                          ", 幅度: " + std::to_string(amplitude) + 
+    //                          ", 频率: " + std::to_string(frequency) + " Hz" +
+    //                          " (呼吸灯已启用)");
+    //     } else {
+    //         ESP_LOGE(TAG, "开始正弦信号失败 - 电机ID: %d", motor_id);
+    //         return std::string("开始正弦信号失败 - 电机ID: " + std::to_string(motor_id));
+    //     }
+    // });
 
-    // 停止正弦信号
-    mcp_server.AddTool("self.motor.stop_sin_signal", "停止电机正弦信号", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
+    // // 停止正弦信号
+    // mcp_server.AddTool("self.motor.stop_sin_signal", "停止电机正弦信号", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
         
-        if (MotorProtocol::stopSinSignal(motor_id)) {
-            ESP_LOGI(TAG, "停止正弦信号成功 - 电机ID: %d", motor_id);
+    //     if (MotorProtocol::stopSinSignal(motor_id)) {
+    //         ESP_LOGI(TAG, "停止正弦信号成功 - 电机ID: %d", motor_id);
             
-            // 禁用呼吸灯效果，切换回角度指示器
-            if (deep_motor && deep_motor->disableBreatheEffect(motor_id)) {
-                ESP_LOGI(TAG, "电机%d呼吸灯效果已禁用，切换回角度指示器", motor_id);
-            }
+    //         // 禁用呼吸灯效果，切换回角度指示器
+    //         if (deep_motor && deep_motor->disableBreatheEffect(motor_id)) {
+    //             ESP_LOGI(TAG, "电机%d呼吸灯效果已禁用，切换回角度指示器", motor_id);
+    //         }
             
-            return std::string("停止正弦信号成功 - 电机ID: " + std::to_string(motor_id) + 
-                             " (呼吸灯已禁用，切换回角度指示器)");
-        } else {
-            ESP_LOGE(TAG, "停止正弦信号失败 - 电机ID: %d", motor_id);
-            return std::string("停止正弦信号失败 - 电机ID: " + std::to_string(motor_id));
-        }
-    });
+    //         return std::string("停止正弦信号成功 - 电机ID: " + std::to_string(motor_id) + 
+    //                          " (呼吸灯已禁用，切换回角度指示器)");
+    //     } else {
+    //         ESP_LOGE(TAG, "停止正弦信号失败 - 电机ID: %d", motor_id);
+    //         return std::string("停止正弦信号失败 - 电机ID: " + std::to_string(motor_id));
+    //     }
+    // });
 
     // ========== 电机角度LED指示器工具 ==========
     
     // 启用电机角度指示器
-    mcp_server.AddTool("self.motor.enable_angle_indicator", "启用电机角度LED指示器（默认已启用）", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
+    // mcp_server.AddTool("self.motor.enable_angle_indicator", "启用电机角度LED指示器（默认已启用）", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
         
-        if (deep_motor && deep_motor->enableAngleIndicator(motor_id, true)) {
-            ESP_LOGI(TAG, "启用电机%d角度指示器成功", motor_id);
-            return std::string("启用电机" + std::to_string(motor_id) + "角度指示器成功（注意：电机初始化时已默认启用所有角度指示器）");
-        } else {
-            ESP_LOGW(TAG, "启用电机%d角度指示器失败", motor_id);
-            return std::string("启用电机" + std::to_string(motor_id) + "角度指示器失败");
-        }
-    });
+    //     if (deep_motor && deep_motor->enableAngleIndicator(motor_id, true)) {
+    //         ESP_LOGI(TAG, "启用电机%d角度指示器成功", motor_id);
+    //         return std::string("启用电机" + std::to_string(motor_id) + "角度指示器成功（注意：电机初始化时已默认启用所有角度指示器）");
+    //     } else {
+    //         ESP_LOGW(TAG, "启用电机%d角度指示器失败", motor_id);
+    //         return std::string("启用电机" + std::to_string(motor_id) + "角度指示器失败");
+    //     }
+    // });
 
-    // 禁用电机角度指示器
-    mcp_server.AddTool("self.motor.disable_angle_indicator", "禁用电机角度LED指示器", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
+    // // 禁用电机角度指示器
+    // mcp_server.AddTool("self.motor.disable_angle_indicator", "禁用电机角度LED指示器", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
         
-        if (deep_motor && deep_motor->disableAngleIndicator(motor_id)) {
-            ESP_LOGI(TAG, "禁用电机%d角度指示器成功", motor_id);
-            return std::string("禁用电机" + std::to_string(motor_id) + "角度指示器成功");
-        } else {
-            ESP_LOGW(TAG, "禁用电机%d角度指示器失败", motor_id);
-            return std::string("禁用电机" + std::to_string(motor_id) + "角度指示器失败");
-        }
-    });
+    //     if (deep_motor && deep_motor->disableAngleIndicator(motor_id)) {
+    //         ESP_LOGI(TAG, "禁用电机%d角度指示器成功", motor_id);
+    //         return std::string("禁用电机" + std::to_string(motor_id) + "角度指示器成功");
+    //     } else {
+    //         ESP_LOGW(TAG, "禁用电机%d角度指示器失败", motor_id);
+    //         return std::string("禁用电机" + std::to_string(motor_id) + "角度指示器失败");
+    //     }
+    // });
 
-    // 设置电机角度范围
-    mcp_server.AddTool("self.motor.set_angle_range", "设置电机角度范围", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255),  // 电机ID (1-255)
-        Property("min_angle", kPropertyTypeInteger, -314, -314, 314),  // 最小角度 (0.01弧度)
-        Property("max_angle", kPropertyTypeInteger, 314, -314, 314)    // 最大角度 (0.01弧度)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
-        int min_angle_int = properties["min_angle"].value<int>();
-        int max_angle_int = properties["max_angle"].value<int>();
+    // // 设置电机角度范围
+    // mcp_server.AddTool("self.motor.set_angle_range", "设置电机角度范围", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255),  // 电机ID (1-255)
+    //     Property("min_angle", kPropertyTypeInteger, -314, -314, 314),  // 最小角度 (0.01弧度)
+    //     Property("max_angle", kPropertyTypeInteger, 314, -314, 314)    // 最大角度 (0.01弧度)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
+    //     int min_angle_int = properties["min_angle"].value<int>();
+    //     int max_angle_int = properties["max_angle"].value<int>();
         
-        float min_angle = min_angle_int / 100.0f;  // 转换为弧度
-        float max_angle = max_angle_int / 100.0f;  // 转换为弧度
+    //     float min_angle = min_angle_int / 100.0f;  // 转换为弧度
+    //     float max_angle = max_angle_int / 100.0f;  // 转换为弧度
         
-        if (deep_motor && deep_motor->setAngleRange(motor_id, min_angle, max_angle)) {
-            ESP_LOGI(TAG, "设置电机%d角度范围: [%.2f, %.2f] rad", motor_id, min_angle, max_angle);
-            return std::string("设置电机" + std::to_string(motor_id) + "角度范围: [" + 
-                             std::to_string(min_angle) + ", " + std::to_string(max_angle) + "] rad");
-        } else {
-            ESP_LOGW(TAG, "设置电机%d角度范围失败", motor_id);
-            return std::string("设置电机" + std::to_string(motor_id) + "角度范围失败");
-        }
-    });
+    //     if (deep_motor && deep_motor->setAngleRange(motor_id, min_angle, max_angle)) {
+    //         ESP_LOGI(TAG, "设置电机%d角度范围: [%.2f, %.2f] rad", motor_id, min_angle, max_angle);
+    //         return std::string("设置电机" + std::to_string(motor_id) + "角度范围: [" + 
+    //                          std::to_string(min_angle) + ", " + std::to_string(max_angle) + "] rad");
+    //     } else {
+    //         ESP_LOGW(TAG, "设置电机%d角度范围失败", motor_id);
+    //         return std::string("设置电机" + std::to_string(motor_id) + "角度范围失败");
+    //     }
+    // });
 
-    // 获取电机角度状态
-    mcp_server.AddTool("self.motor.get_angle_status", "获取电机角度状态", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
+    // // 获取电机角度状态
+    // mcp_server.AddTool("self.motor.get_angle_status", "获取电机角度状态", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
         
-        if (deep_motor) {
-            auto angle_state = deep_motor->getAngleStatus(motor_id);
-            auto angle_range = deep_motor->getAngleRange(motor_id);
-            bool indicator_enabled = deep_motor->isAngleIndicatorEnabled(motor_id);
+    //     if (deep_motor) {
+    //         auto angle_state = deep_motor->getAngleStatus(motor_id);
+    //         auto angle_range = deep_motor->getAngleRange(motor_id);
+    //         bool indicator_enabled = deep_motor->isAngleIndicatorEnabled(motor_id);
             
-            std::string result = "电机" + std::to_string(motor_id) + "角度状态:\n";
-            result += "  当前角度: " + std::to_string(angle_state.current_angle) + " rad\n";
-            result += "  目标角度: " + std::to_string(angle_state.target_angle) + " rad\n";
-            result += "  是否移动: " + std::string(angle_state.is_moving ? "是" : "否") + "\n";
-            result += "  是否有错误: " + std::string(angle_state.is_error ? "是" : "否") + "\n";
-            result += "  角度范围: [" + std::to_string(angle_range.min_angle) + ", " + 
-                     std::to_string(angle_range.max_angle) + "] rad\n";
-            result += "  范围有效: " + std::string(angle_range.is_valid ? "是" : "否") + "\n";
-            result += "  指示器启用: " + std::string(indicator_enabled ? "是" : "否");
+    //         std::string result = "电机" + std::to_string(motor_id) + "角度状态:\n";
+    //         result += "  当前角度: " + std::to_string(angle_state.current_angle) + " rad\n";
+    //         result += "  目标角度: " + std::to_string(angle_state.target_angle) + " rad\n";
+    //         result += "  是否移动: " + std::string(angle_state.is_moving ? "是" : "否") + "\n";
+    //         result += "  是否有错误: " + std::string(angle_state.is_error ? "是" : "否") + "\n";
+    //         result += "  角度范围: [" + std::to_string(angle_range.min_angle) + ", " + 
+    //                  std::to_string(angle_range.max_angle) + "] rad\n";
+    //         result += "  范围有效: " + std::string(angle_range.is_valid ? "是" : "否") + "\n";
+    //         result += "  指示器启用: " + std::string(indicator_enabled ? "是" : "否");
             
-            ESP_LOGI(TAG, "获取电机%d角度状态成功", motor_id);
-            return result;
-        } else {
-            ESP_LOGW(TAG, "深度电机管理器未初始化");
-            return std::string("深度电机管理器未初始化");
-        }
-    });
+    //         ESP_LOGI(TAG, "获取电机%d角度状态成功", motor_id);
+    //         return result;
+    //     } else {
+    //         ESP_LOGW(TAG, "深度电机管理器未初始化");
+    //         return std::string("深度电机管理器未初始化");
+    //     }
+    // });
 
 
     // ========== 软件版本查询工具 ==========
     
     // 获取电机软件版本号
-    mcp_server.AddTool("self.motor.get_software_version", "获取电机软件版本号", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
+    // mcp_server.AddTool("self.motor.get_software_version", "获取电机软件版本号", PropertyList(std::vector<Property>{
+    //     Property("motor_id", kPropertyTypeInteger, 1, 1, 255)  // 电机ID (1-255)
+    // }), [deep_motor](const PropertyList& properties) -> ReturnValue {
+    //     int motor_id = properties["motor_id"].value<int>();
         
-        if (!deep_motor) {
-            ESP_LOGW(TAG, "深度电机管理器未初始化");
-            return std::string("深度电机管理器未初始化");
-        }
+    //     if (!deep_motor) {
+    //         ESP_LOGW(TAG, "深度电机管理器未初始化");
+    //         return std::string("深度电机管理器未初始化");
+    //     }
         
-        if (!deep_motor->isMotorRegistered(motor_id)) {
-            ESP_LOGW(TAG, "电机ID %d 未注册", motor_id);
-            return std::string("电机ID " + std::to_string(motor_id) + " 未注册");
-        }
+    //     if (!deep_motor->isMotorRegistered(motor_id)) {
+    //         ESP_LOGW(TAG, "电机ID %d 未注册", motor_id);
+    //         return std::string("电机ID " + std::to_string(motor_id) + " 未注册");
+    //     }
         
-        char version[16]; // 版本号缓冲区
-        if (deep_motor->getMotorSoftwareVersion(motor_id, version, sizeof(version))) {
-            std::string result = "电机ID " + std::to_string(motor_id) + " 软件版本: " + std::string(version);
-            ESP_LOGI(TAG, "获取电机ID %d 软件版本成功: %s", motor_id, version);
-            return result;
-        } else {
-            ESP_LOGW(TAG, "获取电机ID %d 软件版本失败", motor_id);
-            return std::string("获取电机ID " + std::to_string(motor_id) + " 软件版本失败");
-        }
-    });
+    //     char version[16]; // 版本号缓冲区
+    //     if (deep_motor->getMotorSoftwareVersion(motor_id, version, sizeof(version))) {
+    //         std::string result = "电机ID " + std::to_string(motor_id) + " 软件版本: " + std::string(version);
+    //         ESP_LOGI(TAG, "获取电机ID %d 软件版本成功: %s", motor_id, version);
+    //         return result;
+    //     } else {
+    //         ESP_LOGW(TAG, "获取电机ID %d 软件版本失败", motor_id);
+    //         return std::string("获取电机ID " + std::to_string(motor_id) + " 软件版本失败");
+    //     }
+    // });
 
     ESP_LOGI(TAG, "深度电机控制MCP工具注册完成，包含模式控制、初始化、录制、正弦信号、角度指示器、软件版本查询等功能");
 }

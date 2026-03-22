@@ -52,10 +52,44 @@
 #define CAN_TX_GPIO GPIO_NUM_38   // TX -> 收发器 RXD
 #define CAN_RX_GPIO GPIO_NUM_48   // RX <- 收发器 TXD
 
+/**
+ * 电机「速度档位」占位宏（0～100 整数比例），与 esp-sparkbot 等板级模板同源。
+ * 当前 deep-dog 工程内 **无任何 .cc/.h 引用**（电机实际限速用 rad/s，见 protocol_motor / MCP / LegControl）。
+ * 若后续做语音「百分之八十速度」、UI 滑条或步态占空比，可在此统一换算；否则可删除或保持不动。
+ */
 #define MOTOR_SPEED_MAX 100
 #define MOTOR_SPEED_80  80
 #define MOTOR_SPEED_60  60
 #define MOTOR_SPEED_MIN 0
+
+/** 1=UART 打印 CAN 收发帧 id+dlc+8 字节 HEX（核对指令用）；调完改 0 减轻日志与串口负载 */
+#ifndef DEEP_DOG_CAN_HEX_LOG
+#define DEEP_DOG_CAN_HEX_LOG 1
+#endif
+
+/** 运控（MIT）整步验证：1=关节下发改用运控 CAN 帧（见 protocol_motor::controlMotor） */
+#ifndef DEEP_DOG_USE_MIT_WALK
+#define DEEP_DOG_USE_MIT_WALK 1
+#endif
+/** 1=仅初始化/失能/下发左前腿(FL)，其余腿跳过（台架单腿验证） */
+#ifndef DEEP_DOG_MIT_VALIDATE_FL_ONLY
+#define DEEP_DOG_MIT_VALIDATE_FL_ONLY 0
+#endif
+
+/** 运控默认增益与前馈（腿/整机共用，与单电机 MCP 默认 1/1/0 对齐）；仅当 DEEP_DOG_USE_MIT_WALK=1 时参与编译下发 */
+#ifndef DEEP_DOG_MIT_DEFAULT_KP
+#define DEEP_DOG_MIT_DEFAULT_KP 1.0f
+#endif
+#ifndef DEEP_DOG_MIT_DEFAULT_KD
+#define DEEP_DOG_MIT_DEFAULT_KD 1.0f
+#endif
+#ifndef DEEP_DOG_MIT_DEFAULT_TAU_FF
+#define DEEP_DOG_MIT_DEFAULT_TAU_FF 0.0f
+#endif
+/** LegControl::init 中 MIT 模式 initializeMotorMitMode 的 PARAM_LIMIT_SPD（rad/s） */
+#ifndef DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S
+#define DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S 1.0f
+#endif
 
 #define ECHO_UART_PORT_NUM      UART_NUM_1
 #define ECHO_UART_BAUD_RATE     (115200)
