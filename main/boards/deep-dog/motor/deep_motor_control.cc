@@ -328,15 +328,15 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
     //     }
     // });
 
-    // MIT 运控模式初始化（写零、切运控、限速、使能、首帧保持）
-    mcp_server.AddTool("self.motor.initialize_mit", "初始化电机为MIT运控模式：reset、写零、运控模式、限速、使能、发保持帧。max_speed÷10=rad/s。", PropertyList(std::vector<Property>{
+    // 初始化（按编译配置选择 MIT/位置模式）
+    mcp_server.AddTool("self.motor.initialize", "初始化电机（按当前编译配置）：reset、写零、切模式、使能。max_speed÷10=rad/s 作为目标速度意图参数。", PropertyList(std::vector<Property>{
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
         // 默认 10 → 1.0 rad/s，须在 [10,500] 内（÷10 后 ≤50 rad/s），否则 Property 构造抛异常会导致整机 abort 重启
         Property("max_speed", kPropertyTypeInteger, 10, 10, 500)
     }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         const int motor_id = properties["motor_id"].value<int>();
         const int max_speed_int = properties["max_speed"].value<int>();
-        const float max_speed = max_speed_int / 10.0f;
+        const float target_velocity_rad_s = max_speed_int / 10.0f;
         if (!deep_motor) {
             return std::string("DeepMotor 未初始化");
         }
@@ -346,12 +346,13 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
                 return std::string("registerMotor 失败");
             }
         }
-        if (MotorProtocol::initializeMotorMitMode(mid, max_speed)) {
-            ESP_LOGI(TAG, "电机%d MIT 初始化成功，限速 %.2f rad/s", motor_id, max_speed);
-            return std::string("电机 " + std::to_string(motor_id) + " MIT 初始化成功，限速 " + std::to_string(max_speed) + " rad/s");
+        if (MotorProtocol::initializeMotor(mid, target_velocity_rad_s)) {
+            ESP_LOGI(TAG, "电机%d 初始化成功，target_velocity=%.2f rad/s", motor_id, target_velocity_rad_s);
+            return std::string("电机 " + std::to_string(motor_id) + " 初始化成功，target_velocity=" +
+                   std::to_string(target_velocity_rad_s) + " rad/s");
         }
         ESP_LOGE(TAG, "电机%d MIT 初始化失败", motor_id);
-        return std::string("电机 " + std::to_string(motor_id) + " MIT 初始化失败");
+        return std::string("电机 " + std::to_string(motor_id) + " 初始化失败");
     });
 
     // ========== 状态查询任务工具 ==========

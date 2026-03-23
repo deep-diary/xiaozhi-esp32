@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "config.h"
 
 class DeepMotor;
 
@@ -71,16 +72,16 @@ public:
     bool disable();
 
     /** 回到零位（卧倒）：3 关节置 0 */
-    bool goToZero(float max_speed_rad_s = 1.0f);
+    bool goToZero(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
 
     /** 回到站立位 */
-    bool goToStance(float max_speed_rad_s = 1.0f);
+    bool goToStance(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
 
     /** 向前迈一步：current_step_ += 1，目标 = 站立位 + 正弦偏移，并限幅 */
-    bool stepForward(float max_speed_rad_s = 1.0f);
+    bool stepForward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
 
     /** 向后迈一步：current_step_ -= 1 */
-    bool stepBackward(float max_speed_rad_s = 1.0f);
+    bool stepBackward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
 
     /** 将角度夹在控制上下限内 */
     float clampJoint(int joint_index, float value) const;
@@ -136,7 +137,7 @@ private:
     void computeStepPosition(float out_position[LEG_JOINT_COUNT], bool forward) const;
 
     /** 限速 + 下发（DEEP_DOG_USE_MIT_WALK 时运控帧，否则 PARAM_LOC_REF） */
-    bool sendThreeJointsPositionOrMit(const float pos[LEG_JOINT_COUNT], float max_speed_rad_s);
+    bool sendThreeJointsPositionOrMit(const float pos[LEG_JOINT_COUNT], float target_velocity_rad_s);
 };
 
 /**

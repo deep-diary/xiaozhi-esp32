@@ -87,7 +87,7 @@ deep_motor->invalidateMotorCommandCache(motor_id);
 
 ### MCP 单电机 MIT（`deep_motor_control.cc`）
 
-- `self.motor.initialize_mit`：`motor_id`、`max_speed`（整数 ÷10 = rad/s，默认 10 → 1 rad/s，上限 50 rad/s）→ `MotorProtocol::initializeMotorMitMode`，并 `registerMotor`。
+- `self.motor.initialize`：`motor_id`、`max_speed`（整数 ÷10 = rad/s，默认 10 → 1 rad/s，上限 50 rad/s）→ `MotorProtocol::initializeMotor`（按编译配置初始化 MIT/位置模式），并 `registerMotor`。
 - `self.can.control_motor`：`position_x10`、`velocity_x10`、`kp_x10`、`kd_x10`、`tau_ff_x10` 均为 **整数÷10** 得 rad、rad/s、kp、kd、τ → `DeepMotor::setMotorMitCommand`（会先注册）。默认除扭矩外 **物理量 1.0**（对应 `_x10` 均为 10，`tau_ff_x10` 默认 0）。
 
 底层仍可直接调 `MotorProtocol::initializeMotor`、`resetMotor` 等（如 `LegControl::init`）；建议与 `invalidateMotorCommandCache` 策略保持一致。

@@ -157,10 +157,13 @@ public:
                              float torque_ff = 0.0f);
 
     /**
-     * @brief 运控模式初始化：写零 → 切 MOTOR_CTRL_MODE → 限速 → 使能 → 发一帧运控保持（p=0,v=0,kp/kd 默认 2/0.5）。
-     * 许多驱动在仅 enable、无运控帧时不上扭矩；保持帧与位置模式 init 后立即可抱闸相当。
+     * @brief 电机初始化（统一入口，按编译配置选择模式）
+     * - DEEP_DOG_USE_MIT_WALK=1: reset → 写零 → 运控模式 → 使能（不写 PARAM_LIMIT_SPD）
+     * - DEEP_DOG_USE_MIT_WALK=0: reset → 写零 → 位置模式 → 使能（不写 PARAM_LIMIT_SPD，使用驱动默认）
+     * @param motor_id 电机ID
+     * @param target_velocity_rad_s 预留的目标速度参数（MIT 场景可用于初始化后首帧速度意图）
      */
-    static bool initializeMotorMitMode(uint8_t motor_id, float max_speed_rad_s);
+    static bool initializeMotor(uint8_t motor_id, float target_velocity_rad_s = 0.0f);
 
     /**
      * @brief 设置电机位置
@@ -244,16 +247,6 @@ public:
      *        由 config.h `DEEP_DOG_USE_MIT_WALK` 决定写 **运控(MIT)** 还是 **位置模式**（非独立读寄存器帧）。
      */
     static bool sendRunModeForStatusQuery(uint8_t motor_id);
-
-    /**
-     * @brief 电机初始化函数（含设置零位）
-     * @param motor_id 电机ID
-     * @param max_speed 最大速度 (rad/s)，默认 1.0
-     * @return true 成功, false 失败
-     *
-     * 初始化流程：reset → 设置零位 → 位置模式 → 设置速度限制 → 使能
-     */
-    static bool initializeMotor(uint8_t motor_id, float max_speed = 1.0f);
 
     /**
      * @brief 设置电机参数

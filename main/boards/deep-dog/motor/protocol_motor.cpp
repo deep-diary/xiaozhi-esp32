@@ -6,13 +6,6 @@
 
 static const char* TAG = "MotorProtocol";
 
-/** MIT 模式：仅 enable 时许多驱动仍不上扭矩，需至少一帧运控指令后才进入闭环保持 */
-static constexpr float kMitInitHoldVel = 0.0f;
-static constexpr float kMitInitHoldKp = 1.0f;
-static constexpr float kMitInitHoldKd = 1.0f;
-
-
-
 // 将软件版本号转为字符串格式（假设前4字节为ASCII码，后4字节为日期，最后1字节为版本号）
 static inline void RX_DATA_DISASSEMBLE_VERSION_STR(const uint8_t data[8], char* out_str, size_t out_len) {
     // 例子：0x32 0x30 0x32 0x35 0x31 0x30 0x30 0x30 0x07
@@ -133,36 +126,51 @@ uint32_t MotorProtocol::buildMitControlCanId(uint8_t motor_id, float torque_ff_n
     return id & 0x1FFFFFFFu;
 }
 
-bool MotorProtocol::initializeMotorMitMode(uint8_t motor_id, float max_speed_rad_s) {
-    ESP_LOGI(TAG, "MIT 模式初始化电机%d，限速 %.2f rad/s", motor_id, max_speed_rad_s);
+bool MotorProtocol::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
+    ESP_LOGI(TAG, "开始初始化电机%d（target_velocity=%.2f rad/s）", motor_id, target_velocity_rad_s);
+
     resetMotor(motor_id);
+    ESP_LOGI(TAG, "步骤0: 设置电机%d零位", motor_id);
     if (!setMotorZero(motor_id)) {
-        ESP_LOGE(TAG, "MIT init: 电机%d 写零失败", motor_id);
+        ESP_LOGE(TAG, "设置电机%d零位失败", motor_id);
         return false;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
+
+#if DEEP_DOG_USE_MIT_WALK
+    ESP_LOGI(TAG, "步骤1: 设置电机%d为运控模式", motor_id);
     if (!setMotorControlMode(motor_id)) {
-        ESP_LOGE(TAG, "MIT init: 电机%d 切运控模式失败", motor_id);
+        ESP_LOGE(TAG, "设置电机%d为运控模式失败", motor_id);
         return false;
     }
-    vTaskDelay(pdMS_TO_TICKS(10));
-    if (!setMotorParameter(motor_id, PARAM_LIMIT_SPD, max_speed_rad_s)) {
-        ESP_LOGE(TAG, "MIT init: 电机%d 限速失败", motor_id);
+#else
+    ESP_LOGI(TAG, "步骤1: 设置电机%d为位置模式", motor_id);
+    if (!setMotorPositionMode(motor_id)) {
+        ESP_LOGE(TAG, "设置电机%d为位置模式失败", motor_id);
         return false;
     }
+#endif
     vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGI(TAG, "步骤2: 使能电机%d", motor_id);
     if (!enableMotor(motor_id)) {
-        ESP_LOGE(TAG, "MIT init: 电机%d 使能失败", motor_id);
+        ESP_LOGE(TAG, "使能电机%d失败", motor_id);
         return false;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
-    // 刚写完机械零，目标角 0 = 保持当前姿态；v=0 与前馈速度为 0 对齐
-    if (!controlMotor(motor_id, 0.0f, kMitInitHoldVel, kMitInitHoldKp, kMitInitHoldKd, 0.0f)) {
+
+#if DEEP_DOG_USE_MIT_WALK
+    // 发送初始 MIT 保持帧
+    if (!controlMotor(motor_id, 0.0f, 0.0f, DEEP_DOG_MIT_DEFAULT_KP, DEEP_DOG_MIT_DEFAULT_KD,
+                      DEEP_DOG_MIT_DEFAULT_TAU_FF)) {
         ESP_LOGE(TAG, "MIT init: 电机%d 初始运控保持帧发送失败", motor_id);
         return false;
     }
-    ESP_LOGI(TAG, "MIT 模式电机%d 初始化完成（已发保持帧 p=0 v=%.1f kp=%.1f kd=%.1f）", motor_id, kMitInitHoldVel,
-             kMitInitHoldKp, kMitInitHoldKd);
+    ESP_LOGI(TAG, "电机%d初始化完成（MIT，未发送初始保持帧）", motor_id);
+#else
+    ESP_LOGI(TAG, "电机%d初始化完成（位置模式，未配置速度上限，使用驱动默认）", motor_id);
+#endif
+    ESP_LOGI(TAG, "电机%d初始化完成，状态查询任务将由DeepMotor类管理", motor_id);
     return true;
 }
 
@@ -244,55 +252,6 @@ bool MotorProtocol::sendRunModeForStatusQuery(uint8_t motor_id) {
 #else
     return setMotorPositionMode(motor_id);
 #endif
-}
-
-bool MotorProtocol::initializeMotor(uint8_t motor_id, float max_speed) {
-    ESP_LOGI(TAG, "开始初始化电机%d，最大速度: %.2f rad/s", motor_id, max_speed);
-
-    // 1. 先关闭电机使能， 同时可以返回软件版本号
-    resetMotor(motor_id);
-
-    // 2. 设置电机零位
-    ESP_LOGI(TAG, "步骤0: 设置电机%d零位", motor_id);
-    if (!setMotorZero(motor_id)) {
-        ESP_LOGE(TAG, "设置电机%d零位失败", motor_id);
-        return false;
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    // 3. 将电机切换到位置模式
-    ESP_LOGI(TAG, "步骤1: 设置电机%d为位置模式", motor_id);
-    if (!setMotorPositionMode(motor_id)) {
-        ESP_LOGE(TAG, "设置电机%d为位置模式失败", motor_id);
-        return false;
-    }
-    
-    // 等待模式切换完成
-    vTaskDelay(pdMS_TO_TICKS(10));
-    
-    // 4. 设置最大速度限制
-    ESP_LOGI(TAG, "步骤2: 设置电机%d最大速度限制为%.2f rad/s", motor_id, max_speed);
-    if (!setMotorParameter(motor_id, PARAM_LIMIT_SPD, max_speed)) {
-        ESP_LOGE(TAG, "设置电机%d最大速度限制失败", motor_id);
-        return false;
-    }
-    
-    // 等待参数设置完成
-    vTaskDelay(pdMS_TO_TICKS(10));
-    
-    // 5. 使能电机
-    ESP_LOGI(TAG, "步骤3: 使能电机%d", motor_id);
-    if (!enableMotor(motor_id)) {
-        ESP_LOGE(TAG, "使能电机%d失败", motor_id);
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "电机%d初始化完成", motor_id);
-    
-    // 6. 启动1秒定时状态查询任务（由DeepMotor类管理）
-    ESP_LOGI(TAG, "电机%d初始化完成，状态查询任务将由DeepMotor类管理", motor_id);
-    
-    return true;
 }
 
 bool MotorProtocol::setMotorParameter(uint8_t motor_id, motor_param_t param, float value) {

@@ -64,7 +64,7 @@
 
 /** 1=UART 打印 CAN 收发帧 id+dlc+8 字节 HEX（核对指令用）；调完改 0 减轻日志与串口负载 */
 #ifndef DEEP_DOG_CAN_HEX_LOG
-#define DEEP_DOG_CAN_HEX_LOG 1
+#define DEEP_DOG_CAN_HEX_LOG 0
 #endif
 
 /** 运控（MIT）整步验证：1=关节下发改用运控 CAN 帧（见 protocol_motor::controlMotor） */
@@ -78,18 +78,35 @@
 
 /** 运控默认增益与前馈（腿/整机共用，与单电机 MCP 默认 1/1/0 对齐）；仅当 DEEP_DOG_USE_MIT_WALK=1 时参与编译下发 */
 #ifndef DEEP_DOG_MIT_DEFAULT_KP
-#define DEEP_DOG_MIT_DEFAULT_KP 1.0f
+#define DEEP_DOG_MIT_DEFAULT_KP 10.0f
 #endif
 #ifndef DEEP_DOG_MIT_DEFAULT_KD
-#define DEEP_DOG_MIT_DEFAULT_KD 1.0f
+#define DEEP_DOG_MIT_DEFAULT_KD 1.5f
 #endif
 #ifndef DEEP_DOG_MIT_DEFAULT_TAU_FF
 #define DEEP_DOG_MIT_DEFAULT_TAU_FF 0.0f
 #endif
 /** LegControl::init 中 MIT 模式 initializeMotorMitMode 的 PARAM_LIMIT_SPD（rad/s） */
 #ifndef DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S
-#define DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S 1.0f
+#define DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S 0.5f
 #endif
+
+/**
+ * 底盘 MCP `speed` 整型：÷100 = 关节 PARAM_LIMIT_SPD（rad/s），与 `DogControl::setContinuousSpeed` 上限一致。
+ * 适当拉大 min~max，避免「走得快慢差不多、最快仍偏慢」。
+ */
+#ifndef DEEP_DOG_CHASSIS_SPEED_X100_MIN
+#define DEEP_DOG_CHASSIS_SPEED_X100_MIN 20
+#endif
+#ifndef DEEP_DOG_CHASSIS_SPEED_X100_MAX
+#define DEEP_DOG_CHASSIS_SPEED_X100_MAX 500
+#endif
+
+/**
+ * 髋下垂与 kp/kd（经验值，需台架调）：MIT 下位置环 kp 过小易在重力下「塌」。
+ * 可先试 **kp 2～5、kd 0.8～2**（负重髋略增 kp）；正弦行走仍要兼顾柔顺，过高易抖。
+ * 当前 `DEEP_DOG_MIT_DEFAULT_KP/KD` 为全局统一下发；若需分关节增益需后续扩展 LegControl。
+ */
 
 #define ECHO_UART_PORT_NUM      UART_NUM_1
 #define ECHO_UART_BAUD_RATE     (115200)

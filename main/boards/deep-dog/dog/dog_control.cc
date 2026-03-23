@@ -24,18 +24,17 @@ static inline float dog_rad_to_deg(float rad) {
     return rad * 180.0f / (float)M_PI;
 }
 
-/** MCP 整型速度：30~250 表示 0.30~2.50 rad/s（÷100） */
-static float McpSpeedIntToRad(int speed_x100) {
-    if (speed_x100 < 30) {
-        speed_x100 = 30;
+static int ClampInt(int v, int lo, int hi) {
+    if (v < lo) {
+        return lo;
     }
-    if (speed_x100 > 250) {
-        speed_x100 = 250;
+    if (v > hi) {
+        return hi;
     }
-    return speed_x100 / 100.0f;
+    return v;
 }
 
-static int ClampInt(int v, int lo, int hi) {
+static float ClampFloat(float v, float lo, float hi) {
     if (v < lo) {
         return lo;
     }
@@ -101,9 +100,9 @@ bool DogControl::ensureStandingForWalk(float max_speed_rad_s) {
 void DogControl::logJointTargetsBeforeSend(const char* motion_label, const float pos[4][LEG_JOINT_COUNT]) const {
     static const char* leg_names[] = {"FL", "FR", "RL", "RR"};
     static const char* joint_names[] = {"HipAA", "HipFE", "Knee"};
-    ESP_LOGI(TAG, "[关节目标] %s (rad / deg)", motion_label);
+    ESP_LOGD(TAG, "[关节目标] %s (rad / deg)", motion_label);
     for (int leg = 0; leg < 4; leg++) {
-        ESP_LOGI(TAG, "  腿%s: %s=%.4f(%.1f°)  %s=%.4f(%.1f°)  %s=%.4f(%.1f°)",
+        ESP_LOGD(TAG, "  腿%s: %s=%.4f(%.1f°)  %s=%.4f(%.1f°)  %s=%.4f(%.1f°)",
                  leg_names[leg],
                  joint_names[0], pos[leg][0], dog_rad_to_deg(pos[leg][0]),
                  joint_names[1], pos[leg][1], dog_rad_to_deg(pos[leg][1]),
@@ -114,22 +113,6 @@ void DogControl::logJointTargetsBeforeSend(const char* motion_label, const float
 bool DogControl::sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], float max_speed_rad_s) {
     if (!deep_motor_) {
         return false;
-    }
-    for (int leg = 0; leg < 4; leg++) {
-        if (mit_fl_only_ && leg != 0) {
-            continue;
-        }
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            uint8_t id = legs_[leg].getMotorId(j);
-            if (id == 0) {
-                continue;
-            }
-            if (!deep_motor_->setMotorSpeedLimit(id, max_speed_rad_s)) {
-                ESP_LOGE(TAG, "sendAllLegJointTargets setMotorSpeedLimit leg=%d joint=%d id=%u", leg, j,
-                         (unsigned)id);
-                return false;
-            }
-        }
     }
     for (int j = 0; j < LEG_JOINT_COUNT; j++) {
         for (int leg = 0; leg < 4; leg++) {
@@ -142,8 +125,7 @@ bool DogControl::sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], flo
             }
             float pj = pos[leg][j];
 #if DEEP_DOG_USE_MIT_WALK
-            if (!deep_motor_->setMotorMitCommand(id, pj, 0.0f, DEEP_DOG_MIT_DEFAULT_KP, DEEP_DOG_MIT_DEFAULT_KD,
-                                               DEEP_DOG_MIT_DEFAULT_TAU_FF)) {
+            if (!deep_motor_->setMotorMitCommand(id, pj, max_speed_rad_s, mit_kp_, mit_kd_, mit_tau_ff_)) {
                 ESP_LOGE(TAG, "sendAllLegJointTargets setMotorMitCommand leg=%d joint=%d id=%u", leg, j,
                          (unsigned)id);
                 return false;
@@ -170,8 +152,8 @@ bool DogControl::init() {
         return false;
     }
 #if DEEP_DOG_USE_MIT_WALK
-    ESP_LOGI(TAG, "整机 init：关节下发为运控帧 (kp=%.2f kd=%.2f tau_ff=%.2f，见 config.h)",
-             (double)DEEP_DOG_MIT_DEFAULT_KP, (double)DEEP_DOG_MIT_DEFAULT_KD, (double)DEEP_DOG_MIT_DEFAULT_TAU_FF);
+    ESP_LOGI(TAG, "整机 init：关节下发为运控帧 (kp=%.2f kd=%.2f tau_ff=%.2f)",
+             (double)mit_kp_, (double)mit_kd_, (double)mit_tau_ff_);
 #else
     ESP_LOGI(TAG, "整机 init：关节下发为位置参考 PARAM_LOC_REF");
 #endif
@@ -277,9 +259,25 @@ bool DogControl::lieDown(float max_speed_rad_s) {
     clampLegsMechanical(pos_zero);
     logJointTargetsBeforeSend("lie_down", pos_zero);
 
-    if (!sendAllLegJointTargets(pos_zero, max_speed_rad_s)) {
+#if DEEP_DOG_USE_MIT_WALK
+    const float target_velocity_rad_s = 0.0f;  // 卧倒定点：MIT 下固定 v_des=0
+    constexpr bool kEnableLieDownHold = true;
+    constexpr int kLieDownHoldMs = 200;
+#else
+    const float target_velocity_rad_s = max_speed_rad_s;
+#endif
+
+    if (!sendAllLegJointTargets(pos_zero, target_velocity_rad_s)) {
         return false;
     }
+#if DEEP_DOG_USE_MIT_WALK
+    if (kEnableLieDownHold) {
+        vTaskDelay(pdMS_TO_TICKS(kLieDownHoldMs));
+        if (!sendAllLegJointTargets(pos_zero, target_velocity_rad_s)) {
+            return false;
+        }
+    }
+#endif
     state_machine_.onLieDownSuccess();
     return true;
 }
@@ -477,14 +475,24 @@ bool DogControl::goBackBigStep(float max_speed_rad_s, int inter_step_delay_ms) {
 }
 
 void DogControl::setContinuousSpeed(float max_speed_rad_s) {
-    if (max_speed_rad_s < 0.2f) {
-        max_speed_rad_s = 0.2f;
+    const float lo = DEEP_DOG_CHASSIS_SPEED_X100_MIN / 100.0f;
+    const float hi = DEEP_DOG_CHASSIS_SPEED_X100_MAX / 100.0f;
+    if (max_speed_rad_s < lo) {
+        max_speed_rad_s = lo;
     }
-    if (max_speed_rad_s > 2.5f) {
-        max_speed_rad_s = 2.5f;
+    if (max_speed_rad_s > hi) {
+        max_speed_rad_s = hi;
     }
     continuous_speed_rad_s_ = max_speed_rad_s;
     ESP_LOGI(TAG, "持续行走电机限速设为 %.2f rad/s", max_speed_rad_s);
+}
+
+void DogControl::setMitGains(float kp, float kd) {
+    const float kp_new = ClampFloat(kp, 0.0f, 500.0f);
+    const float kd_new = ClampFloat(kd, 0.0f, 5.0f);
+    mit_kp_ = kp_new;
+    mit_kd_ = kd_new;
+    ESP_LOGI(TAG, "MIT 增益已更新：kp=%.2f kd=%.2f（后续运控帧生效）", mit_kp_, mit_kd_);
 }
 
 void DogControl::setContinuousStepPeriodMs(int ms) {
@@ -523,9 +531,7 @@ std::string DogControl::getChassisStatusString() const {
     std::string out = std::string("机器狗状态：") + pose;
     if (IsContinuousWalkingPose(s)) {
         char extra[128];
-        snprintf(extra, sizeof(extra),
-                 "；电机限速 %.2f rad/s；小步间隔 %d ms（共 %u 步/正弦周期）",
-                 continuous_speed_rad_s_, continuous_step_period_ms_,
+        snprintf(extra, sizeof(extra), "；小步间隔 %d ms（共 %u 步/正弦周期）", continuous_step_period_ms_,
                  (unsigned)gait_planner_.getTotalSteps());
         out += extra;
     } else {
@@ -729,56 +735,44 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
     });
 
     mcp_server.AddTool("self.chassis.forward_big",
-                         "机器狗向前「一大步」：沿相位连续迈半个正弦周期（若干小步+可选延时），非持续行走。参数 speed：30~250 表示 0.30~2.50 rad/s；step_delay_ms：小步之间延时 0~300ms",
-                         PropertyList(std::vector<Property>{
-                             Property("speed", kPropertyTypeInteger, 100, 30, 250),
-                             Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
+                         "机器狗向前「一大步」：沿相位连续迈半个正弦周期（若干小步+可选延时），非持续行走。参数 step_delay_ms：小步之间延时 0~300ms",
+                         PropertyList(std::vector<Property>{Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
                          [dog](const PropertyList& props) -> ReturnValue {
-                             const float sp = McpSpeedIntToRad(props["speed"].value<int>());
                              const int d = props["step_delay_ms"].value<int>();
-                             if (dog->goForwardBigStep(sp, d)) {
+                             if (dog->goForwardBigStep(1.0f, d)) {
                                  return std::string("已向前一大步");
                              }
                              return std::string("前进一大步失败");
                          });
 
     mcp_server.AddTool("self.chassis.backward_big",
-                         "机器狗向后「一大步」：半个正弦周期的小步串联。参数 speed、step_delay_ms 同 forward_big",
-                         PropertyList(std::vector<Property>{
-                             Property("speed", kPropertyTypeInteger, 100, 30, 250),
-                             Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
+                         "机器狗向后「一大步」：半个正弦周期的小步串联。参数 step_delay_ms 同 forward_big",
+                         PropertyList(std::vector<Property>{Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
                          [dog](const PropertyList& props) -> ReturnValue {
-                             const float sp = McpSpeedIntToRad(props["speed"].value<int>());
                              const int d = props["step_delay_ms"].value<int>();
-                             if (dog->goBackBigStep(sp, d)) {
+                             if (dog->goBackBigStep(1.0f, d)) {
                                  return std::string("已向后一大步");
                              }
                              return std::string("后退一大步失败");
                          });
 
     mcp_server.AddTool("self.chassis.start_forward",
-                         "机器狗持续向前行走，直到 stop。参数 speed：电机限速(数值÷100=rad/s，如100=1.0)；step_period_ms：小步间隔30~250，越小步频越快（跑得快一点可略减小间隔或提高 speed）",
-                         PropertyList(std::vector<Property>{
-                             Property("speed", kPropertyTypeInteger, 100, 30, 250),
-                             Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250)}),
+                         "机器狗持续向前行走，直到 stop。参数 step_period_ms：小步间隔30~250，越小步频越快",
+                         PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250)}),
                          [dog](const PropertyList& props) -> ReturnValue {
-                             const float sp = McpSpeedIntToRad(props["speed"].value<int>());
                              const int p = props["step_period_ms"].value<int>();
-                             if (dog->startContinuousForward(sp, p)) {
+                             if (dog->startContinuousForward(dog->getContinuousSpeed(), p)) {
                                  return std::string("已开始持续前进");
                              }
                              return std::string("持续前进启动失败");
                          });
 
     mcp_server.AddTool("self.chassis.start_backward",
-                         "机器狗持续向后退，直到 stop。参数同 start_forward",
-                         PropertyList(std::vector<Property>{
-                             Property("speed", kPropertyTypeInteger, 100, 30, 250),
-                             Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250)}),
+                         "机器狗持续向后退，直到 stop。参数 step_period_ms 同 start_forward",
+                         PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250)}),
                          [dog](const PropertyList& props) -> ReturnValue {
-                             const float sp = McpSpeedIntToRad(props["speed"].value<int>());
                              const int p = props["step_period_ms"].value<int>();
-                             if (dog->startContinuousBackward(sp, p)) {
+                             if (dog->startContinuousBackward(dog->getContinuousSpeed(), p)) {
                                  return std::string("已开始持续后退");
                              }
                              return std::string("持续后退启动失败");
@@ -800,17 +794,39 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.set_speed",
-                         "调节持续行走的电机限速与小步间隔（跑快/慢：提高或降低 speed；步频：减小或增大 step_period_ms）。未在持续行走时也会作为下次 start 的默认参数",
+                         "同时调节持续行走步频与 MIT 速度：step_period_ms 越小步频越快；speed_x100/100 为关节 v_des(rad/s)",
                          PropertyList(std::vector<Property>{
-                             Property("speed", kPropertyTypeInteger, 100, 30, 250),
-                             Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250)}),
+                             Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250),
+                             Property("speed_x100", kPropertyTypeInteger, 100,
+                                      DEEP_DOG_CHASSIS_SPEED_X100_MIN, DEEP_DOG_CHASSIS_SPEED_X100_MAX)}),
                          [dog](const PropertyList& props) -> ReturnValue {
-                             const float sp = McpSpeedIntToRad(props["speed"].value<int>());
                              const int p = props["step_period_ms"].value<int>();
-                             dog->setContinuousSpeed(sp);
+                             const int speed_x100 = props["speed_x100"].value<int>();
+                             dog->setContinuousSpeed(speed_x100 / 100.0f);
                              dog->setContinuousStepPeriodMs(p);
-                             return std::string("已更新：限速约 ") + std::to_string(props["speed"].value<int>()) +
-                                    "/100 rad/s，小步间隔 " + std::to_string(p) + "ms";
+                             return std::string("已更新：step_period_ms=") + std::to_string(p) +
+                                    "ms, v_des=" + std::to_string(speed_x100 / 100.0f) + " rad/s";
+                         });
+
+    mcp_server.AddTool("self.chassis.set_mit_gains",
+                         "设置 MIT 全局增益（后续所有关节运控帧默认使用）。kp 范围 0~500；kd 范围 0~5",
+                         PropertyList(std::vector<Property>{
+                             Property("kp_x10", kPropertyTypeInteger, 100, 0, 5000),
+                             Property("kd_x100", kPropertyTypeInteger, 150, 0, 500)}),
+                         [dog](const PropertyList& props) -> ReturnValue {
+                             const float kp = props["kp_x10"].value<int>() / 10.0f;
+                             const float kd = props["kd_x100"].value<int>() / 100.0f;
+                             dog->setMitGains(kp, kd);
+                             return std::string("MIT 增益已设置：kp=") + std::to_string(dog->getMitKp()) +
+                                    ", kd=" + std::to_string(dog->getMitKd());
+                         });
+
+    mcp_server.AddTool("self.chassis.get_mit_gains",
+                         "查询当前 MIT 全局增益（kp/kd）",
+                         PropertyList(),
+                         [dog](const PropertyList&) -> ReturnValue {
+                             return std::string("当前 MIT 增益：kp=") + std::to_string(dog->getMitKp()) +
+                                    ", kd=" + std::to_string(dog->getMitKd());
                          });
 
     mcp_server.AddTool("self.chassis.dance", "机器狗跳舞（站立→2次前进一大步→2次后退一大步→站立）。用户说：跳舞、来段舞 时调用", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
@@ -820,5 +836,5 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
 
     ESP_LOGI(TAG,
              "Dog MCP: dog.init/stand/lie_down; chassis.forward_big/backward_big/start_forward/start_backward/stop/status/"
-             "set_speed/dance");
+             "set_speed/set_mit_gains/get_mit_gains/dance");
 }
