@@ -88,7 +88,63 @@
 #endif
 /** LegControl::init 中 MIT 模式 initializeMotorMitMode 的 PARAM_LIMIT_SPD（rad/s） */
 #ifndef DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S
-#define DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S 0.5f
+#define DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S 0.2f
+#endif
+
+/** 步态一个正弦周期的采样点数（越大越平滑、步频任务更密） */
+#ifndef DEEP_DOG_GAIT_TOTAL_STEPS
+#define DEEP_DOG_GAIT_TOTAL_STEPS 50
+#endif
+
+/**
+ * 周期优先配置（推荐）：
+ * - 以「完整步态周期（一个正弦周期）」时长定义快慢范围；
+ * - 每个小步间隔 step_period_ms 由 周期/采样点数 自动推导。
+ * 这样后续只改 `DEEP_DOG_GAIT_TOTAL_STEPS`，step_period 范围会自动同步，无需手工改三处参数。
+ */
+#ifndef DEEP_DOG_BIG_STEP_PERIOD_MS_MIN
+#define DEEP_DOG_BIG_STEP_PERIOD_MS_MIN 500
+#endif
+#ifndef DEEP_DOG_BIG_STEP_PERIOD_MS_MAX
+#define DEEP_DOG_BIG_STEP_PERIOD_MS_MAX 4000
+#endif
+#ifndef DEEP_DOG_BIG_STEP_PERIOD_MS_DEFAULT
+#define DEEP_DOG_BIG_STEP_PERIOD_MS_DEFAULT 2000
+#endif
+
+/** 兼容旧宏名：这里直接按完整步态周期使用（单位 ms） */
+#define DEEP_DOG_CYCLE_PERIOD_MS_MIN (DEEP_DOG_BIG_STEP_PERIOD_MS_MIN)
+#define DEEP_DOG_CYCLE_PERIOD_MS_MAX (DEEP_DOG_BIG_STEP_PERIOD_MS_MAX)
+#define DEEP_DOG_CYCLE_PERIOD_MS_DEFAULT (DEEP_DOG_BIG_STEP_PERIOD_MS_DEFAULT)
+
+/** step_period_ms = 全周期 / 采样点数（取整）；并保证最小为 1ms */
+#define DEEP_DOG_STEP_PERIOD_MS_MIN \
+    (((DEEP_DOG_CYCLE_PERIOD_MS_MIN / DEEP_DOG_GAIT_TOTAL_STEPS) > 0) ? \
+         (DEEP_DOG_CYCLE_PERIOD_MS_MIN / DEEP_DOG_GAIT_TOTAL_STEPS) : 1)
+#define DEEP_DOG_STEP_PERIOD_MS_MAX \
+    (((DEEP_DOG_CYCLE_PERIOD_MS_MAX / DEEP_DOG_GAIT_TOTAL_STEPS) > 0) ? \
+         (DEEP_DOG_CYCLE_PERIOD_MS_MAX / DEEP_DOG_GAIT_TOTAL_STEPS) : 1)
+#define DEEP_DOG_STEP_PERIOD_MS_DEFAULT \
+    (((DEEP_DOG_CYCLE_PERIOD_MS_DEFAULT / DEEP_DOG_GAIT_TOTAL_STEPS) > 0) ? \
+         (DEEP_DOG_CYCLE_PERIOD_MS_DEFAULT / DEEP_DOG_GAIT_TOTAL_STEPS) : 1)
+
+/**
+ * 固定点位插值通用配置（当前用于站立/卧倒，后续左倾/右倾等固定姿态也可复用）：
+ * 总时长固定，点数越多则单点延时等比例减小。
+ */
+#ifndef DEEP_DOG_POSE_INTERP_POINTS
+#define DEEP_DOG_POSE_INTERP_POINTS 50
+#endif
+#ifndef DEEP_DOG_POSE_INTERP_DURATION_MS
+#define DEEP_DOG_POSE_INTERP_DURATION_MS 1000
+#endif
+
+/* 兼容旧宏名（站立插值） */
+#ifndef DEEP_DOG_STAND_INTERP_POINTS
+#define DEEP_DOG_STAND_INTERP_POINTS DEEP_DOG_POSE_INTERP_POINTS
+#endif
+#ifndef DEEP_DOG_STAND_INTERP_DURATION_MS
+#define DEEP_DOG_STAND_INTERP_DURATION_MS DEEP_DOG_POSE_INTERP_DURATION_MS
 #endif
 
 /**

@@ -130,6 +130,50 @@ bool trajectory_plan_point_to_point(trajectory_planner_t* planner,
     return true;
 }
 
+bool trajectory_plan_linear_fixed_duration(trajectory_planner_t* planner,
+                                           const float* start_positions,
+                                           const float* end_positions,
+                                           uint16_t motor_count,
+                                           uint16_t point_count,
+                                           uint32_t total_duration_ms) {
+    if (!planner || !start_positions || !end_positions) {
+        ESP_LOGE(TAG, "线性轨迹参数无效：空指针");
+        return false;
+    }
+    if (motor_count == 0 || motor_count > TRAJECTORY_MAX_MOTOR_COUNT) {
+        ESP_LOGE(TAG, "线性轨迹参数无效：motor_count=%u", (unsigned)motor_count);
+        return false;
+    }
+    if (point_count < 2) {
+        point_count = 2;
+    }
+    if (point_count > MAX_TRAJECTORY_POINTS) {
+        point_count = MAX_TRAJECTORY_POINTS;
+    }
+
+    memset(planner, 0, sizeof(trajectory_planner_t));
+    planner->point_count = point_count;
+    planner->current_index = 0;
+    planner->is_active = true;
+
+    const float dt_s = (point_count > 1) ? ((float)total_duration_ms / 1000.0f) / (float)(point_count - 1) : 0.0f;
+    for (uint16_t i = 0; i < point_count; i++) {
+        const float t = (point_count > 1) ? (float)i / (float)(point_count - 1) : 1.0f;
+        trajectory_point_t* p = &planner->points[i];
+        p->time_ms = (uint32_t)((uint64_t)total_duration_ms * (uint64_t)i / (uint64_t)(point_count - 1));
+        for (uint16_t m = 0; m < motor_count; m++) {
+            const float delta = end_positions[m] - start_positions[m];
+            p->positions[m] = start_positions[m] + delta * t;
+            p->velocities[m] = (dt_s > 0.0f) ? (delta / ((float)(point_count - 1) * dt_s)) : 0.0f;
+        }
+        for (uint16_t m = motor_count; m < TRAJECTORY_MAX_MOTOR_COUNT; m++) {
+            p->positions[m] = 0.0f;
+            p->velocities[m] = 0.0f;
+        }
+    }
+    return true;
+}
+
 // 轨迹插值
 bool trajectory_interpolate(trajectory_planner_t* planner, 
                            const trajectory_point_t* original_points,

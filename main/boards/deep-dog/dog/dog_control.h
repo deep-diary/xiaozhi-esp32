@@ -33,6 +33,7 @@ public:
     GaitPlanner& gaitPlanner() { return gait_planner_; }
     const GaitPlanner& gaitPlanner() const { return gait_planner_; }
     void setQuadrupedGaitType(QuadrupedGaitType t) { gait_planner_.setGaitType(t); }
+    void setGaitTotalSteps(uint16_t steps);
 
     /** 整机姿态状态（趴下/站立/行走中等），供板级 LED 等使用 */
     DogPoseState getPoseState() const { return state_machine_.state(); }
@@ -67,14 +68,19 @@ public:
      * 持续前进/后退（后台任务循环小步，直至 stopContinuousLocomotion 或其它动作打断）。
      * step_period_ms：相邻小步之间的节拍间隔（影响「走得快慢」观感，与电机限速 speed 独立）。
      */
-    bool startContinuousForward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S, int step_period_ms = 80);
-    bool startContinuousBackward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S, int step_period_ms = 80);
+    bool startContinuousForward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S,
+                                int step_period_ms = DEEP_DOG_STEP_PERIOD_MS_DEFAULT);
+    bool startContinuousBackward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S,
+                                 int step_period_ms = DEEP_DOG_STEP_PERIOD_MS_DEFAULT);
     /** 持续行走中调节电机限速（rad/s） */
     void setContinuousSpeed(float max_speed_rad_s);
     float getContinuousSpeed() const { return continuous_speed_rad_s_; }
     /** 持续行走中调节小步间隔（ms） */
     void setContinuousStepPeriodMs(int ms);
     int getContinuousStepPeriodMs() const { return continuous_step_period_ms_; }
+    /** 按一个完整步态周期时长（ms）设置小步间隔：step_period = cycle_period / gait_steps */
+    void setContinuousCyclePeriodMs(int cycle_period_ms);
+    int getContinuousCyclePeriodMs() const;
 
     /** 运行时设置 MIT 增益（会用于后续所有关节运控下发） */
     void setMitGains(float kp, float kd);
@@ -107,6 +113,7 @@ private:
 
     bool goForwardStepNoEnsure(float max_speed_rad_s);
     bool goBackStepNoEnsure(float max_speed_rad_s);
+    bool sendHoldCurrentPoseZeroSpeed(const char* reason);
 
     static void ContinuousWalkTask(void* arg);
     void ensureContinuousWalkTask();
@@ -116,7 +123,7 @@ private:
     /** 0=无 1=前进 2=后退 */
     std::atomic<uint8_t> continuous_mode_{0};
     float continuous_speed_rad_s_ = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S;
-    int continuous_step_period_ms_ = 80;
+    int continuous_step_period_ms_ = DEEP_DOG_STEP_PERIOD_MS_DEFAULT;
     TaskHandle_t continuous_task_handle_ = nullptr;
     float mit_kp_ = DEEP_DOG_MIT_DEFAULT_KP;
     float mit_kd_ = DEEP_DOG_MIT_DEFAULT_KD;
@@ -131,8 +138,8 @@ private:
     /** 下发前打印 12 关节目标角（rad/°），不打印 CAN 报文 */
     void logJointTargetsBeforeSend(const char* motion_label, const float pos[4][LEG_JOINT_COUNT]) const;
 
-    /** 各腿 init 后读反馈角，核对是否在近零位（趴姿写零后应接近 0） */
-    void logMotorActualPositionsAfterInit();
+    /** 各腿 init 后读反馈角，核对是否在近零位（趴姿写零后应接近 0）；true=全部正常 */
+    bool logMotorActualPositionsAfterInit();
 
     // 由于初始化会给每个电机重新设置零位并使能，
     // 若重复调用可能导致机械抖动/意外转动。

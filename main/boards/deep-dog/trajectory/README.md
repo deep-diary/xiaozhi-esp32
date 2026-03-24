@@ -14,6 +14,7 @@
 
 - `trajectory_planner.h`：接口与数据结构定义
 - `trajectory_planner.c`：实现（点对点、插值、样条等）
+- `stand_transition.md`：卧倒到站立的插值轨迹说明
 
 ---
 

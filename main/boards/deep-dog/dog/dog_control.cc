@@ -2,7 +2,9 @@
 #include "config.h"
 #include "motor/deep_motor.h"
 #include "mcp_server.h"
+#include "trajectory/trajectory_planner.h"
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <cmath>
@@ -44,6 +46,19 @@ static float ClampFloat(float v, float lo, float hi) {
     return v;
 }
 
+static trajectory_planner_t* AcquirePosePlanner() {
+    static trajectory_planner_t* planner = nullptr;
+    if (planner) {
+        return planner;
+    }
+    planner = static_cast<trajectory_planner_t*>(
+        heap_caps_malloc(sizeof(trajectory_planner_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!planner) {
+        planner = static_cast<trajectory_planner_t*>(heap_caps_malloc(sizeof(trajectory_planner_t), MALLOC_CAP_8BIT));
+    }
+    return planner;
+}
+
 DogControl::DogControl() {
     legs_[0].setLegType(LegType::FL);
     legs_[1].setLegType(LegType::FR);
@@ -71,6 +86,23 @@ void DogControl::getLegs(LegControl* out_legs[4]) {
     for (int i = 0; i < 4; i++) {
         out_legs[i] = &legs_[i];
     }
+}
+
+void DogControl::setGaitTotalSteps(uint16_t steps) {
+    const uint16_t old_steps = gait_planner_.getTotalSteps();
+    const int old_cycle_ms = (old_steps > 0) ? (continuous_step_period_ms_ * (int)old_steps)
+                                             : DEEP_DOG_CYCLE_PERIOD_MS_DEFAULT;
+    if (steps < 4) {
+        steps = 4;
+    }
+    gait_planner_.setTotalSteps(steps);
+    for (int i = 0; i < 4; i++) {
+        legs_[i].setTotalSteps(steps);
+        legs_[i].setCurrentStep(gait_planner_.effectiveStepForLeg(i));
+    }
+    // 保持整步周期不变，避免仅改采样点数导致体感速度突变。
+    setContinuousCyclePeriodMs(old_cycle_ms);
+    ESP_LOGI(TAG, "步态周期采样点数已更新为 %u", (unsigned)steps);
 }
 
 void DogControl::clampLegsMechanical(float pos[4][LEG_JOINT_COUNT]) {
@@ -142,6 +174,36 @@ bool DogControl::sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], flo
     return true;
 }
 
+bool DogControl::sendHoldCurrentPoseZeroSpeed(const char* reason) {
+    if (!deep_motor_) {
+        return false;
+    }
+    float hold_pos[4][LEG_JOINT_COUNT] = {};
+    for (int leg = 0; leg < 4; leg++) {
+        if (mit_fl_only_ && leg != 0) {
+            continue;
+        }
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            const uint8_t id = legs_[leg].getMotorId(j);
+            if (id == 0) {
+                continue;
+            }
+            float rad = 0.0f;
+            if (!deep_motor_->getMotorActualPosition(id, &rad)) {
+                // 读不到反馈时退化为站立目标，避免发送空姿态。
+                rad = legs_[leg].getStanceTargetJoint(j);
+            }
+            hold_pos[leg][j] = rad;
+        }
+    }
+    clampLegsMechanical(hold_pos);
+    const bool ok = sendAllLegJointTargets(hold_pos, 0.0f);
+    if (ok) {
+        ESP_LOGI(TAG, "已补发零速保持帧（%s）", reason ? reason : "unknown");
+    }
+    return ok;
+}
+
 bool DogControl::init() {
     if (initialized_) {
         ESP_LOGI(TAG, "dog init skipped: already initialized");
@@ -178,13 +240,18 @@ bool DogControl::init() {
     state_machine_.onInitSuccess();
     // 等待若干反馈帧，再读实际角（否则可能读到旧缓存）
     vTaskDelay(pdMS_TO_TICKS(150));
-    logMotorActualPositionsAfterInit();
+    const bool init_feedback_ok = logMotorActualPositionsAfterInit();
+    if (!init_feedback_ok) {
+        ESP_LOGE(TAG, "init 后反馈异常，立即整机失能保护");
+        (void)disable();
+        return false;
+    }
     return true;
 }
 
-void DogControl::logMotorActualPositionsAfterInit() {
+bool DogControl::logMotorActualPositionsAfterInit() {
     if (!deep_motor_) {
-        return;
+        return false;
     }
     static const char* leg_names[] = {"FL", "FR", "RL", "RR"};
     static const char* joint_names[] = {"HipAA", "HipFE", "Knee"};
@@ -220,8 +287,10 @@ void DogControl::logMotorActualPositionsAfterInit() {
     }
     if (abnormal > 0) {
         ESP_LOGW(TAG, "[init 后反馈] 共 %d 项异常或不可读，请检查趴姿机械零位、CAN 与驱动反馈", abnormal);
+        return false;
     } else {
         ESP_LOGI(TAG, "[init 后反馈] 可读关节均在 ±%.3f rad 内，置零外观正常", kZeroTolRad);
+        return true;
     }
 }
 
@@ -241,7 +310,60 @@ bool DogControl::stand(float max_speed_rad_s) {
     clampLegsMechanical(pos);
     logJointTargetsBeforeSend("stand", pos);
 
-    if (!sendAllLegJointTargets(pos, max_speed_rad_s)) {
+    float start_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
+    float end_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
+    int idx = 0;
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            float rad = 0.0f;
+            const uint8_t id = legs_[leg].getMotorId(j);
+            if (id != 0) {
+                if (!deep_motor_->getMotorActualPosition(id, &rad)) {
+                    rad = 0.0f;
+                }
+            }
+            start_flat[idx] = rad;
+            end_flat[idx] = pos[leg][j];
+            idx++;
+        }
+    }
+
+    trajectory_planner_t* planner = AcquirePosePlanner();
+    if (!planner) {
+        ESP_LOGE(TAG, "stand: pose planner alloc failed");
+        return false;
+    }
+    if (!trajectory_plan_linear_fixed_duration(planner, start_flat, end_flat, 12, DEEP_DOG_POSE_INTERP_POINTS,
+                                               DEEP_DOG_POSE_INTERP_DURATION_MS)) {
+        return false;
+    }
+
+    trajectory_point_t p;
+    uint32_t last_t = 0;
+#if DEEP_DOG_USE_MIT_WALK
+    const float lie_down_interp_speed = 0.0f;
+#else
+    const float lie_down_interp_speed = max_speed_rad_s;
+#endif
+    while (trajectory_get_next_point(planner, &p)) {
+        float interp[4][LEG_JOINT_COUNT] = {};
+        int k = 0;
+        for (int leg = 0; leg < 4; leg++) {
+            for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+                interp[leg][j] = p.positions[k++];
+            }
+        }
+        clampLegsMechanical(interp);
+        if (!sendAllLegJointTargets(interp, lie_down_interp_speed)) {
+            return false;
+        }
+        const uint32_t dt_ms = p.time_ms - last_t;
+        last_t = p.time_ms;
+        if (dt_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(dt_ms));
+        }
+    }
+    if (!sendHoldCurrentPoseZeroSpeed("stand_done")) {
         return false;
     }
     state_machine_.onStandSuccess();
@@ -259,25 +381,57 @@ bool DogControl::lieDown(float max_speed_rad_s) {
     clampLegsMechanical(pos_zero);
     logJointTargetsBeforeSend("lie_down", pos_zero);
 
-#if DEEP_DOG_USE_MIT_WALK
-    const float target_velocity_rad_s = 0.0f;  // 卧倒定点：MIT 下固定 v_des=0
-    constexpr bool kEnableLieDownHold = true;
-    constexpr int kLieDownHoldMs = 200;
-#else
-    const float target_velocity_rad_s = max_speed_rad_s;
-#endif
-
-    if (!sendAllLegJointTargets(pos_zero, target_velocity_rad_s)) {
-        return false;
-    }
-#if DEEP_DOG_USE_MIT_WALK
-    if (kEnableLieDownHold) {
-        vTaskDelay(pdMS_TO_TICKS(kLieDownHoldMs));
-        if (!sendAllLegJointTargets(pos_zero, target_velocity_rad_s)) {
-            return false;
+    float start_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
+    float end_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
+    int idx = 0;
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            float rad = 0.0f;
+            const uint8_t id = legs_[leg].getMotorId(j);
+            if (id != 0) {
+                if (!deep_motor_->getMotorActualPosition(id, &rad)) {
+                    rad = 0.0f;
+                }
+            }
+            start_flat[idx] = rad;
+            end_flat[idx] = pos_zero[leg][j];
+            idx++;
         }
     }
-#endif
+
+    trajectory_planner_t* planner = AcquirePosePlanner();
+    if (!planner) {
+        ESP_LOGE(TAG, "lieDown: pose planner alloc failed");
+        return false;
+    }
+    if (!trajectory_plan_linear_fixed_duration(planner, start_flat, end_flat, 12, DEEP_DOG_POSE_INTERP_POINTS,
+                                               DEEP_DOG_POSE_INTERP_DURATION_MS)) {
+        return false;
+    }
+
+    trajectory_point_t p;
+    uint32_t last_t = 0;
+    while (trajectory_get_next_point(planner, &p)) {
+        float interp[4][LEG_JOINT_COUNT] = {};
+        int k = 0;
+        for (int leg = 0; leg < 4; leg++) {
+            for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+                interp[leg][j] = p.positions[k++];
+            }
+        }
+        clampLegsMechanical(interp);
+        if (!sendAllLegJointTargets(interp, max_speed_rad_s)) {
+            return false;
+        }
+        const uint32_t dt_ms = p.time_ms - last_t;
+        last_t = p.time_ms;
+        if (dt_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(dt_ms));
+        }
+    }
+    if (!sendHoldCurrentPoseZeroSpeed("lie_down_done")) {
+        return false;
+    }
     state_machine_.onLieDownSuccess();
     return true;
 }
@@ -496,8 +650,20 @@ void DogControl::setMitGains(float kp, float kd) {
 }
 
 void DogControl::setContinuousStepPeriodMs(int ms) {
-    continuous_step_period_ms_ = ClampInt(ms, 30, 250);
+    continuous_step_period_ms_ = ClampInt(ms, DEEP_DOG_STEP_PERIOD_MS_MIN, DEEP_DOG_STEP_PERIOD_MS_MAX);
     ESP_LOGI(TAG, "持续行走步频周期设为 %d ms", continuous_step_period_ms_);
+}
+
+void DogControl::setContinuousCyclePeriodMs(int cycle_period_ms) {
+    cycle_period_ms = ClampInt(cycle_period_ms, DEEP_DOG_CYCLE_PERIOD_MS_MIN, DEEP_DOG_CYCLE_PERIOD_MS_MAX);
+    const uint16_t steps = gait_planner_.getTotalSteps() > 0 ? gait_planner_.getTotalSteps() : LEG_DEFAULT_TOTAL_STEPS;
+    const int step_period_ms = (int)(cycle_period_ms / (int)steps);
+    setContinuousStepPeriodMs(step_period_ms > 0 ? step_period_ms : 1);
+}
+
+int DogControl::getContinuousCyclePeriodMs() const {
+    const uint16_t steps = gait_planner_.getTotalSteps() > 0 ? gait_planner_.getTotalSteps() : LEG_DEFAULT_TOTAL_STEPS;
+    return continuous_step_period_ms_ * (int)steps;
 }
 
 std::string DogControl::getChassisStatusString() const {
@@ -563,7 +729,8 @@ void DogControl::ContinuousWalkTask(void* arg) {
     const TickType_t idle_delay = pdMS_TO_TICKS(30);
     for (;;) {
         const uint8_t mode = self->continuous_mode_.load(std::memory_order_relaxed);
-        const int period_ms = self->continuous_step_period_ms_ > 0 ? self->continuous_step_period_ms_ : 80;
+        const int period_ms =
+            self->continuous_step_period_ms_ > 0 ? self->continuous_step_period_ms_ : DEEP_DOG_STEP_PERIOD_MS_DEFAULT;
         const TickType_t step_delay = pdMS_TO_TICKS(period_ms);
         if (mode == 1) {
             if (!self->goForwardStepNoEnsure(self->continuous_speed_rad_s_)) {
@@ -594,6 +761,7 @@ void DogControl::stopContinuousLocomotionIfNeeded() {
 
 void DogControl::stopContinuousLocomotion() {
     stopContinuousLocomotionIfNeeded();
+    (void)sendHoldCurrentPoseZeroSpeed("stop_continuous");
 }
 
 bool DogControl::isContinuousLocomotionActive() const {
@@ -605,7 +773,7 @@ bool DogControl::startContinuousForward(float max_speed_rad_s, int step_period_m
         return false;
     }
     setContinuousSpeed(max_speed_rad_s);
-    continuous_step_period_ms_ = ClampInt(step_period_ms, 30, 250);
+    continuous_step_period_ms_ = ClampInt(step_period_ms, DEEP_DOG_STEP_PERIOD_MS_MIN, DEEP_DOG_STEP_PERIOD_MS_MAX);
     ensureContinuousWalkTask();
     if (!continuous_task_handle_) {
         return false;
@@ -641,7 +809,7 @@ bool DogControl::startContinuousBackward(float max_speed_rad_s, int step_period_
         return false;
     }
     setContinuousSpeed(max_speed_rad_s);
-    continuous_step_period_ms_ = ClampInt(step_period_ms, 30, 250);
+    continuous_step_period_ms_ = ClampInt(step_period_ms, DEEP_DOG_STEP_PERIOD_MS_MIN, DEEP_DOG_STEP_PERIOD_MS_MAX);
     ensureContinuousWalkTask();
     if (!continuous_task_handle_) {
         return false;
@@ -734,6 +902,12 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
         return std::string("机器狗卧倒失败");
     });
 
+    mcp_server.AddTool("self.dog.disable", "机器狗整机失能（12 电机 reset/停扭）。用户说：整体断电、整体失能、电机下电 时调用",
+                        PropertyList(), [dog](const PropertyList&) -> ReturnValue {
+        if (dog->disable()) return std::string("机器狗已整体失能（电机停扭）");
+        return std::string("机器狗整体失能失败");
+    });
+
     mcp_server.AddTool("self.chassis.forward_big",
                          "机器狗向前「一大步」：沿相位连续迈半个正弦周期（若干小步+可选延时），非持续行走。参数 step_delay_ms：小步之间延时 0~300ms",
                          PropertyList(std::vector<Property>{Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
@@ -757,8 +931,11 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.start_forward",
-                         "机器狗持续向前行走，直到 stop。参数 step_period_ms：小步间隔30~250，越小步频越快",
-                         PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250)}),
+                         "机器狗持续向前行走，直到 stop。参数 step_period_ms：小步间隔越小步频越快",
+                         PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger,
+                                                                     DEEP_DOG_STEP_PERIOD_MS_DEFAULT,
+                                                                     DEEP_DOG_STEP_PERIOD_MS_MIN,
+                                                                     DEEP_DOG_STEP_PERIOD_MS_MAX)}),
                          [dog](const PropertyList& props) -> ReturnValue {
                              const int p = props["step_period_ms"].value<int>();
                              if (dog->startContinuousForward(dog->getContinuousSpeed(), p)) {
@@ -769,7 +946,10 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
 
     mcp_server.AddTool("self.chassis.start_backward",
                          "机器狗持续向后退，直到 stop。参数 step_period_ms 同 start_forward",
-                         PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250)}),
+                         PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger,
+                                                                     DEEP_DOG_STEP_PERIOD_MS_DEFAULT,
+                                                                     DEEP_DOG_STEP_PERIOD_MS_MIN,
+                                                                     DEEP_DOG_STEP_PERIOD_MS_MAX)}),
                          [dog](const PropertyList& props) -> ReturnValue {
                              const int p = props["step_period_ms"].value<int>();
                              if (dog->startContinuousBackward(dog->getContinuousSpeed(), p)) {
@@ -793,19 +973,27 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                              return dog->getChassisStatusString();
                          });
 
-    mcp_server.AddTool("self.chassis.set_speed",
-                         "同时调节持续行走步频与 MIT 速度：step_period_ms 越小步频越快；speed_x100/100 为关节 v_des(rad/s)",
-                         PropertyList(std::vector<Property>{
-                             Property("step_period_ms", kPropertyTypeInteger, 80, 30, 250),
-                             Property("speed_x100", kPropertyTypeInteger, 100,
-                                      DEEP_DOG_CHASSIS_SPEED_X100_MIN, DEEP_DOG_CHASSIS_SPEED_X100_MAX)}),
+    mcp_server.AddTool("self.chassis.set_gait_steps",
+                         "设置一个正弦周期采样点数（越大步态越细腻，范围 8~120）",
+                         PropertyList(std::vector<Property>{Property("steps", kPropertyTypeInteger, (int)LEG_DEFAULT_TOTAL_STEPS, 8, 120)}),
                          [dog](const PropertyList& props) -> ReturnValue {
-                             const int p = props["step_period_ms"].value<int>();
-                             const int speed_x100 = props["speed_x100"].value<int>();
-                             dog->setContinuousSpeed(speed_x100 / 100.0f);
-                             dog->setContinuousStepPeriodMs(p);
-                             return std::string("已更新：step_period_ms=") + std::to_string(p) +
-                                    "ms, v_des=" + std::to_string(speed_x100 / 100.0f) + " rad/s";
+                             const int steps = props["steps"].value<int>();
+                             dog->setGaitTotalSteps((uint16_t)steps);
+                             return std::string("步态周期采样点数已设置为 ") + std::to_string(steps);
+                         });
+
+    mcp_server.AddTool("self.chassis.set_speed",
+                         "设置完整步态周期（ms），采样点数不变时：周期越小跑得越快。示例：cycle_period_ms=2000 表示步态周期 2s",
+                         PropertyList(std::vector<Property>{
+                             Property("cycle_period_ms", kPropertyTypeInteger, DEEP_DOG_CYCLE_PERIOD_MS_DEFAULT,
+                                      DEEP_DOG_CYCLE_PERIOD_MS_MIN, DEEP_DOG_CYCLE_PERIOD_MS_MAX)}),
+                         [dog](const PropertyList& props) -> ReturnValue {
+                             const int cycle_ms = props["cycle_period_ms"].value<int>();
+                             dog->setContinuousCyclePeriodMs(cycle_ms);
+                             return std::string("已更新：cycle_period_ms=") +
+                                    std::to_string(dog->getContinuousCyclePeriodMs()) +
+                                    "ms, step_period_ms=" + std::to_string(dog->getContinuousStepPeriodMs()) +
+                                    "ms";
                          });
 
     mcp_server.AddTool("self.chassis.set_mit_gains",
@@ -835,6 +1023,6 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
     });
 
     ESP_LOGI(TAG,
-             "Dog MCP: dog.init/stand/lie_down; chassis.forward_big/backward_big/start_forward/start_backward/stop/status/"
-             "set_speed/set_mit_gains/get_mit_gains/dance");
+             "Dog MCP: dog.init/stand/lie_down/disable; chassis.forward_big/backward_big/start_forward/start_backward/stop/status/"
+             "set_speed/set_gait_steps/set_mit_gains/get_mit_gains/dance");
 }

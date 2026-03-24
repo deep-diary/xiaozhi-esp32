@@ -130,9 +130,20 @@ bool MotorProtocol::initializeMotor(uint8_t motor_id, float target_velocity_rad_
     ESP_LOGI(TAG, "开始初始化电机%d（target_velocity=%.2f rad/s）", motor_id, target_velocity_rad_s);
 
     resetMotor(motor_id);
-    ESP_LOGI(TAG, "步骤0: 设置电机%d零位", motor_id);
-    if (!setMotorZero(motor_id)) {
-        ESP_LOGE(TAG, "设置电机%d零位失败", motor_id);
+    ESP_LOGI(TAG, "步骤0: 设置电机%d零位（发送两帧增强可靠性）", motor_id);
+    bool zero_ok = false;
+    for (int k = 0; k < 2; ++k) {
+        if (setMotorZero(motor_id)) {
+            zero_ok = true;
+        } else {
+            ESP_LOGW(TAG, "设置电机%d零位第%d帧发送失败", motor_id, k + 1);
+        }
+        if (k == 0) {
+            vTaskDelay(pdMS_TO_TICKS(8));
+        }
+    }
+    if (!zero_ok) {
+        ESP_LOGE(TAG, "设置电机%d零位失败（两帧均失败）", motor_id);
         return false;
     }
     vTaskDelay(pdMS_TO_TICKS(10));

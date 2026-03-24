@@ -26,7 +26,7 @@ enum class LegType {
 #define LEG_JOINT_KNEE     2  // 膝
 
 /** 默认步态总步数（一步周期内的采样点数） */
-#define LEG_DEFAULT_TOTAL_STEPS 20
+#define LEG_DEFAULT_TOTAL_STEPS DEEP_DOG_GAIT_TOTAL_STEPS
 
 /** 默认迈步关节幅度（弧度），用于正弦偏移 */
 #define LEG_DEFAULT_HIP_FE_AMP   0.25f

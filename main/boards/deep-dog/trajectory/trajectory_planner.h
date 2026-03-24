@@ -10,7 +10,7 @@ extern "C" {
 
 // 轨迹规划配置
 #define MAX_TRAJECTORY_POINTS 1000    // 最大轨迹点数
-#define TRAJECTORY_MAX_MOTOR_COUNT 6  // 最大电机数量
+#define TRAJECTORY_MAX_MOTOR_COUNT 12  // 最大电机数量（deep-dog 全身 12 关节）
 #define INTERPOLATION_FACTOR 4        // 插值倍数，用于三次样条插值
 #define POINT_TO_POINT_FACTOR 180     // 点对点轨迹插值倍数
 #define POINT_TO_POINT_DURATION_MS 3000  // 点对点轨迹执行时长(ms)
@@ -61,6 +61,23 @@ bool trajectory_plan_point_to_point(trajectory_planner_t* planner,
                                    const trajectory_point_t* start_point,
                                    const trajectory_point_t* end_point,
                                    const trajectory_config_t* config);
+
+/**
+ * @brief 线性插值生成固定时长轨迹（常用于姿态切换）
+ * @param planner 轨迹规划器
+ * @param start_positions 起点关节数组
+ * @param end_positions 终点关节数组
+ * @param motor_count 使用的关节数量（<= TRAJECTORY_MAX_MOTOR_COUNT）
+ * @param point_count 插值点数（>= 2）
+ * @param total_duration_ms 总时长（ms）
+ * @return true 成功，false 失败
+ */
+bool trajectory_plan_linear_fixed_duration(trajectory_planner_t* planner,
+                                           const float* start_positions,
+                                           const float* end_positions,
+                                           uint16_t motor_count,
+                                           uint16_t point_count,
+                                           uint32_t total_duration_ms);
 
 /**
  * @brief 对现有轨迹进行插值
