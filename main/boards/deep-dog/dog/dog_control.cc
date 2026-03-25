@@ -5,6 +5,7 @@
 #include "trajectory/trajectory_planner.h"
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <esp_random.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <cmath>
@@ -57,6 +58,83 @@ static trajectory_planner_t* AcquirePosePlanner() {
         planner = static_cast<trajectory_planner_t*>(heap_caps_malloc(sizeof(trajectory_planner_t), MALLOC_CAP_8BIT));
     }
     return planner;
+}
+
+bool DogControl::moveToPoseJointsInterp(const char* label, const float target[4][LEG_JOINT_COUNT], float max_speed_rad_s) {
+    if (!deep_motor_) return false;
+    stopContinuousLocomotionIfNeeded();
+    gait_planner_.resetCycle();
+    for (int i = 0; i < 4; i++) {
+        legs_[i].setCurrentStep(gait_planner_.effectiveStepForLeg(i));
+    }
+
+    float pos[4][LEG_JOINT_COUNT] = {};
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            pos[leg][j] = target[leg][j];
+        }
+    }
+    clampLegsMechanical(pos);
+    logJointTargetsBeforeSend(label ? label : "pose", pos);
+
+    float start_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
+    float end_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
+    int idx = 0;
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            float rad = 0.0f;
+            const uint8_t id = legs_[leg].getMotorId(j);
+            if (id != 0) {
+                if (!deep_motor_->getMotorActualPosition(id, &rad)) {
+                    rad = 0.0f;
+                }
+            }
+            start_flat[idx] = rad;
+            end_flat[idx] = pos[leg][j];
+            idx++;
+        }
+    }
+
+    trajectory_planner_t* planner = AcquirePosePlanner();
+    if (!planner) {
+        ESP_LOGE(TAG, "%s: pose planner alloc failed", label ? label : "pose");
+        return false;
+    }
+    if (!trajectory_plan_linear_fixed_duration(planner, start_flat, end_flat, 12, DEEP_DOG_POSE_INTERP_POINTS,
+                                               DEEP_DOG_POSE_INTERP_DURATION_MS)) {
+        return false;
+    }
+
+    trajectory_point_t p;
+    uint32_t last_t = 0;
+    while (trajectory_get_next_point(planner, &p)) {
+        float interp[4][LEG_JOINT_COUNT] = {};
+        int k = 0;
+        for (int leg = 0; leg < 4; leg++) {
+            for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+                interp[leg][j] = p.positions[k++];
+            }
+        }
+        clampLegsMechanical(interp);
+        if (!sendAllLegJointTargets(interp, max_speed_rad_s)) {
+            return false;
+        }
+        const uint32_t dt_ms = p.time_ms - last_t;
+        last_t = p.time_ms;
+        if (dt_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(dt_ms));
+        }
+    }
+    if (!sendHoldCurrentPoseZeroSpeed(label ? label : "pose_done")) {
+        return false;
+    }
+    return true;
+}
+
+bool DogControl::goToStaticPose(DogStaticPoseId pose, float max_speed_rad_s) {
+    float target[4][LEG_JOINT_COUNT] = {};
+    FillDogStaticPose(pose, legs_, target);
+    return moveToPoseJointsInterp(DogStaticPoseName(pose), target, max_speed_rad_s);
 }
 
 DogControl::DogControl() {
@@ -296,74 +374,16 @@ bool DogControl::logMotorActualPositionsAfterInit() {
 
 bool DogControl::stand(float max_speed_rad_s) {
     if (!deep_motor_) return false;
-    stopContinuousLocomotionIfNeeded();
-    gait_planner_.resetCycle();
-    for (int i = 0; i < 4; i++) {
-        legs_[i].setCurrentStep(gait_planner_.effectiveStepForLeg(i));
-    }
-    float pos[4][LEG_JOINT_COUNT];
-    for (int leg = 0; leg < 4; leg++) {
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            pos[leg][j] = legs_[leg].getStanceTargetJoint(j);
-        }
-    }
-    clampLegsMechanical(pos);
-    logJointTargetsBeforeSend("stand", pos);
-
-    float start_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
-    float end_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
-    int idx = 0;
-    for (int leg = 0; leg < 4; leg++) {
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            float rad = 0.0f;
-            const uint8_t id = legs_[leg].getMotorId(j);
-            if (id != 0) {
-                if (!deep_motor_->getMotorActualPosition(id, &rad)) {
-                    rad = 0.0f;
-                }
-            }
-            start_flat[idx] = rad;
-            end_flat[idx] = pos[leg][j];
-            idx++;
-        }
-    }
-
-    trajectory_planner_t* planner = AcquirePosePlanner();
-    if (!planner) {
-        ESP_LOGE(TAG, "stand: pose planner alloc failed");
-        return false;
-    }
-    if (!trajectory_plan_linear_fixed_duration(planner, start_flat, end_flat, 12, DEEP_DOG_POSE_INTERP_POINTS,
-                                               DEEP_DOG_POSE_INTERP_DURATION_MS)) {
-        return false;
-    }
-
-    trajectory_point_t p;
-    uint32_t last_t = 0;
 #if DEEP_DOG_USE_MIT_WALK
-    const float lie_down_interp_speed = 0.0f;
+    // MIT 运控：站立阶段如果把 speed 给得太大，容易“冲”；这里插值阶段速度置 0 更稳。
+    const float interp_speed = 0.0f;
 #else
-    const float lie_down_interp_speed = max_speed_rad_s;
+    const float interp_speed = max_speed_rad_s;
 #endif
-    while (trajectory_get_next_point(planner, &p)) {
-        float interp[4][LEG_JOINT_COUNT] = {};
-        int k = 0;
-        for (int leg = 0; leg < 4; leg++) {
-            for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-                interp[leg][j] = p.positions[k++];
-            }
-        }
-        clampLegsMechanical(interp);
-        if (!sendAllLegJointTargets(interp, lie_down_interp_speed)) {
-            return false;
-        }
-        const uint32_t dt_ms = p.time_ms - last_t;
-        last_t = p.time_ms;
-        if (dt_ms > 0) {
-            vTaskDelay(pdMS_TO_TICKS(dt_ms));
-        }
-    }
-    if (!sendHoldCurrentPoseZeroSpeed("stand_done")) {
+
+    float target[4][LEG_JOINT_COUNT] = {};
+    FillDogStaticPose(DogStaticPoseId::Stand, legs_, target);
+    if (!moveToPoseJointsInterp("stand", target, interp_speed)) {
         return false;
     }
     state_machine_.onStandSuccess();
@@ -372,64 +392,9 @@ bool DogControl::stand(float max_speed_rad_s) {
 
 bool DogControl::lieDown(float max_speed_rad_s) {
     if (!deep_motor_) return false;
-    stopContinuousLocomotionIfNeeded();
-    gait_planner_.resetCycle();
-    for (int i = 0; i < 4; i++) {
-        legs_[i].setCurrentStep(gait_planner_.effectiveStepForLeg(i));
-    }
-    float pos_zero[4][LEG_JOINT_COUNT] = {};
-    clampLegsMechanical(pos_zero);
-    logJointTargetsBeforeSend("lie_down", pos_zero);
-
-    float start_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
-    float end_flat[TRAJECTORY_MAX_MOTOR_COUNT] = {0};
-    int idx = 0;
-    for (int leg = 0; leg < 4; leg++) {
-        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-            float rad = 0.0f;
-            const uint8_t id = legs_[leg].getMotorId(j);
-            if (id != 0) {
-                if (!deep_motor_->getMotorActualPosition(id, &rad)) {
-                    rad = 0.0f;
-                }
-            }
-            start_flat[idx] = rad;
-            end_flat[idx] = pos_zero[leg][j];
-            idx++;
-        }
-    }
-
-    trajectory_planner_t* planner = AcquirePosePlanner();
-    if (!planner) {
-        ESP_LOGE(TAG, "lieDown: pose planner alloc failed");
-        return false;
-    }
-    if (!trajectory_plan_linear_fixed_duration(planner, start_flat, end_flat, 12, DEEP_DOG_POSE_INTERP_POINTS,
-                                               DEEP_DOG_POSE_INTERP_DURATION_MS)) {
-        return false;
-    }
-
-    trajectory_point_t p;
-    uint32_t last_t = 0;
-    while (trajectory_get_next_point(planner, &p)) {
-        float interp[4][LEG_JOINT_COUNT] = {};
-        int k = 0;
-        for (int leg = 0; leg < 4; leg++) {
-            for (int j = 0; j < LEG_JOINT_COUNT; j++) {
-                interp[leg][j] = p.positions[k++];
-            }
-        }
-        clampLegsMechanical(interp);
-        if (!sendAllLegJointTargets(interp, max_speed_rad_s)) {
-            return false;
-        }
-        const uint32_t dt_ms = p.time_ms - last_t;
-        last_t = p.time_ms;
-        if (dt_ms > 0) {
-            vTaskDelay(pdMS_TO_TICKS(dt_ms));
-        }
-    }
-    if (!sendHoldCurrentPoseZeroSpeed("lie_down_done")) {
+    float target[4][LEG_JOINT_COUNT] = {};
+    FillDogStaticPose(DogStaticPoseId::LieDownZero, legs_, target);
+    if (!moveToPoseJointsInterp("lie_down", target, max_speed_rad_s)) {
         return false;
     }
     state_machine_.onLieDownSuccess();
@@ -857,28 +822,87 @@ bool DogControl::disable() {
 }
 
 bool DogControl::dance(float max_speed_rad_s) {
+    return danceWithMode("default", 0, 3, max_speed_rad_s);
+}
+
+static uint32_t DanceNextRand(uint32_t* s) {
+    // LCG：足够用于动作随机编排
+    *s = (*s) * 1664525u + 1013904223u;
+    return *s;
+}
+
+bool DogControl::danceWithMode(const std::string& mode, int seed, int rounds, float max_speed_rad_s) {
+    rounds = ClampInt(rounds, 1, 12);
     if (!stand(max_speed_rad_s)) {
         return false;
     }
-    vTaskDelay(pdMS_TO_TICKS(800));
+    vTaskDelay(pdMS_TO_TICKS(450));
+
     const int stride_delay_ms = 45;
-    // 各 2 次「一大步」（半正弦周期串联），替代原先 4×小步 + 4×小步，动作更完整、总时长相近
-    for (int i = 0; i < 2; i++) {
-        if (!goForwardBigStep(max_speed_rad_s, stride_delay_ms)) {
-            return false;
+    const int pose_hold_ms = 180;
+
+    if (mode == "random") {
+        uint32_t rng = (seed != 0) ? (uint32_t)seed : esp_random();
+        for (int i = 0; i < rounds; i++) {
+            const uint32_t r = DanceNextRand(&rng);
+            const int pick = (int)(r % 6);
+            if (pick == 0) {
+                if (!goForwardBigStep(max_speed_rad_s, stride_delay_ms)) return false;
+            } else if (pick == 1) {
+                if (!goBackBigStep(max_speed_rad_s, stride_delay_ms)) return false;
+            } else if (pick == 2) {
+                if (!goToStaticPose(DogStaticPoseId::TiltLeft, max_speed_rad_s)) return false;
+                vTaskDelay(pdMS_TO_TICKS(pose_hold_ms));
+            } else if (pick == 3) {
+                if (!goToStaticPose(DogStaticPoseId::TiltRight, max_speed_rad_s)) return false;
+                vTaskDelay(pdMS_TO_TICKS(pose_hold_ms));
+            } else if (pick == 4) {
+                if (!goToStaticPose(DogStaticPoseId::FrontDownBackUp, max_speed_rad_s)) return false;
+                vTaskDelay(pdMS_TO_TICKS(pose_hold_ms));
+            } else {
+                if (!goToStaticPose(DogStaticPoseId::FrontUpBackDown, max_speed_rad_s)) return false;
+                vTaskDelay(pdMS_TO_TICKS(pose_hold_ms));
+            }
+            // 每轮拉回站立，避免随机串联误差累积导致姿态漂移
+            if (!stand(max_speed_rad_s)) return false;
+            vTaskDelay(pdMS_TO_TICKS(140));
         }
-        vTaskDelay(pdMS_TO_TICKS(450));
+        ESP_LOGI(TAG, "dance done (random rounds=%d seed=%u)", rounds, (unsigned)rng);
+        return true;
+    }
+
+    // default：按阶段计划里的“站立/前后走 + 左右倾 + 前后俯仰”编排
+    // 1) 左右倾 * rounds
+    for (int i = 0; i < rounds; i++) {
+        if (!goToStaticPose(DogStaticPoseId::TiltLeft, max_speed_rad_s)) return false;
+        vTaskDelay(pdMS_TO_TICKS(pose_hold_ms));
+        if (!goToStaticPose(DogStaticPoseId::TiltRight, max_speed_rad_s)) return false;
+        vTaskDelay(pdMS_TO_TICKS(pose_hold_ms));
+    }
+    if (!stand(max_speed_rad_s)) return false;
+    vTaskDelay(pdMS_TO_TICKS(220));
+
+    // 2) 前后俯仰各一次
+    if (!goToStaticPose(DogStaticPoseId::FrontDownBackUp, max_speed_rad_s)) return false;
+    vTaskDelay(pdMS_TO_TICKS(pose_hold_ms + 80));
+    if (!goToStaticPose(DogStaticPoseId::FrontUpBackDown, max_speed_rad_s)) return false;
+    vTaskDelay(pdMS_TO_TICKS(pose_hold_ms + 80));
+    if (!stand(max_speed_rad_s)) return false;
+    vTaskDelay(pdMS_TO_TICKS(260));
+
+    // 3) 前进/后退大步（展示移动能力）
+    for (int i = 0; i < 2; i++) {
+        if (!goForwardBigStep(max_speed_rad_s, stride_delay_ms)) return false;
+        vTaskDelay(pdMS_TO_TICKS(380));
     }
     for (int i = 0; i < 2; i++) {
-        if (!goBackBigStep(max_speed_rad_s, stride_delay_ms)) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(450));
+        if (!goBackBigStep(max_speed_rad_s, stride_delay_ms)) return false;
+        vTaskDelay(pdMS_TO_TICKS(380));
     }
     if (!stand(max_speed_rad_s)) {
         return false;
     }
-    ESP_LOGI(TAG, "dance done (big-step stride x2 forward + x2 back)");
+    ESP_LOGI(TAG, "dance done (default: sway x%d + pitch + big-step)", rounds);
     return true;
 }
 
@@ -1017,12 +1041,51 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                                     ", kd=" + std::to_string(dog->getMitKd());
                          });
 
-    mcp_server.AddTool("self.chassis.dance", "机器狗跳舞（站立→2次前进一大步→2次后退一大步→站立）。用户说：跳舞、来段舞 时调用", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
-        if (dog->dance()) return std::string("跳舞完成");
-        return std::string("跳舞失败");
-    });
+    mcp_server.AddTool("self.chassis.pose",
+                       "切换到静态姿态点（插值到目标点）。pose: lie_down_zero/stand/tilt_left/tilt_right/front_down_back_up/front_up_back_down",
+                       PropertyList(std::vector<Property>{
+                           Property("pose", kPropertyTypeString, std::string("stand")),
+                       }),
+                       [dog](const PropertyList& props) -> ReturnValue {
+                           const std::string pose = props["pose"].value<std::string>();
+                           DogStaticPoseId id = DogStaticPoseId::Stand;
+                           if (pose == "lie_down_zero" || pose == "lie_down" || pose == "zero") {
+                               id = DogStaticPoseId::LieDownZero;
+                           } else if (pose == "stand") {
+                               id = DogStaticPoseId::Stand;
+                           } else if (pose == "tilt_left") {
+                               id = DogStaticPoseId::TiltLeft;
+                           } else if (pose == "tilt_right") {
+                               id = DogStaticPoseId::TiltRight;
+                           } else if (pose == "front_down_back_up") {
+                               id = DogStaticPoseId::FrontDownBackUp;
+                           } else if (pose == "front_up_back_down") {
+                               id = DogStaticPoseId::FrontUpBackDown;
+                           } else {
+                               return std::string("未知 pose：") + pose;
+                           }
+                           if (dog->goToStaticPose(id)) {
+                               return std::string("已切换姿态：") + pose;
+                           }
+                           return std::string("切换姿态失败：") + pose;
+                       });
+
+    mcp_server.AddTool("self.chassis.dance",
+                       "机器狗跳舞（支持可编排/可随机）。mode=default/random，rounds=左右倾重复次数，seed=随机种子(0表示自动)",
+                       PropertyList(std::vector<Property>{
+                           Property("mode", kPropertyTypeString, std::string("default")),
+                           Property("rounds", kPropertyTypeInteger, 3, 1, 12),
+                           Property("seed", kPropertyTypeInteger, 0, 0, 2147483647),
+                       }),
+                       [dog](const PropertyList& props) -> ReturnValue {
+                           const std::string mode = props["mode"].value<std::string>();
+                           const int rounds = props["rounds"].value<int>();
+                           const int seed = props["seed"].value<int>();
+                           if (dog->danceWithMode(mode, seed, rounds)) return std::string("跳舞完成");
+                           return std::string("跳舞失败");
+                       });
 
     ESP_LOGI(TAG,
              "Dog MCP: dog.init/stand/lie_down/disable; chassis.forward_big/backward_big/start_forward/start_backward/stop/status/"
-             "set_speed/set_gait_steps/set_mit_gains/get_mit_gains/dance");
+             "set_speed/set_gait_steps/set_mit_gains/get_mit_gains/pose/dance");
 }

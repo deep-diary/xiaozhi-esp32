@@ -10,6 +10,7 @@
 #include "leg/leg_control.h"
 #include "gait_planner.h"
 #include "dog_state_machine.h"
+#include "dog_static_poses.h"
 
 class DeepMotor;
 
@@ -101,6 +102,13 @@ public:
      * 每步之间可加延时，后续可改为关键帧+插值。
      */
     bool dance(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool danceWithMode(const std::string& mode,
+                       int seed = 0,
+                       int rounds = 3,
+                       float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+
+    /** 跳到某个静态点（站立/趴下/左右倾/前后俯仰等），内部会做插值 */
+    bool goToStaticPose(DogStaticPoseId pose, float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
 
 private:
     DeepMotor* deep_motor_ = nullptr;
@@ -114,6 +122,7 @@ private:
     bool goForwardStepNoEnsure(float max_speed_rad_s);
     bool goBackStepNoEnsure(float max_speed_rad_s);
     bool sendHoldCurrentPoseZeroSpeed(const char* reason);
+    bool moveToPoseJointsInterp(const char* label, const float target[4][LEG_JOINT_COUNT], float max_speed_rad_s);
 
     static void ContinuousWalkTask(void* arg);
     void ensureContinuousWalkTask();
