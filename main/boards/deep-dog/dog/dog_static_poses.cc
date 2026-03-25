@@ -50,9 +50,15 @@ void FillDogStaticPose(DogStaticPoseId id, const LegControl legs[4], float out[4
 
     // 下面所有静态点都在“行走范围附近的小幅偏置”，避免一上来就撞机械限位。
     // 单位：rad
-    const float aa = 0.14f;     // 髋侧摆偏置幅度（左右倾）
-    const float fe = 0.10f;     // 髋前后偏置（俯仰）
-    const float knee = 0.30f;   // 膝偏置（伸长/缩短腿长，控制前后俯仰体感）
+    // 经验偏置（rad）
+    // 说明：
+    // - TiltLeft/TiltRight 这里按“真实侧倾（roll，左右高低）”实现：通过左右两侧腿长差（主要膝）制造高低差，
+    //   这样更接近“站在地上倾斜”的效果；HipAA 仅做很小辅助避免脚向外撇。
+    const float aa = 0.03f;        // HipAA：轻微辅助（不再用大幅度镜像）
+    const float fe = 0.10f;        // HipFE：俯仰
+    const float knee = 0.30f;      // 膝：伸长/缩短腿长，控制前后俯仰体感
+    const float fe_roll = 0.03f;   // roll 时 HipFE 配合幅度（小）
+    const float knee_roll = 0.18f; // roll 时膝关节腿长差幅度（建议先小后大）
 
     // leg index: 0=FL,1=FR,2=RL,3=RR
     const bool is_front[4] = {true, true, false, false};
@@ -61,12 +67,20 @@ void FillDogStaticPose(DogStaticPoseId id, const LegControl legs[4], float out[4
     for (int leg = 0; leg < 4; leg++) {
         switch (id) {
             case DogStaticPoseId::TiltLeft: {
-                // 目标：身体向左“压”——左侧两腿更靠内、右侧两腿更靠外（基于各腿 AA 正负定义）。
-                // 左腿：AA +aa；右腿：AA -aa（对称写法，不依赖“内/外”文案）
+                // 左侧倾：左侧“压低”、右侧“抬高”
+                // 左侧腿缩短（膝更弯，朝 0），右侧腿变长（膝更直，远离 0）。
+                // 膝关节左右符号相反：用 base[knee] 的正负来决定“朝 0 / 远离 0”的符号方向。
+                const float s = (base[leg][LEG_JOINT_KNEE] >= 0.0f) ? 1.0f : -1.0f;
                 out[leg][LEG_JOINT_HIP_AA] = base[leg][LEG_JOINT_HIP_AA] + (is_left[leg] ? +aa : -aa);
+                out[leg][LEG_JOINT_HIP_FE] = base[leg][LEG_JOINT_HIP_FE] + (is_left[leg] ? +fe_roll : -fe_roll);
+                out[leg][LEG_JOINT_KNEE]   = base[leg][LEG_JOINT_KNEE] + (is_left[leg] ? -s * knee_roll : +s * knee_roll);
             } break;
             case DogStaticPoseId::TiltRight: {
+                // 右侧倾：右侧“压低”、左侧“抬高”
+                const float s = (base[leg][LEG_JOINT_KNEE] >= 0.0f) ? 1.0f : -1.0f;
                 out[leg][LEG_JOINT_HIP_AA] = base[leg][LEG_JOINT_HIP_AA] + (is_left[leg] ? -aa : +aa);
+                out[leg][LEG_JOINT_HIP_FE] = base[leg][LEG_JOINT_HIP_FE] + (is_left[leg] ? -fe_roll : +fe_roll);
+                out[leg][LEG_JOINT_KNEE]   = base[leg][LEG_JOINT_KNEE] + (is_left[leg] ? +s * knee_roll : -s * knee_roll);
             } break;
             case DogStaticPoseId::FrontDownBackUp: {
                 // 前趴后仰：前腿缩短（膝更弯，接近 0），后腿伸长（膝更直，远离 0）

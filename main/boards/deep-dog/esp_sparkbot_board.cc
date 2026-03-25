@@ -91,14 +91,16 @@ private:
     }
 
     void InitializeCan() {
-        ESP32Can.setTxQueueSize(10);
-        ESP32Can.setRxQueueSize(10);
+        // 连续行走时每个小步会突发下发 12 个关节帧；队列太小容易触发 send 超时。
+        // 适当增大 TX/RX 队列可显著降低高频下的丢帧/超时概率。
+        ESP32Can.setTxQueueSize(64);
+        ESP32Can.setRxQueueSize(64);
         bool ok = ESP32Can.begin(
             ESP32Can.convertSpeed(1000),
             (int8_t)CAN_TX_GPIO,
             (int8_t)CAN_RX_GPIO,
-            10,
-            10
+            64,
+            64
         );
         if (ok) {
             ESP_LOGI(TAG, "CAN init ok, TX=%d RX=%d", (int)CAN_TX_GPIO, (int)CAN_RX_GPIO);
@@ -251,7 +253,7 @@ private:
         dog_.setDeepMotor(deep_motor_);
         dog_.getLegs(leg_ptrs_);
         // MCP 数量上限约 32：单电机/MIT 调试时只开电机工具，腿/整机先注释，需要整机时再改回
-        RegisterMotorMcpTools(mcp_server, deep_motor_);
+        // RegisterMotorMcpTools(mcp_server, deep_motor_);
         // RegisterLegMcpTools(mcp_server, leg_ptrs_);
         RegisterDogMcpTools(mcp_server, &dog_);
     }

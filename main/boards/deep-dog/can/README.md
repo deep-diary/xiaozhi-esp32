@@ -24,7 +24,7 @@
 |----|------------|
 | 引脚 | `CAN_TX_GPIO` = **GPIO38**（接收发器 RXD），`CAN_RX_GPIO` = **GPIO48**（接收发器 TXD） |
 | 波特率 | `InitializeCan()` 中使用 **`convertSpeed(1000)`** → **1 Mbps**（须与全部电机一致） |
-| 队列 | `setTxQueueSize(10)` / `setRxQueueSize(10)`，`begin(..., 10, 10)` |
+| 队列 | `setTxQueueSize(64)` / `setRxQueueSize(64)`，`begin(..., 64, 64)`（连续行走突发 12 帧更稳） |
 
 **硬件**：ESP32 GPIO 必须经过 **CAN 收发器**（如 TJA1051、SN65HVD230）接 CANH/CANL；**共地**；总线两端 **120Ω** 终端（按线长与拓扑调整）。
 
@@ -41,8 +41,8 @@ bool ok = ESP32Can.begin(
     ESP32Can.convertSpeed(1000),
     (int8_t)CAN_TX_GPIO,
     (int8_t)CAN_RX_GPIO,
-    10,   // TX 队列长度
-    10    // RX 队列长度
+    64,   // TX 队列长度
+    64    // RX 队列长度
 );
 ```
 

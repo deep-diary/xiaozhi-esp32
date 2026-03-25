@@ -224,6 +224,15 @@ bool DogControl::sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], flo
     if (!deep_motor_) {
         return false;
     }
+    // 缓存“上一帧目标”，便于调 MIT 增益后立即重发（只改 kp/kd，其它不变）。
+    for (int leg = 0; leg < 4; leg++) {
+        for (int j = 0; j < LEG_JOINT_COUNT; j++) {
+            last_joint_targets_[leg][j] = pos[leg][j];
+        }
+    }
+    last_max_speed_rad_s_ = max_speed_rad_s;
+    has_last_joint_targets_ = true;
+
     for (int j = 0; j < LEG_JOINT_COUNT; j++) {
         for (int leg = 0; leg < 4; leg++) {
             if (mit_fl_only_ && leg != 0) {
@@ -250,6 +259,16 @@ bool DogControl::sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], flo
         }
     }
     return true;
+}
+
+bool DogControl::resendLastJointTargetsWithUpdatedGains() {
+    if (!deep_motor_) {
+        return false;
+    }
+    if (!has_last_joint_targets_) {
+        return false;
+    }
+    return sendAllLegJointTargets(last_joint_targets_, last_max_speed_rad_s_);
 }
 
 bool DogControl::sendHoldCurrentPoseZeroSpeed(const char* reason) {
@@ -1029,8 +1048,10 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                              const float kp = props["kp_x10"].value<int>() / 10.0f;
                              const float kd = props["kd_x100"].value<int>() / 100.0f;
                              dog->setMitGains(kp, kd);
+                             const bool resent = dog->resendLastJointTargetsWithUpdatedGains();
                              return std::string("MIT 增益已设置：kp=") + std::to_string(dog->getMitKp()) +
-                                    ", kd=" + std::to_string(dog->getMitKd());
+                                    ", kd=" + std::to_string(dog->getMitKd()) +
+                                    (resent ? "（已用新增益重发上一帧）" : "（尚无可重发的上一帧）");
                          });
 
     mcp_server.AddTool("self.chassis.get_mit_gains",

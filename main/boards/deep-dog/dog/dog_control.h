@@ -88,6 +88,9 @@ public:
     float getMitKp() const { return mit_kp_; }
     float getMitKd() const { return mit_kd_; }
 
+    /** 立即用最新 kp/kd 重发上一帧关节目标（位置/速度/力矩/限速保持不变）。用于调参快速生效。 */
+    bool resendLastJointTargetsWithUpdatedGains();
+
     void stopContinuousLocomotion();
     bool isContinuousLocomotionActive() const;
 
@@ -137,6 +140,10 @@ private:
     float mit_kp_ = DEEP_DOG_MIT_DEFAULT_KP;
     float mit_kd_ = DEEP_DOG_MIT_DEFAULT_KD;
     float mit_tau_ff_ = DEEP_DOG_MIT_DEFAULT_TAU_FF;
+
+    bool has_last_joint_targets_ = false;
+    float last_joint_targets_[4][LEG_JOINT_COUNT] = {};
+    float last_max_speed_rad_s_ = 0.0f;
 
     /** 12 关节目标统一做机械限位裁剪（README 机械列） */
     void clampLegsMechanical(float pos[4][LEG_JOINT_COUNT]);
