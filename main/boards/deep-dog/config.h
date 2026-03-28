@@ -62,7 +62,7 @@
 #define MOTOR_SPEED_60  60
 #define MOTOR_SPEED_MIN 0
 
-/** 1=UART 打印 CAN 收发帧 id+dlc+8 字节 HEX（核对指令用）；调完改 0 减轻日志与串口负载 */
+/** 1=UART 以 INFO 打印每条 CAN RX：id+dlc+8 字节 HEX（验接收电路/总线用）；调完改 0 减轻日志与串口负载 */
 #ifndef DEEP_DOG_CAN_HEX_LOG
 #define DEEP_DOG_CAN_HEX_LOG 0
 #endif
@@ -78,7 +78,7 @@
 
 /** 运控默认增益与前馈（腿/整机共用，与单电机 MCP 默认 1/1/0 对齐）；仅当 DEEP_DOG_USE_MIT_WALK=1 时参与编译下发 */
 #ifndef DEEP_DOG_MIT_DEFAULT_KP
-#define DEEP_DOG_MIT_DEFAULT_KP 10.0f
+#define DEEP_DOG_MIT_DEFAULT_KP 20.0f
 #endif
 #ifndef DEEP_DOG_MIT_DEFAULT_KD
 #define DEEP_DOG_MIT_DEFAULT_KD 1.5f
@@ -86,9 +86,13 @@
 #ifndef DEEP_DOG_MIT_DEFAULT_TAU_FF
 #define DEEP_DOG_MIT_DEFAULT_TAU_FF 0.0f
 #endif
-/** LegControl::init 中 MIT 模式 initializeMotorMitMode 的 PARAM_LIMIT_SPD（rad/s） */
-#ifndef DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S
-#define DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S 0.2f
+/**
+ * 关节默认速度（rad/s），编译期统一出口（MIT 与位置模式由 DEEP_DOG_USE_MIT_WALK 二选一，不会同时生效）。
+ * - MIT：运控帧 v_des 一律用本值；整机/单腿 API 的 max_speed_rad_s 不再写入 v_des（快慢靠插值与步频）。
+ * - 位置模式：作默认 max_speed_rad_s / setMotorSpeedLimit；`stand`/`lieDown` 等插值仍传该参数。
+ */
+#ifndef DEEP_DOG_MIT_VDES_RAD_S
+#define DEEP_DOG_MIT_VDES_RAD_S 0.0f
 #endif
 
 /** 步态一个正弦周期的采样点数（越大越平滑、步频任务更密） */
@@ -148,7 +152,7 @@
 #endif
 
 /**
- * 底盘 MCP `speed` 整型：÷100 = 关节 PARAM_LIMIT_SPD（rad/s），与 `DogControl::setContinuousSpeed` 上限一致。
+ * 底盘 MCP `speed` 整型：÷100 后写入 `setContinuousSpeed`（状态/位置模式限速语义；MIT 下运控 v_des 仍为 DEEP_DOG_MIT_VDES_RAD_S）。
  * 适当拉大 min~max，避免「走得快慢差不多、最快仍偏慢」。
  */
 #ifndef DEEP_DOG_CHASSIS_SPEED_X100_MIN

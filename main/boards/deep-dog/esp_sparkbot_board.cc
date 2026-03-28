@@ -170,6 +170,9 @@ private:
         );
         if (ok) {
             ESP_LOGI(TAG, "CAN init ok, TX=%d RX=%d", (int)CAN_TX_GPIO, (int)CAN_RX_GPIO);
+#if DEEP_DOG_CAN_HEX_LOG
+            ESP_LOGI(TAG, "CAN RX 报文日志已开启 (DEEP_DOG_CAN_HEX_LOG)：每条接收帧打印 ext id / dlc / data[0..7]");
+#endif
         } else {
             ESP_LOGE(TAG, "CAN init failed");
         }

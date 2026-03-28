@@ -270,7 +270,7 @@ void DeepDogTouchApp::OnRelease2() {
     btn2_long_fired_ = false;
 
     if (ComboArmed() && was_combo_touch && was_short) {
-        if (dog_->goForwardBigStep(1.0f, 40)) {
+        if (dog_->goForwardBigStep(DEEP_DOG_MIT_VDES_RAD_S, 40)) {
             ESP_LOGI(TAG, "Touch: 组合键 长按1→短按2 → goForwardBigStep ok");
         } else {
             ESP_LOGE(TAG, "Touch: goForwardBigStep failed");
@@ -293,7 +293,7 @@ void DeepDogTouchApp::OnRelease3() {
     btn3_long_fired_ = false;
 
     if (ComboArmed() && was_combo_touch && was_short) {
-        if (dog_->goBackBigStep(1.0f, 40)) {
+        if (dog_->goBackBigStep(DEEP_DOG_MIT_VDES_RAD_S, 40)) {
             ESP_LOGI(TAG, "Touch: 组合键 长按1→短按3 → goBackBigStep ok");
         } else {
             ESP_LOGE(TAG, "Touch: goBackBigStep failed");

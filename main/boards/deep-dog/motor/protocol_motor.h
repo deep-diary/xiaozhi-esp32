@@ -13,7 +13,7 @@
 
 // CAN配置常量
 #define MOTOR_MASTER_ID       0xFD
-#define MOTOR_CAN_TIMEOUT_MS  10
+#define MOTOR_CAN_TIMEOUT_MS  15
 
 // 数学常量
 #ifndef MOTOR_PI

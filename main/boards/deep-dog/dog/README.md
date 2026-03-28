@@ -113,5 +113,5 @@
 - [x] 在 `esp_sparkbot_board.cc` 中注册 MCP 并改为调用 `DogControl`（`RegisterDogMcpTools`）；保留单腿 `RegisterLegMcpTools` 用于调试。
 - [x] 实现跳舞：站立 → 2×`goForwardBigStep` → 2×`goBackBigStep` → 站立；后续可改为关键帧+插值。
 - [ ] 可选：左转/右转。
-- [x] **一大步** `goForwardBigStep`/`goBackBigStep`（半周期小步+延时）；`start_forward`/`backward` 可调速与步频（MCP 整型 `speed`÷100=rad/s，**范围见 `config.h` `DEEP_DOG_CHASSIS_SPEED_X100_*`**）。
+- [x] **一大步** `goForwardBigStep`/`goBackBigStep`（半周期小步+延时）；`start_forward`/`backward` 可调步频；MCP `speed` 在位置模式为限速参考，**MIT 下运控 `v_des` 见 `DEEP_DOG_MIT_VDES_RAD_S`**（**范围** `DEEP_DOG_CHASSIS_SPEED_X100_*`）。
 - [x] 姿态状态机（趴下后前进先站立、软件机械限位、`getPoseState()` 供 LED 扩展）。

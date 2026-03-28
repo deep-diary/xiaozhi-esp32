@@ -244,7 +244,7 @@ bool DogControl::sendAllLegJointTargets(const float pos[4][LEG_JOINT_COUNT], flo
             }
             float pj = pos[leg][j];
 #if DEEP_DOG_USE_MIT_WALK
-            if (!deep_motor_->setMotorMitCommand(id, pj, max_speed_rad_s, mit_kp_, mit_kd_, mit_tau_ff_)) {
+            if (!deep_motor_->setMotorMitCommand(id, pj, DEEP_DOG_MIT_VDES_RAD_S, mit_kp_, mit_kd_, mit_tau_ff_)) {
                 ESP_LOGE(TAG, "sendAllLegJointTargets setMotorMitCommand leg=%d joint=%d id=%u", leg, j,
                          (unsigned)id);
                 return false;
@@ -294,7 +294,7 @@ bool DogControl::sendHoldCurrentPoseZeroSpeed(const char* reason) {
         }
     }
     clampLegsMechanical(hold_pos);
-    const bool ok = sendAllLegJointTargets(hold_pos, 0.0f);
+    const bool ok = sendAllLegJointTargets(hold_pos, DEEP_DOG_MIT_VDES_RAD_S);
     if (ok) {
         ESP_LOGI(TAG, "已补发零速保持帧（%s）", reason ? reason : "unknown");
     }
@@ -394,8 +394,8 @@ bool DogControl::logMotorActualPositionsAfterInit() {
 bool DogControl::stand(float max_speed_rad_s) {
     if (!deep_motor_) return false;
 #if DEEP_DOG_USE_MIT_WALK
-    // MIT 运控：站立阶段如果把 speed 给得太大，容易“冲”；这里插值阶段速度置 0 更稳。
-    const float interp_speed = 0.0f;
+    // MIT：v_des 固定为 DEEP_DOG_MIT_VDES_RAD_S；插值快慢与 max_speed_rad_s 无耦合。
+    const float interp_speed = DEEP_DOG_MIT_VDES_RAD_S;
 #else
     const float interp_speed = max_speed_rad_s;
 #endif
@@ -956,7 +956,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          PropertyList(std::vector<Property>{Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
                          [dog](const PropertyList& props) -> ReturnValue {
                              const int d = props["step_delay_ms"].value<int>();
-                             if (dog->goForwardBigStep(1.0f, d)) {
+                             if (dog->goForwardBigStep(DEEP_DOG_MIT_VDES_RAD_S, d)) {
                                  return std::string("已向前一大步");
                              }
                              return std::string("前进一大步失败");
@@ -967,7 +967,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          PropertyList(std::vector<Property>{Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
                          [dog](const PropertyList& props) -> ReturnValue {
                              const int d = props["step_delay_ms"].value<int>();
-                             if (dog->goBackBigStep(1.0f, d)) {
+                             if (dog->goBackBigStep(DEEP_DOG_MIT_VDES_RAD_S, d)) {
                                  return std::string("已向后一大步");
                              }
                              return std::string("后退一大步失败");

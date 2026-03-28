@@ -43,37 +43,37 @@ public:
     bool init();
 
     /** 整机站立：4 条腿回站立位 */
-    bool stand(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool stand(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
 
     /** 整机卧倒：4 条腿回零位 */
-    bool lieDown(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool lieDown(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
 
     /** 整机向前一步：推进 GaitPlanner 周期并按当前步态类型下发各腿目标（默认 Trot） */
-    bool goForward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool goForward(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
 
     /** 整机向后一步：周期反向，摆动方向取反（见 LegControl::fillStepPositionsAtStepIndex） */
-    bool goBack(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool goBack(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
 
     /** 连续前/后若干「小步」（每步推进一个周期采样索引，共 total_steps 步为一正弦周期） */
-    bool goForwardSteps(int steps, float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
-    bool goBackSteps(int steps, float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool goForwardSteps(int steps, float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
+    bool goBackSteps(int steps, float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
 
     /**
      * 一大步：沿相位连续走 **半个正弦周期**（total_steps/2 个小步），小步之间可插延时。
      * 例如 total_steps=20 时一大步 = 10 个小步。
      */
-    bool goForwardBigStep(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S, int inter_step_delay_ms = 40);
-    bool goBackBigStep(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S, int inter_step_delay_ms = 40);
+    bool goForwardBigStep(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S, int inter_step_delay_ms = 40);
+    bool goBackBigStep(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S, int inter_step_delay_ms = 40);
 
     /**
      * 持续前进/后退（后台任务循环小步，直至 stopContinuousLocomotion 或其它动作打断）。
-     * step_period_ms：相邻小步之间的节拍间隔（影响「走得快慢」观感，与电机限速 speed 独立）。
+     * step_period_ms：相邻小步间隔，主导 MIT 下「走得快慢」；max_speed_rad_s 在 MIT 下不写入 v_des（见 DEEP_DOG_MIT_VDES_RAD_S）。
      */
-    bool startContinuousForward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S,
+    bool startContinuousForward(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S,
                                 int step_period_ms = DEEP_DOG_STEP_PERIOD_MS_DEFAULT);
-    bool startContinuousBackward(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S,
+    bool startContinuousBackward(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S,
                                  int step_period_ms = DEEP_DOG_STEP_PERIOD_MS_DEFAULT);
-    /** 持续行走中调节电机限速（rad/s） */
+    /** 持续行走中调节缓存速度（rad/s）；位置模式影响限速，MIT 下 v_des 仍为 DEEP_DOG_MIT_VDES_RAD_S */
     void setContinuousSpeed(float max_speed_rad_s);
     float getContinuousSpeed() const { return continuous_speed_rad_s_; }
     /** 持续行走中调节小步间隔（ms） */
@@ -88,7 +88,7 @@ public:
     float getMitKp() const { return mit_kp_; }
     float getMitKd() const { return mit_kd_; }
 
-    /** 立即用最新 kp/kd 重发上一帧关节目标（位置/速度/力矩/限速保持不变）。用于调参快速生效。 */
+    /** 立即用最新 kp/kd 重发上一帧关节目标（MIT 下 v_des 恒为 DEEP_DOG_MIT_VDES_RAD_S）。用于调参快速生效。 */
     bool resendLastJointTargetsWithUpdatedGains();
 
     void stopContinuousLocomotion();
@@ -104,14 +104,14 @@ public:
      * 跳舞：简单预定义动作序列（站立 → 若干步前进 → 若干步后退 → 站立）。
      * 每步之间可加延时，后续可改为关键帧+插值。
      */
-    bool dance(float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool dance(float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
     bool danceWithMode(const std::string& mode,
                        int seed = 0,
                        int rounds = 3,
-                       float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+                       float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
 
     /** 跳到某个静态点（站立/趴下/左右倾/前后俯仰等），内部会做插值 */
-    bool goToStaticPose(DogStaticPoseId pose, float max_speed_rad_s = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S);
+    bool goToStaticPose(DogStaticPoseId pose, float max_speed_rad_s = DEEP_DOG_MIT_VDES_RAD_S);
 
 private:
     DeepMotor* deep_motor_ = nullptr;
@@ -134,7 +134,7 @@ private:
 
     /** 0=无 1=前进 2=后退 */
     std::atomic<uint8_t> continuous_mode_{0};
-    float continuous_speed_rad_s_ = DEEP_DOG_MIT_INIT_SPEED_LIMIT_RAD_S;
+    float continuous_speed_rad_s_ = DEEP_DOG_MIT_VDES_RAD_S;
     int continuous_step_period_ms_ = DEEP_DOG_STEP_PERIOD_MS_DEFAULT;
     TaskHandle_t continuous_task_handle_ = nullptr;
     float mit_kp_ = DEEP_DOG_MIT_DEFAULT_KP;

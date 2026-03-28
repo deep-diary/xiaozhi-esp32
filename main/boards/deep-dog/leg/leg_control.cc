@@ -214,7 +214,7 @@ bool LegControl::sendThreeJointsPositionOrMit(const float pos[LEG_JOINT_COUNT], 
             continue;
         }
 #if DEEP_DOG_USE_MIT_WALK
-        if (!deep_motor_->setMotorMitCommand(motor_ids_[i], pos[i], target_velocity_rad_s, DEEP_DOG_MIT_DEFAULT_KP,
+        if (!deep_motor_->setMotorMitCommand(motor_ids_[i], pos[i], DEEP_DOG_MIT_VDES_RAD_S, DEEP_DOG_MIT_DEFAULT_KP,
                                              DEEP_DOG_MIT_DEFAULT_KD, DEEP_DOG_MIT_DEFAULT_TAU_FF)) {
             ESP_LOGE(TAG, "setMotorMitCommand fail id=%d", motor_ids_[i]);
             return false;
@@ -234,19 +234,16 @@ bool LegControl::goToZero(float max_speed_rad_s) {
     float pos[LEG_JOINT_COUNT] = {0.0f, 0.0f, 0.0f};
     clampJointPositionsMechanical(pos);
 #if DEEP_DOG_USE_MIT_WALK
-    const float target_velocity_rad_s = 0.0f;  // 卧倒/回零定点：MIT 下固定 v_des=0
     constexpr bool kEnableZeroHold = true;
     constexpr int kZeroHoldMs = 200;
-#else
-    const float target_velocity_rad_s = max_speed_rad_s;
 #endif
-    if (!sendThreeJointsPositionOrMit(pos, target_velocity_rad_s)) {
+    if (!sendThreeJointsPositionOrMit(pos, max_speed_rad_s)) {
         return false;
     }
 #if DEEP_DOG_USE_MIT_WALK
     if (kEnableZeroHold) {
         vTaskDelay(pdMS_TO_TICKS(kZeroHoldMs));
-        if (!sendThreeJointsPositionOrMit(pos, target_velocity_rad_s)) {
+        if (!sendThreeJointsPositionOrMit(pos, max_speed_rad_s)) {
             return false;
         }
     }
