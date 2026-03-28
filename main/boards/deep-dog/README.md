@@ -45,6 +45,7 @@ main/boards/deep-dog/
 
 - **编译**：主项目 `CMakeLists.txt` 根据 `CONFIG_BOARD_TYPE_DEEP_DOG` 选择 `BOARD_TYPE=deep-dog`，并通过 `GLOB_RECURSE` 递归收集本目录及子目录下所有 `*.cc`/`*.cpp`/`*.c` 参与编译，无需修改主项目源列表。
 - **头文件**：主项目已把 `boards/deep-dog` 加入 include 路径，本目录内引用使用相对路径即可，例如 `#include "dog/dog_control.h"`、`#include "can/ESP32-TWAI-CAN.hpp"`。
+- **同步板级配置**：配置环境时使用 python scripts/release.py ‘deep-dog’ 来加载sdkconfig跟摄像头有关的配置。
 
 ---
 

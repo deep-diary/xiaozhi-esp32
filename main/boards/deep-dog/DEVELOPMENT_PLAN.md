@@ -206,6 +206,28 @@
 - 同一页面提供 **若干控制按钮**，映射与语音/触摸一致的核心动作，例如：**前进、后退、跳舞、站立、卧倒、停止持续走** 等（具体列表与 `DogControl` / MCP 已有能力对齐，避免重复造语义）。
 - **实现上优先复用成熟组件**：如 ESP-IDF **`esp_http_server`**、主工程已有 **`esp_video` / `EspVideo`（`boards/common`）** 与板级摄像头配置；JPEG 编码可选用 ESP-IDF **`esp_jpeg`** 或工程内已有封装，减少自研编解码路径。
 
+**摄像头采集三态（已实现，见 `boards/deep-dog/http-server/`）**
+
+| 状态 | 说明 | 行为概要 |
+|------|------|----------|
+| **Off** | 默认，省资源 | `dog_cam_http` 任务仅短睡，不 `CaptureOnly`、不编码。 |
+| **PeriodicSample** | 定时巡检（≈1Hz） | 每秒 `CaptureOnly()` 一次，日志占位「人脸/检测可挂接」；**不刷 LCD**。 |
+| **Streaming** | 网页 MJPEG | Worker 按约 **8fps**（可调 `stream_target_fps_`）采帧 → `image_to_jpeg` → 写入 `jpeg_latest_`；`GET /stream` 仅**读**该缓冲并 multipart 推送，**不在 httpd 内直接抓相机**。 |
+
+网页「视频流」按钮将模式切到 **Streaming** 后，`<img src="/stream">` 拉 MJPEG；切回 **Off** 可停采减负。**注意**：与语音拍照 MCP、触摸 Explain **共用同一 `EspVideo`**，并发时可能互抢；后续可加板级互斥或合并调度。
+
+**板级入口**：`config.h` 中 `DEEP_DOG_HTTP_SERVER_ENABLE` / `DEEP_DOG_HTTP_SERVER_PORT`（默认 `8080`）；`esp_sparkbot_board.cc` 在 `InitializeCamera()` 末尾 `Start()`。
+
+**HTTP 路由（简版）**
+
+| 方法 | 路径 | 作用 |
+|------|------|------|
+| GET | `/` | 内嵌控制页（模式按钮 + 狗动作 + MJPEG 预览） |
+| GET | `/stream` | `multipart/x-mixed-replace` JPEG |
+| GET | `/api/status` | JSON：`mode`、`stream_clients`、`has_jpeg`、`port` |
+| POST | `/api/capture_mode?mode=` 取值 `off` / `periodic` / `stream` | 切换采集三态 |
+| POST | `/api/cmd?cmd=` 取值 `init`、`forward`、`back`、`stand`、`liedown`、`dance`、`stop_walk` | 投递 `DogControl`（`dog_web_cmd` 任务执行） |
+
 **软件架构（模块化、可多任务）**
 
 设计目标：**采集、消费图像的算法/业务、HTTP 服务** 解耦，便于后续加人脸检测而不推翻流媒体结构。

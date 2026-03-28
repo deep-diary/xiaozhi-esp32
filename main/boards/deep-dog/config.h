@@ -221,4 +221,35 @@ typedef enum {
 #define DEEP_DOG_TOUCH2_SHORT_PHOTO_EXPLAIN 1
 #endif
 
+/** 局域网 HTTP：控制页 + MJPEG；置 0 关闭以省资源 */
+#ifndef DEEP_DOG_HTTP_SERVER_ENABLE
+#define DEEP_DOG_HTTP_SERVER_ENABLE 1
+#endif
+#ifndef DEEP_DOG_HTTP_SERVER_PORT
+#define DEEP_DOG_HTTP_SERVER_PORT 8080
+#endif
+
+/**
+ * Wi‑Fi STA 静态 IPv4（调试用）：置 1 后不再向 AP 要 DHCP，避免同名 SSID 连到别网段拿到 192.168.1.x。
+ * 须与当前 AP 的网段一致；若仍连到 192.168.1.x 的「假 Blue」，本机地址在二层上也不通网关。
+ * 发布或换环境前改回 0 恢复 DHCP。
+ */
+#ifndef DEEP_DOG_WIFI_USE_STATIC_IP
+#define DEEP_DOG_WIFI_USE_STATIC_IP 1
+#endif
+#if DEEP_DOG_WIFI_USE_STATIC_IP
+#define DEEP_DOG_WIFI_STATIC_IP_O1 192
+#define DEEP_DOG_WIFI_STATIC_IP_O2 168
+#define DEEP_DOG_WIFI_STATIC_IP_O3 31
+#define DEEP_DOG_WIFI_STATIC_IP_O4 211
+#define DEEP_DOG_WIFI_STATIC_GW_O1 192
+#define DEEP_DOG_WIFI_STATIC_GW_O2 168
+#define DEEP_DOG_WIFI_STATIC_GW_O3 31
+#define DEEP_DOG_WIFI_STATIC_GW_O4 1
+#define DEEP_DOG_WIFI_STATIC_NM_O1 255
+#define DEEP_DOG_WIFI_STATIC_NM_O2 255
+#define DEEP_DOG_WIFI_STATIC_NM_O3 255
+#define DEEP_DOG_WIFI_STATIC_NM_O4 0
+#endif
+
 #endif // _BOARD_CONFIG_H_

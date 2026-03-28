@@ -16,15 +16,78 @@
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
+#if DEEP_DOG_WIFI_USE_STATIC_IP
+#include <esp_event.h>
+#include <esp_netif.h>
+#include <esp_wifi.h>
+#endif
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <cstring>
+#include <memory>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 #include "esp_video.h"
 
+#if DEEP_DOG_HTTP_SERVER_ENABLE
+#include "http-server/deep_dog_http_server.h"
+#endif
+
 #define TAG "deep_dog"
+
+#if DEEP_DOG_WIFI_USE_STATIC_IP
+namespace {
+
+esp_event_handler_instance_t s_deep_dog_sta_connected_hook = nullptr;
+
+void DeepDogApplyStaticStaIpv4() {
+    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif == nullptr) {
+        ESP_LOGW(TAG, "静态 IP: 未找到 WIFI_STA_DEF");
+        return;
+    }
+    esp_err_t err = esp_netif_dhcpc_stop(netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        ESP_LOGW(TAG, "dhcpc_stop: %s", esp_err_to_name(err));
+    }
+
+    esp_netif_ip_info_t ip_info = {};
+    ip_info.ip.addr = ESP_IP4TOADDR(DEEP_DOG_WIFI_STATIC_IP_O1, DEEP_DOG_WIFI_STATIC_IP_O2, DEEP_DOG_WIFI_STATIC_IP_O3,
+                                    DEEP_DOG_WIFI_STATIC_IP_O4);
+    ip_info.gw.addr = ESP_IP4TOADDR(DEEP_DOG_WIFI_STATIC_GW_O1, DEEP_DOG_WIFI_STATIC_GW_O2, DEEP_DOG_WIFI_STATIC_GW_O3,
+                                    DEEP_DOG_WIFI_STATIC_GW_O4);
+    ip_info.netmask.addr = ESP_IP4TOADDR(DEEP_DOG_WIFI_STATIC_NM_O1, DEEP_DOG_WIFI_STATIC_NM_O2,
+                                         DEEP_DOG_WIFI_STATIC_NM_O3, DEEP_DOG_WIFI_STATIC_NM_O4);
+
+    err = esp_netif_set_ip_info(netif, &ip_info);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "静态 IP 设置失败: %s", esp_err_to_name(err));
+        return;
+    }
+
+    esp_netif_dns_info_t dns = {};
+    dns.ip.type = ESP_IPADDR_TYPE_V4;
+    dns.ip.u_addr.ip4.addr = ip_info.gw.addr;
+    err = esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "DNS 设置: %s", esp_err_to_name(err));
+    }
+
+    ESP_LOGI(TAG, "WiFi 已切静态 IP: " IPSTR " mask " IPSTR " gw " IPSTR, IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask),
+             IP2STR(&ip_info.gw));
+}
+
+void DeepDogOnWifiStaConnected(void* arg, esp_event_base_t base, int32_t id, void* data) {
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
+    DeepDogApplyStaticStaIpv4();
+}
+
+}  // namespace
+#endif  // DEEP_DOG_WIFI_USE_STATIC_IP
 
 // CAN 接收任务栈与优先级
 #define CAN_RX_TASK_STACK  4096
@@ -65,6 +128,9 @@ private:
     DeepDogTouchApp touch_app_{&dog_};  // 触摸按键业务（须在 dog_ 之后构造）
     LegControl* leg_ptrs_[4] = { nullptr };  // 供单腿 MCP 回调使用，指向 dog_ 内 4 腿
     TaskHandle_t can_rx_task_handle_ = nullptr;
+#if DEEP_DOG_HTTP_SERVER_ENABLE
+    std::unique_ptr<DeepDogHttpServer> http_server_;
+#endif
 
     static void CanRxTask(void* arg) {
         DeepMotor* motor = static_cast<DeepMotor*>(arg);
@@ -250,6 +316,10 @@ private:
         camera_->SetHMirror(camera_flipped);
         camera_->SetVFlip(camera_flipped);
         touch_app_.SetCamera(camera_);
+#if DEEP_DOG_HTTP_SERVER_ENABLE
+        // 须在 esp_netif_init / tcpip 就绪之后启动（见 StartNetwork）；勿在构造函数里 httpd_start
+        http_server_ = std::make_unique<DeepDogHttpServer>(camera_, &dog_, DEEP_DOG_HTTP_SERVER_PORT);
+#endif
     }
 
     void InitializeTools() {
@@ -296,6 +366,30 @@ public:
 
     virtual Camera* GetCamera() override {
         return camera_;
+    }
+
+    void StartNetwork() override {
+        WifiBoard::StartNetwork();
+#if DEEP_DOG_WIFI_USE_STATIC_IP
+        if (s_deep_dog_sta_connected_hook == nullptr) {
+            esp_err_t er = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, DeepDogOnWifiStaConnected,
+                                                               nullptr, &s_deep_dog_sta_connected_hook);
+            if (er != ESP_OK) {
+                ESP_LOGE(TAG, "注册 STA_CONNECTED 静态 IP: %s", esp_err_to_name(er));
+            }
+        }
+        wifi_ap_record_t ap{};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            DeepDogApplyStaticStaIpv4();
+        }
+#endif
+#if DEEP_DOG_HTTP_SERVER_ENABLE
+        if (http_server_ && !http_server_->IsRunning()) {
+            if (!http_server_->Start()) {
+                ESP_LOGW(TAG, "HTTP 控制/MJPEG 服务启动失败（可检查端口占用）");
+            }
+        }
+#endif
     }
 };
 
