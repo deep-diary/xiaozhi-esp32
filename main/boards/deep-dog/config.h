@@ -230,6 +230,74 @@ typedef enum {
 #endif
 
 /**
+ * 网页人脸检测（human_face_detect / ESP-DL）：1=编译进固件；0=桩实现，零推理开销。
+ * 仅建议在 ESP32-S3 + PSRAM 下开启。
+ */
+#ifndef DEEP_DOG_FACE_AI_ENABLE
+#define DEEP_DOG_FACE_AI_ENABLE 1
+#endif
+/** 向人脸任务送帧的最小间隔（ms），用于降载 */
+#ifndef DEEP_DOG_FACE_AI_MIN_INTERVAL_MS
+#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 250
+#endif
+/**
+ * 1=检测前对 RGB565 每像素做高/低字节对调（与 human_face_detect 的 BIG_ENDIAN 预处理约定有关）。
+ * thumble 文档：全黑图 RGB565 与 RGB888 均会误检时，根因不在此开关；可与 0 对照试。
+ */
+#ifndef DEEP_DOG_FACE_DETECT_RGB565_SWAP
+#define DEEP_DOG_FACE_DETECT_RGB565_SWAP 0
+#endif
+/**
+ * 1=先把紧密 RGB565（小端内存布局）展开为 RGB888 再送入 HumanFaceDetect（与旧例 infer(...,3) 三通道一致），
+ * 绕开组件内对 RGB565 的 BIG_ENDIAN 预处理，常能改善「真人脸在画面中但框全挤在边缘」。
+ * 为 1 时不再使用 DEEP_DOG_FACE_DETECT_RGB565_SWAP（按 LE 拆 R/G/B）。
+ */
+#ifndef DEEP_DOG_FACE_DETECT_INPUT_RGB888
+#define DEEP_DOG_FACE_DETECT_INPUT_RGB888 1
+#endif
+/** MSR / MNP 阶段置信度阈值（默认高于组件内置 0.5，减轻量化噪声导致的满屏假框） */
+#ifndef DEEP_DOG_FACE_DETECT_MSR_SCORE_THR
+#define DEEP_DOG_FACE_DETECT_MSR_SCORE_THR 0.88f
+#endif
+#ifndef DEEP_DOG_FACE_DETECT_MNP_SCORE_THR
+#define DEEP_DOG_FACE_DETECT_MNP_SCORE_THR 0.88f
+#endif
+/** NMS IoU 阈值（越小越 aggressively 合并重叠框） */
+#ifndef DEEP_DOG_FACE_DETECT_MSR_NMS_THR
+#define DEEP_DOG_FACE_DETECT_MSR_NMS_THR 0.45f
+#endif
+#ifndef DEEP_DOG_FACE_DETECT_MNP_NMS_THR
+#define DEEP_DOG_FACE_DETECT_MNP_NMS_THR 0.45f
+#endif
+/** 输出前过滤宽或高小于该像素的框（滤掉贴边细条假框） */
+#ifndef DEEP_DOG_FACE_DETECT_MIN_BOX_PX
+#define DEEP_DOG_FACE_DETECT_MIN_BOX_PX 20
+#endif
+/** 1=Init 后对 240×240 全黑帧跑一次检测并打 log（用于对照分区/模型是否与 thumble「全黑仍多框」一致） */
+#ifndef DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_LOG
+#define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_LOG 1
+#endif
+/**
+ * 挡住镜头时传感器往往不是「全 0」而是低亮度+弱纹理，仍可能触发网络；与 calloc 自检通过不矛盾。
+ * 1=在跑模型前对 RGB565 做稀疏采样：若整幅「够暗且绿通道起伏不大」则直接认为无人脸（不跑推理）。
+ * 采样块全为 0 时不走此分支，以便自检仍调用模型。
+ */
+#ifndef DEEP_DOG_FACE_DETECT_SKIP_UNIFORM_DARK
+#define DEEP_DOG_FACE_DETECT_SKIP_UNIFORM_DARK 1
+#endif
+#ifndef DEEP_DOG_FACE_DETECT_UD_SAMPLE_STEP
+#define DEEP_DOG_FACE_DETECT_UD_SAMPLE_STEP 12
+#endif
+/** RGB565 绿通道 0..63，采样均值上限 */
+#ifndef DEEP_DOG_FACE_DETECT_UD_MAX_MEAN_G
+#define DEEP_DOG_FACE_DETECT_UD_MAX_MEAN_G 14
+#endif
+/** 采样点绿通道 max-min 上限（略放宽以吃掉挡镜头噪声） */
+#ifndef DEEP_DOG_FACE_DETECT_UD_MAX_RANGE_G
+#define DEEP_DOG_FACE_DETECT_UD_MAX_RANGE_G 22
+#endif
+
+/**
  * Wi‑Fi STA 静态 IPv4（调试用）：置 1 后不再向 AP 要 DHCP，避免同名 SSID 连到别网段拿到 192.168.1.x。
  * 须与当前 AP 的网段一致；若仍连到 192.168.1.x 的「假 Blue」，本机地址在二层上也不通网关。
  * 发布或换环境前改回 0 恢复 DHCP。

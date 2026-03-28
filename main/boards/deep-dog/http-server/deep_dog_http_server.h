@@ -83,6 +83,8 @@ private:
     void MjpegStreamWorkerLoop();
 
     bool EncodeCurrentFrameToJpeg(std::vector<uint8_t>* out);
+    /** submit_face_for_ai：Streaming 路径在 JPEG 编码前把 RGB565 帧送入人脸任务（方案 B，不重画 MJPEG）。 */
+    bool EncodePackedJpegFromCamera(std::vector<uint8_t>* out, bool submit_face_for_ai);
 
     static void IpGotHandler(void* arg, esp_event_base_t base, int32_t event_id, void* event_data);
     void LogHttpAccessUrls();

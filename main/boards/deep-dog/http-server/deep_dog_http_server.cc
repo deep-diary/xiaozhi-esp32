@@ -4,14 +4,17 @@
 #include "esp_video.h"
 
 #include "camera.h"
+#include "face_ai_bridge.h"
 #include "image_to_jpeg.h"
 
 #include <wifi_manager.h>
 
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <cstdlib>
-#include <cstring>
 #include <cstdio>
+#include <cstring>
+#include <strings.h>
 
 #if DEEP_DOG_HTTP_SERVER_ENABLE
 
@@ -181,6 +184,13 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "<button class='secondary' onclick=\"setMode('periodic')\">定时(1Hz)</button>"
         "<button onclick=\"setMode('stream')\">视频流</button></div>"
         "<p id='st'></p>"
+        "<div class='row' style='margin-top:8px'><label style='color:#ccc;font-size:14px'>"
+        "<input type='checkbox' id='faceEn' onchange='toggleFace(this.checked)'/> 网页人脸框（需视频流，轮询 /api/face）</label></div>"
+        "<p id='faceMeta' style='font-size:12px;color:#9cf;margin:4px 0'></p>"
+        "<div style='position:relative;width:240px;height:240px;display:none' id='vidWrap'>"
+        "<img id='m' width='240' height='240' alt='mjpeg' style='display:block;width:240px;height:240px'/>"
+        "<canvas id='fc' width='240' height='240' style='position:absolute;left:0;top:0;pointer-events:none'></canvas>"
+        "</div>"
         "<div class='row'>"
         "<button onclick=\"cmd('init')\">初始化</button>"
         "<button onclick=\"cmd('forward')\">前进</button>"
@@ -190,13 +200,26 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "<button onclick=\"cmd('dance')\">跳舞</button>"
         "<button class='secondary' onclick=\"cmd('stop_walk')\">停走</button>"
         "</div>"
-        "<img id='m' width='240' alt='mjpeg' style='display:none'/>"
         "<script>"
-        "const st=document.getElementById('st');const img=document.getElementById('m');"
+        "const st=document.getElementById('st');const wrap=document.getElementById('vidWrap');"
+        "const img=document.getElementById('m');const cv=document.getElementById('fc');const faceMeta=document.getElementById('faceMeta');"
+        "let facePoll=null;"
+        "function drawFaces(j){const c=cv.getContext('2d');c.clearRect(0,0,240,240);"
+        "if(!j||!j.faces)return;(j.faces||[]).forEach(f=>{c.strokeStyle='#0f0';c.lineWidth=2;"
+        "c.strokeRect(f.x0*240,f.y0*240,(f.x1-f.x0)*240,(f.y1-f.y0)*240);});}"
+        "function pollFace(){fetch('/api/face').then(r=>r.json()).then(j=>{"
+        "if(!j.enabled){faceMeta.textContent='人脸检测未编译';drawFaces(null);return;}"
+        "faceMeta.textContent='人脸:'+(j.feature_on?'开':'关')+' has_face:'+j.has_face+' n:'+j.n+' 帧:'+j.w+'x'+j.h;"
+        "if(j.feature_on)drawFaces(j);else drawFaces(null);}).catch(()=>{});}"
+        "function toggleFace(on){fetch('/api/face_enable?enabled='+(on?'1':'0'),{method:'POST'})"
+        ".then(()=>pollFace()).catch(()=>{});if(on&&!facePoll){facePoll=setInterval(pollFace,200);pollFace();}"
+        "else if(!on&&facePoll){clearInterval(facePoll);facePoll=null;drawFaces(null);faceMeta.textContent='';}}"
         "function refresh(){return fetch('/api/status').then(r=>r.json()).then(j=>{"
-        "st.textContent='模式:'+j.mode+' 拉流客户端:'+j.stream_clients+' JPEG:'+(j.has_jpeg?'有':'无');"
-        "if(j.mode==='stream'){img.style.display='block';if(!img.src||img.src.indexOf('/stream')<0)img.src='/stream';}"
-        "else{img.style.display='none';img.removeAttribute('src');}}).catch(()=>{st.textContent='状态获取失败';});}"
+        "st.textContent='模式:'+j.mode+' 拉流:'+j.stream_clients+' JPEG:'+(j.has_jpeg?'有':'无')"
+        "+(j.face_ai_compiled?' 人脸模块:有':' 人脸模块:无');"
+        "if(j.mode==='stream'){wrap.style.display='block';if(!img.src||img.src.indexOf('/stream')<0)img.src='/stream';}"
+        "else{wrap.style.display='none';img.removeAttribute('src');if(facePoll){clearInterval(facePoll);facePoll=null;}"
+        "document.getElementById('faceEn').checked=false;drawFaces(null);faceMeta.textContent='';}}).catch(()=>{st.textContent='状态获取失败';});}"
         "function setMode(m){fetch('/api/capture_mode?mode='+encodeURIComponent(m),{method:'POST'})"
         ".then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return refresh();})"
         ".catch(e=>{st.textContent='切换模式失败: '+e.message;});}"
@@ -285,9 +308,14 @@ static esp_err_t ApiStatusHandler(httpd_req_t* req) {
     }
     char buf[192];
     snprintf(buf, sizeof(buf),
-             "{\"mode\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u}",
+             "{\"mode\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u,\"face_ai_compiled\":%s}",
              ModeToStr(srv->GetCaptureMode()), srv->StreamClientCount(), srv->HasJpegFrame() ? "true" : "false",
-             (unsigned)srv->Port());
+             (unsigned)srv->Port(),
+#if DEEP_DOG_FACE_AI_ENABLE
+             "true");
+#else
+             "false");
+#endif
     return SendCorsJson(req, buf);
 }
 
@@ -380,6 +408,58 @@ static esp_err_t ApiCmdHandler(httpd_req_t* req) {
     return SendCorsJson(req, R"({"ok":true})");
 }
 
+static esp_err_t ApiFaceHandler(httpd_req_t* req) {
+    (void)req;
+    /** 勿在 httpd 任务栈上分配 ~2KB：默认 CONFIG_ESP_HTTPD_STACK_SIZE 仅 4KB 级，易栈溢出重启。 */
+    constexpr size_t kFaceJsonCap = 2048;
+    char* buf = static_cast<char*>(heap_caps_malloc(kFaceJsonCap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (buf == nullptr) {
+        buf = static_cast<char*>(heap_caps_malloc(kFaceJsonCap, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
+    if (buf == nullptr) {
+        return SendCorsJson(req, R"({"error":"no_mem"})");
+    }
+    const size_t n = DeepDogFaceAiFormatJson(buf, kFaceJsonCap);
+    esp_err_t err;
+    if (n == 0 || n >= kFaceJsonCap) {
+        err = SendCorsJson(req, R"({"error":"face json overflow"})");
+    } else {
+        buf[n] = '\0';
+        err = SendCorsJson(req, buf);
+    }
+    heap_caps_free(buf);
+    return err;
+}
+
+static esp_err_t ApiFaceEnableHandler(httpd_req_t* req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_set_status(req, "405 Method Not Allowed");
+        return httpd_resp_send(req, nullptr, 0);
+    }
+    if (DrainPostBody(req) != ESP_OK) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_send(req, nullptr, 0);
+    }
+#if !DEEP_DOG_FACE_AI_ENABLE
+    return SendCorsJson(req, R"({"ok":false,"reason":"face_ai_disabled"})");
+#else
+    char query[64];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, R"({"error":"need enabled=0|1"})", HTTPD_RESP_USE_STRLEN);
+    }
+    char val[16];
+    if (httpd_query_key_value(query, "enabled", val, sizeof(val)) != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, R"({"error":"need enabled=0|1"})", HTTPD_RESP_USE_STRLEN);
+    }
+    const bool on = (strcmp(val, "1") == 0 || strcasecmp(val, "true") == 0);
+    DeepDogFaceAiSetEnabled(on);
+    ESP_LOGI(TAG, "网页 人脸检测 -> %s", on ? "on" : "off");
+    return SendCorsJson(req, R"({"ok":true})");
+#endif
+}
+
 }  // namespace
 
 DeepDogHttpServer::DeepDogHttpServer(EspVideo* camera, DogControl* dog, uint16_t port)
@@ -465,7 +545,7 @@ void DeepDogHttpServer::MjpegStreamWorkerLoop() {
     }
 }
 
-bool DeepDogHttpServer::EncodeCurrentFrameToJpeg(std::vector<uint8_t>* out) {
+bool DeepDogHttpServer::EncodePackedJpegFromCamera(std::vector<uint8_t>* out, bool submit_face_for_ai) {
     if (!camera_ || !out) {
         return false;
     }
@@ -487,6 +567,12 @@ bool DeepDogHttpServer::EncodeCurrentFrameToJpeg(std::vector<uint8_t>* out) {
         }
         src = packed.data();
         src_len = packed.size();
+#if DEEP_DOG_FACE_AI_ENABLE
+        if (submit_face_for_ai && !packed.empty()) {
+            DeepDogFaceAiSubmitFrameIfDue(packed.data(), packed.size(), static_cast<uint16_t>(cf.width),
+                                         static_cast<uint16_t>(cf.height));
+        }
+#endif
     }
 
     uint8_t* jpeg_ptr = nullptr;
@@ -497,6 +583,10 @@ bool DeepDogHttpServer::EncodeCurrentFrameToJpeg(std::vector<uint8_t>* out) {
     out->assign(jpeg_ptr, jpeg_ptr + jpeg_len);
     free(jpeg_ptr);
     return true;
+}
+
+bool DeepDogHttpServer::EncodeCurrentFrameToJpeg(std::vector<uint8_t>* out) {
+    return EncodePackedJpegFromCamera(out, false);
 }
 
 void DeepDogHttpServer::CameraWorkerEntry(void* arg) {
@@ -519,7 +609,7 @@ void DeepDogHttpServer::CameraWorkerLoop() {
                 break;
             case DeepDogCaptureMode::Streaming: {
                 std::vector<uint8_t> jpeg;
-                if (EncodeCurrentFrameToJpeg(&jpeg) && !jpeg.empty()) {
+                if (EncodePackedJpegFromCamera(&jpeg, true) && !jpeg.empty()) {
                     PublishJpeg(std::move(jpeg));
                 }
                 {
@@ -622,12 +712,24 @@ bool DeepDogHttpServer::Start() {
         return false;
     }
 
+#if DEEP_DOG_FACE_AI_ENABLE
+    if (!DeepDogFaceAiRuntimeStart()) {
+        ESP_LOGW(TAG, "人脸检测 runtime 未启动（可继续用网页/MJPEG，仅无检测）");
+    }
+#endif
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port_;
     config.ctrl_port = (uint16_t)(port_ + 1);
     /* 须满足 max_open_sockets + 3 <= CONFIG_LWIP_MAX_SOCKETS（常见为 10 → 最多 7） */
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
+#if DEEP_DOG_FACE_AI_ENABLE
+    /* 人脸相关 API + 解析/日志链略深，略高于默认 4096，避免边缘场景栈溢出 */
+    if (config.stack_size < 8192) {
+        config.stack_size = 8192;
+    }
+#endif
 
     if (httpd_start(&server_, &config) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");
@@ -637,6 +739,9 @@ bool DeepDogHttpServer::Start() {
         }
         vQueueDelete(mjpeg_stream_queue_);
         mjpeg_stream_queue_ = nullptr;
+#if DEEP_DOG_FACE_AI_ENABLE
+        DeepDogFaceAiRuntimeStop();
+#endif
         return false;
     }
 
@@ -645,12 +750,19 @@ bool DeepDogHttpServer::Start() {
     httpd_uri_t uri_status = {.uri = "/api/status", .method = HTTP_GET, .handler = ApiStatusHandler, .user_ctx = this};
     httpd_uri_t uri_mode = {.uri = "/api/capture_mode", .method = HTTP_POST, .handler = ApiModeHandler, .user_ctx = this};
     httpd_uri_t uri_cmd = {.uri = "/api/cmd", .method = HTTP_POST, .handler = ApiCmdHandler, .user_ctx = this};
+    httpd_uri_t uri_face = {.uri = "/api/face", .method = HTTP_GET, .handler = ApiFaceHandler, .user_ctx = this};
+    httpd_uri_t uri_face_en =
+        {.uri = "/api/face_enable", .method = HTTP_POST, .handler = ApiFaceEnableHandler, .user_ctx = this};
 
     if (httpd_register_uri_handler(server_, &uri_root) != ESP_OK || httpd_register_uri_handler(server_, &uri_stream) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_status) != ESP_OK || httpd_register_uri_handler(server_, &uri_mode) != ESP_OK ||
-        httpd_register_uri_handler(server_, &uri_cmd) != ESP_OK) {
+        httpd_register_uri_handler(server_, &uri_cmd) != ESP_OK || httpd_register_uri_handler(server_, &uri_face) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_face_en) != ESP_OK) {
         httpd_stop(server_);
         server_ = nullptr;
+#if DEEP_DOG_FACE_AI_ENABLE
+        DeepDogFaceAiRuntimeStop();
+#endif
         ESP_LOGE(TAG, "register uri failed");
         return false;
     }
@@ -667,6 +779,9 @@ bool DeepDogHttpServer::Start() {
 
 void DeepDogHttpServer::Stop() {
     worker_stop_.store(true, std::memory_order_release);
+#if DEEP_DOG_FACE_AI_ENABLE
+    DeepDogFaceAiRuntimeStop();
+#endif
     if (ip_event_registered_) {
         esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &DeepDogHttpServer::IpGotHandler);
         ip_event_registered_ = false;
@@ -729,6 +844,10 @@ void DeepDogHttpServer::DogCmdTaskEntry(void* arg) {
 void DeepDogHttpServer::DogCmdTaskLoop() {}
 
 bool DeepDogHttpServer::EncodeCurrentFrameToJpeg(std::vector<uint8_t>*) {
+    return false;
+}
+
+bool DeepDogHttpServer::EncodePackedJpegFromCamera(std::vector<uint8_t>*, bool) {
     return false;
 }
 

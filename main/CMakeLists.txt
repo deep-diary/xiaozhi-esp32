@@ -764,6 +764,9 @@ list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})
 if(BOARD_TYPE STREQUAL "deep-thumble")
     list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/app_ai/include)
 endif()
+if(BOARD_TYPE STREQUAL "deep-dog")
+    list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/face_ai)
+endif()
 
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)
@@ -917,28 +920,34 @@ if(CONFIG_IDF_TARGET_ESP32S3)
     list(APPEND SOURCES "boards/common/esp32_camera.cc")
 endif()
 
+set(MAIN_COMPONENT_PRIV_REQUIRES
+    esp_http_server
+    esp_pm
+    esp_psram
+    esp_netif
+    esp_driver_gpio
+    esp_driver_uart
+    esp_driver_spi
+    esp_driver_i2c
+    esp_driver_i2s
+    esp_driver_jpeg
+    esp_driver_ppa
+    esp_app_format
+    app_update
+    spi_flash
+    console
+    efuse
+    bt
+)
+if(BOARD_TYPE STREQUAL "deep-dog")
+    list(APPEND MAIN_COMPONENT_PRIV_REQUIRES human_face_detect esp-dl)
+endif()
+
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
-                    PRIV_REQUIRES
-                        esp_http_server
-                        esp_pm
-                        esp_psram
-                        esp_netif
-                        esp_driver_gpio
-                        esp_driver_uart
-                        esp_driver_spi
-                        esp_driver_i2c
-                        esp_driver_i2s
-                        esp_driver_jpeg
-                        esp_driver_ppa
-                        esp_app_format
-                        app_update
-                        spi_flash
-                        console
-                        efuse
-                        bt
+                    PRIV_REQUIRES ${MAIN_COMPONENT_PRIV_REQUIRES}
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
