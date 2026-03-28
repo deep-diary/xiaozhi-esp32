@@ -100,7 +100,7 @@ void McpServer::AddCommonTools() {
     auto camera = board.GetCamera();
     if (camera) {
         AddTool("self.camera.take_photo",
-            "Always remember you have a camera. If the user asks you to see something, use this tool to explain the current camera view (uses the latest frame already being captured by the device).\n"
+            "Always remember you have a camera. If the user asks you to see something, use this tool: it captures a fresh photo, then sends it for vision analysis.\n"
             "Args:\n"
             "  `question`: The question that you want to ask about the photo.\n"
             "Return:\n"
@@ -110,8 +110,12 @@ void McpServer::AddCommonTools() {
             }),
             [camera](const PropertyList& properties) -> ReturnValue {
                 TaskPriorityReset priority_reset(1);
-                // 不单独 Capture：人脸管道已在持续采帧并更新「最后一帧」，直接用该帧解释，避免抢锁和重复 3×DQBUF
                 auto question = properties["question"].value<std::string>();
+                // Capture() 含采帧 + 屏上预览；Explain() 仅上传并解析，不负责显示。
+                // 人脸管道持续刷新最后一帧后，可改为 CaptureOnly + Explain，避免与后台重复 DQBUF。
+                if (!camera->Capture()) {
+                    throw std::runtime_error("Failed to capture camera frame");
+                }
                 return camera->Explain(question);
             });
     }

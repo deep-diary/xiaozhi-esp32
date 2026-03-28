@@ -817,15 +817,56 @@ bool EspVideo::ShowFrameToDisplay() {
                 break;
             }
 
-            case V4L2_PIX_FMT_RGB565:
-                data = (uint8_t*)heap_caps_malloc(w * h * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            case V4L2_PIX_FMT_RGB565: {
+                // 快照路径与「连续采帧只更新 mmap」不同：必须把 frame_ 当成独立副本，且
+                // bytesused 常为「行 stride×高」，不能与 w*h*2 混用，否则 memcpy/data_size 与
+                // 实际 malloc 不一致（显示花屏、上下错行或像总是一张图）。
+                if (w == 0 || h == 0) {
+                    return false;
+                }
+                const size_t row_bytes = (size_t)w * 2u;
+                const size_t dst_stride = (row_bytes + 3u) & ~3u;
+                const size_t dst_size = dst_stride * (size_t)h;
+                if (frame_.len < row_bytes) {
+                    ESP_LOGE(TAG, "RGB565 preview: frame_.len %zu < row_bytes %zu", frame_.len, row_bytes);
+                    return false;
+                }
+                data = (uint8_t*)heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 if (data == nullptr) {
                     ESP_LOGE(TAG, "Failed to allocate memory for preview image");
                     return false;
                 }
-                memcpy(data, frame_.data, frame_.len);
-                lvgl_image_size = frame_.len;  // fallthrough 时兼顾 YUYV 与 RGB565
+                if (frame_.len % (size_t)h == 0u) {
+                    const size_t src_stride = frame_.len / (size_t)h;
+                    if (src_stride < row_bytes) {
+                        ESP_LOGE(TAG, "RGB565 preview: src_stride %zu < row_bytes %zu", src_stride, row_bytes);
+                        heap_caps_free(data);
+                        data = nullptr;
+                        return false;
+                    }
+                    for (uint32_t row = 0; row < (uint32_t)h; row++) {
+                        memcpy(data + row * dst_stride, frame_.data + row * src_stride, row_bytes);
+                    }
+                } else {
+                    const size_t packed = row_bytes * (size_t)h;
+                    if (frame_.len < packed) {
+                        ESP_LOGE(TAG, "RGB565 preview: frame_.len %zu < packed %zu", frame_.len, packed);
+                        heap_caps_free(data);
+                        data = nullptr;
+                        return false;
+                    }
+                    if (dst_stride == row_bytes) {
+                        memcpy(data, frame_.data, packed);
+                    } else {
+                        for (uint32_t row = 0; row < (uint32_t)h; row++) {
+                            memcpy(data + row * dst_stride, frame_.data + row * row_bytes, row_bytes);
+                        }
+                    }
+                }
+                lvgl_image_size = dst_size;
+                stride = dst_stride;
                 break;
+            }
 
 #ifdef CONFIG_XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
             case V4L2_PIX_FMT_JPEG: {

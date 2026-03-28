@@ -1,5 +1,6 @@
 #pragma once
 
+#include "camera.h"
 #include "touch_btn/touch_button_controller.h"
 
 class DogControl;
@@ -12,6 +13,9 @@ class DeepDogTouchApp {
 public:
     explicit DeepDogTouchApp(DogControl* dog);
 
+    /** 在 `InitializeCamera()` 之后调用，供触摸触发拍照解释（与 MCP take_photo 同源：先 Capture 再 Explain）。 */
+    void SetCamera(Camera* camera) { camera_ = camera; }
+
     void OnTouchEvent(int button_id,
                       TouchButtonEvent event,
                       uint32_t value,
@@ -20,8 +24,10 @@ public:
 
 private:
     DogControl* dog_;
+    Camera* camera_ = nullptr;
 
     int64_t combo_deadline_us_ = 0;
+    bool btn1_long_fired_ = false;
     bool btn2_touching_ = false;
     bool btn2_long_fired_ = false;
     bool btn3_touching_ = false;
@@ -39,7 +45,9 @@ private:
     void DisarmCombo();
     void ExpireComboIfNeeded();
 
+    void OnPress1();
     void OnLongPress1();
+    void OnRelease1();
     void OnPress2();
     void OnPress3();
     void OnLongPress2();
@@ -48,4 +56,7 @@ private:
     void OnRelease3();
 
     void MaybeDualShortStopOnBothReleased();
+
+    void MaybeQueuePhotoExplainAfterForward();
+    void QueueTouchPhotoExplainIfIdle();
 };

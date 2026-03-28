@@ -1,12 +1,81 @@
 #include "deep_dog_touch_app.h"
+#include "config.h"
 #include "dog/dog_control.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+#include <atomic>
+#include <new>
+#include <string>
 
 #define TAG "dog_touch"
 
+namespace {
+
+std::atomic<bool> g_touch_explain_busy{false};
+
+void TouchExplainTask(void* arg) {
+    struct Job {
+        Camera* cam;
+    };
+    auto* job = static_cast<Job*>(arg);
+    try {
+        constexpr const char* kDefaultQuestion = "请解释下这张图片。";
+        if (!job->cam->Capture()) {
+            ESP_LOGE(TAG, "触摸拍照问答：采帧失败（与 MCP take_photo 一致需先 Capture）");
+        } else {
+            const std::string r = job->cam->Explain(kDefaultQuestion);
+            ESP_LOGI(TAG, "触摸拍照问答结果: %s", r.c_str());
+        }
+    } catch (const std::exception& e) {
+        ESP_LOGE(TAG, "触摸拍照问答失败: %s", e.what());
+    } catch (...) {
+        ESP_LOGE(TAG, "触摸拍照问答失败: 未知异常");
+    }
+    delete job;
+    g_touch_explain_busy.store(false);
+    vTaskDelete(nullptr);
+}
+
+}  // namespace
+
 DeepDogTouchApp::DeepDogTouchApp(DogControl* dog) : dog_(dog) {}
+
+void DeepDogTouchApp::QueueTouchPhotoExplainIfIdle() {
+#if !DEEP_DOG_TOUCH2_SHORT_PHOTO_EXPLAIN
+    return;
+#endif
+    if (!camera_) {
+        return;
+    }
+    bool expected = false;
+    if (!g_touch_explain_busy.compare_exchange_strong(expected, true)) {
+        ESP_LOGW(TAG, "上一路拍照问答尚未结束，跳过本次");
+        return;
+    }
+    struct Job {
+        Camera* cam;
+    };
+    Job* job = new (std::nothrow) Job{camera_};
+    if (!job) {
+        g_touch_explain_busy.store(false);
+        ESP_LOGE(TAG, "拍照问答任务内存不足");
+        return;
+    }
+    constexpr uint32_t kStackWords = 12288;
+    if (xTaskCreate(TouchExplainTask, "touch_explain", kStackWords, job, 5, nullptr) != pdPASS) {
+        delete job;
+        g_touch_explain_busy.store(false);
+        ESP_LOGE(TAG, "touch_explain 任务创建失败");
+    }
+}
+
+void DeepDogTouchApp::MaybeQueuePhotoExplainAfterForward() {
+    QueueTouchPhotoExplainIfIdle();
+}
 
 bool DeepDogTouchApp::ComboArmed() const {
     if (combo_deadline_us_ == 0) {
@@ -32,7 +101,12 @@ void DeepDogTouchApp::ExpireComboIfNeeded() {
     }
 }
 
+void DeepDogTouchApp::OnPress1() {
+    btn1_long_fired_ = false;
+}
+
 void DeepDogTouchApp::OnLongPress1() {
+    btn1_long_fired_ = true;
     if (!dog_) {
         return;
     }
@@ -42,6 +116,14 @@ void DeepDogTouchApp::OnLongPress1() {
         ESP_LOGE(TAG, "Touch: dog init failed");
     }
     ArmComboAfterLongPress1();
+}
+
+void DeepDogTouchApp::OnRelease1() {
+    const bool was_short = !btn1_long_fired_;
+    btn1_long_fired_ = false;
+    if (was_short) {
+        QueueTouchPhotoExplainIfIdle();
+    }
 }
 
 void DeepDogTouchApp::OnPress2() {
@@ -75,6 +157,7 @@ void DeepDogTouchApp::OnPress2() {
     } else {
         ESP_LOGE(TAG, "Touch: goForward failed");
     }
+    MaybeQueuePhotoExplainAfterForward();
 }
 
 void DeepDogTouchApp::OnPress3() {
@@ -234,7 +317,9 @@ void DeepDogTouchApp::OnTouchEvent(int button_id,
     switch (event) {
         case TouchButtonEvent::kPress:
             ESP_LOGI(TAG, "Touch button %d pressed", button_id);
-            if (button_id == 2) {
+            if (button_id == 1) {
+                OnPress1();
+            } else if (button_id == 2) {
                 OnPress2();
             } else if (button_id == 3) {
                 OnPress3();
@@ -243,7 +328,9 @@ void DeepDogTouchApp::OnTouchEvent(int button_id,
 
         case TouchButtonEvent::kRelease:
             ESP_LOGI(TAG, "Touch button %d released", button_id);
-            if (button_id == 2) {
+            if (button_id == 1) {
+                OnRelease1();
+            } else if (button_id == 2) {
                 OnRelease2();
             } else if (button_id == 3) {
                 OnRelease3();

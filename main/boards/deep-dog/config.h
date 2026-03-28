@@ -181,7 +181,8 @@ typedef enum {
     LIGHT_MODE_MAX
 } light_mode_t;
 
-/* Camera PINs*/
+/* Camera：与 ESP-SparkBot 一致；SCCB 与 ES8311 共用 I2C0（SDA=4/SCL=5），SIOD/SIOC 为 NC 时由 esp_video 复用该总线。
+ * 若日志出现 PID=0x0：多为摄像头未供电、无上拉、或模组 SCCB 未接到该 I2C（需单独第二总线）。 */
 #define SPARKBOT_CAMERA_XCLK      (GPIO_NUM_15)
 #define SPARKBOT_CAMERA_PCLK      (GPIO_NUM_13)
 #define SPARKBOT_CAMERA_VSYNC     (GPIO_NUM_6)
@@ -197,12 +198,8 @@ typedef enum {
 
 #define SPARKBOT_CAMERA_PWDN      (GPIO_NUM_NC)
 #define SPARKBOT_CAMERA_RESET     (GPIO_NUM_NC)
-#define SPARKBOT_CAMERA_XCLK      (GPIO_NUM_15)
-#define SPARKBOT_CAMERA_PCLK      (GPIO_NUM_13)
-#define SPARKBOT_CAMERA_VSYNC     (GPIO_NUM_6)
-#define SPARKBOT_CAMERA_HSYNC     (GPIO_NUM_7)
-
-#define SPARKBOT_CAMERA_XCLK_FREQ (16000000)
+/* OV3660 官方表 240×240 RGB565 常用 20MHz 输入；16M 时部分模组读 ID 不稳定 */
+#define SPARKBOT_CAMERA_XCLK_FREQ (20000000)
 #define SPARKBOT_LEDC_TIMER       (LEDC_TIMER_0)
 #define SPARKBOT_LEDC_CHANNEL     (LEDC_CHANNEL_0)
 
@@ -213,5 +210,15 @@ typedef enum {
 #define TOUCH_BUTTON1_GPIO       (GPIO_NUM_1)
 #define TOUCH_BUTTON2_GPIO       (GPIO_NUM_2)
 #define TOUCH_BUTTON3_GPIO       (GPIO_NUM_3)
+
+/**
+ * 触摸触发「先 Capture 再 Explain」（与 MCP `self.camera.take_photo` 一致）：
+ * - 键 1：短按释放（未触发长按初始化）时排队；
+ * - 键 2：成功 goForward 一小步后排队。
+ * 需已配置图像解释 URL/Token。置 0 可关闭。
+ */
+#ifndef DEEP_DOG_TOUCH2_SHORT_PHOTO_EXPLAIN
+#define DEEP_DOG_TOUCH2_SHORT_PHOTO_EXPLAIN 1
+#endif
 
 #endif // _BOARD_CONFIG_H_
