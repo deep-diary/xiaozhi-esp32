@@ -3,7 +3,7 @@
  */
 #include "sdkconfig.h"
 
-#include "config.h"
+#include "face_ai_config.h"
 #include "face_ai_types.h"
 
 #include <esp_heap_caps.h>

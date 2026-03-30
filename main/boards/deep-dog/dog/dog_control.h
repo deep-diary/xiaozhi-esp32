@@ -6,7 +6,9 @@
 #include <string>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include "config.h"
+#include "dog_config.h"
+#include "motor/motor_config.h"
+#include "trajectory/trajectory_config.h"
 #include "leg/leg_control.h"
 #include "gait_planner.h"
 #include "dog_state_machine.h"

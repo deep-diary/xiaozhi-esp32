@@ -1,4 +1,5 @@
 #include "deep_motor.h"
+#include "motor_config.h"
 #include <esp_log.h>
 #include <math.h>
 
@@ -125,6 +126,27 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
 
     // 只有反馈帧才更新活跃电机ID和LED状态
     if (cmd_type == MOTOR_CMD_FEEDBACK) {
+        motor_statuses_[motor_index].has_feedback = true;
+        motor_statuses_[motor_index].feedback_seq++;
+
+        // 扭矩观测/碰撞保护：用 |扭矩| 判断，避免正负方向影响
+        const float abs_t = fabsf(motor_statuses_[motor_index].current_torque);
+        if (abs_t > motor_statuses_[motor_index].max_abs_torque + DEEP_DOG_TORQUE_MAX_LOG_DELTA_NM) {
+            motor_statuses_[motor_index].max_abs_torque = abs_t;
+            ESP_LOGW(TAG, "电机%u 观测到更大 |扭矩|=%.3f N·m (limit=%.2f，0=仅观测)",
+                     (unsigned)motor_id, (double)abs_t, (double)DEEP_DOG_TORQUE_LIMIT_NM);
+        } else if (abs_t > motor_statuses_[motor_index].max_abs_torque) {
+            motor_statuses_[motor_index].max_abs_torque = abs_t;
+        }
+
+        if (DEEP_DOG_TORQUE_LIMIT_NM > 0.0f && abs_t > DEEP_DOG_TORQUE_LIMIT_NM) {
+            if (!motor_statuses_[motor_index].collision) {
+                motor_statuses_[motor_index].collision = true;
+                ESP_LOGE(TAG, "电机%u 触发碰撞/堵转保护：|扭矩|=%.3f > limit=%.2f N·m，将拒绝后续下发并建议整机失能",
+                         (unsigned)motor_id, (double)abs_t, (double)DEEP_DOG_TORQUE_LIMIT_NM);
+            }
+        }
+
         // 更新活跃电机ID为当前收到数据的电机
         active_motor_id_ = motor_id;
         
@@ -212,6 +234,10 @@ bool DeepMotor::registerMotorId(uint8_t motor_id) {
             // 初始化电机状态
             memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
             motor_statuses_[i].motor_id = motor_id;
+            motor_statuses_[i].has_feedback = false;
+            motor_statuses_[i].feedback_seq = 0;
+            motor_statuses_[i].max_abs_torque = 0.0f;
+            motor_statuses_[i].collision = false;
             motor_cmd_cache_[i].position_known = false;
             motor_cmd_cache_[i].speed_known = false;
             motor_cmd_cache_[i].iq_known = false;
@@ -368,6 +394,8 @@ void DeepMotor::clearAllMotors() {
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
+        motor_statuses_[i].max_abs_torque = 0.0f;
+        motor_statuses_[i].collision = false;
         motor_cmd_cache_[i].position_known = false;
         motor_cmd_cache_[i].speed_known = false;
         motor_cmd_cache_[i].iq_known = false;
@@ -400,11 +428,14 @@ void DeepMotor::printAllMotorStatus() const {
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         if (registered_motor_ids_[i] != MOTOR_ID_UNREGISTERED) {
             const motor_status_t* status = &motor_statuses_[i];
-            ESP_LOGI(TAG, "电机ID %d: 角度=%.3f rad, 速度=%.3f rad/s, 扭矩=%.3f N·m, 温度=%.1f°C, 模式=%d", 
+            ESP_LOGI(TAG,
+                     "电机ID %d: 角度=%.3f rad, 速度=%.3f rad/s, 扭矩=%.3f N·m, |τ|max=%.3f, 碰撞=%s, 温度=%.1f°C, 模式=%d",
                      status->motor_id,
                      status->current_angle,
                      status->current_speed,
                      status->current_torque,
+                     status->max_abs_torque,
+                     status->collision ? "是" : "否",
                      status->current_temp,
                      status->mode_status);
             
@@ -786,6 +817,143 @@ bool DeepMotor::getMotorSoftwareVersion(uint8_t motor_id, char* version, size_t 
     return true;
 }
 
+bool DeepMotor::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
+    (void)target_velocity_rad_s;  // 预留：未来可用于 MIT 首帧速度意图/软启动
+    if (!isMotorRegistered(motor_id)) {
+        ESP_LOGW(TAG, "initializeMotor: motor %u 未注册，尝试注册", (unsigned)motor_id);
+        if (!registerMotor(motor_id)) {
+            ESP_LOGE(TAG, "initializeMotor: motor %u 注册失败", (unsigned)motor_id);
+            return false;
+        }
+    }
+
+    // 初始化前清掉发送缓存，避免后续 setMotorPosition/限速去重导致“看似没发”
+    invalidateMotorCommandCache(motor_id);
+    // 清除碰撞 latch 与最大扭矩观测（重新初始化视为重新开始）
+    {
+        int8_t idx = findMotorIndex(motor_id);
+        if (idx >= 0) {
+            motor_statuses_[idx].collision = false;
+            motor_statuses_[idx].max_abs_torque = 0.0f;
+        }
+    }
+
+    ESP_LOGI(TAG, "电机%u 初始化：reset×2 -> set_zero×3 -> mode -> enable -> 校验零位反馈", (unsigned)motor_id);
+
+    // 1) reset 两帧（更可靠）
+    bool reset_ok = false;
+    for (int k = 0; k < 2; ++k) {
+        if (MotorProtocol::resetMotor(motor_id)) {
+            reset_ok = true;
+        } else {
+            ESP_LOGW(TAG, "电机%u reset 第%d帧发送失败", (unsigned)motor_id, k + 1);
+        }
+        if (k == 0) {
+            vTaskDelay(pdMS_TO_TICKS(8));
+        }
+    }
+    if (!reset_ok) {
+        ESP_LOGE(TAG, "电机%u reset 失败（两帧均失败）", (unsigned)motor_id);
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // 2) set_zero 三帧（置零是关键，额外增强可靠性）
+    // 记录写零前的反馈序号：写零过程通常会带来新的反馈帧，用于判定“已更新到写零后的真实角度”
+    motor_status_t st_before_zero{};
+    uint32_t seq_before_zero = 0;
+    if (getMotorStatus(motor_id, &st_before_zero) && st_before_zero.has_feedback) {
+        seq_before_zero = st_before_zero.feedback_seq;
+    }
+
+    bool zero_ok = false;
+    for (int k = 0; k < 3; ++k) {
+        if (MotorProtocol::setMotorZero(motor_id)) {
+            zero_ok = true;
+        } else {
+            ESP_LOGW(TAG, "电机%u set_zero 第%d帧发送失败", (unsigned)motor_id, k + 1);
+        }
+        vTaskDelay(pdMS_TO_TICKS(8));
+    }
+    if (!zero_ok) {
+        ESP_LOGE(TAG, "电机%u set_zero 失败（三帧均失败）", (unsigned)motor_id);
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // 3) 写零后先校验反馈角度在零位附近（通过才允许进入使能/保持帧阶段）
+    // 说明：多数情况下写零帧/复位帧会触发电机主动回传反馈，因此此处不再额外发送“状态查询帧”。
+    constexpr float kZeroTolRad = 0.15f;  // 与 DogControl::logMotorActualPositionsAfterInit 保持一致
+    constexpr int kPollCount = 3;         // 优先读一次；若还没收到“写零后的新反馈”则短暂等待
+    constexpr int kPollIntervalMs = 6;
+
+    bool got_new_feedback_after_zero = false;
+    float rad_after_zero = 0.0f;
+    for (int i = 0; i < kPollCount; ++i) {
+        motor_status_t st{};
+        if (getMotorStatus(motor_id, &st) && st.has_feedback && st.feedback_seq != seq_before_zero) {
+            got_new_feedback_after_zero = true;
+            (void)getMotorActualPosition(motor_id, &rad_after_zero);
+            break;
+        }
+        if (i + 1 < kPollCount) {
+            vTaskDelay(pdMS_TO_TICKS(kPollIntervalMs));
+        }
+    }
+
+    if (!got_new_feedback_after_zero) {
+        ESP_LOGE(TAG, "电机%u init 失败：写零后未等到新的反馈帧，拒绝使能并 reset 停扭保护", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        return false;
+    }
+    if (fabsf(rad_after_zero) > kZeroTolRad) {
+        ESP_LOGE(TAG, "电机%u init 失败：写零后角度偏离零位 pos=%.4f rad (tol=%.3f)，拒绝使能并 reset 停扭保护",
+                 (unsigned)motor_id, (double)rad_after_zero, (double)kZeroTolRad);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        return false;
+    }
+    ESP_LOGI(TAG, "电机%u 写零反馈OK：pos=%.4f rad (|pos|<=%.3f)，允许使能", (unsigned)motor_id,
+             (double)rad_after_zero, (double)kZeroTolRad);
+
+    // 4) 设置运行模式（MIT/位置）
+#if DEEP_DOG_USE_MIT_WALK
+    if (!MotorProtocol::setMotorControlMode(motor_id)) {
+        ESP_LOGE(TAG, "电机%u 设置运控模式失败", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        return false;
+    }
+#else
+    if (!MotorProtocol::setMotorPositionMode(motor_id)) {
+        ESP_LOGE(TAG, "电机%u 设置位置模式失败", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        return false;
+    }
+#endif
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // 5) enable
+    if (!MotorProtocol::enableMotor(motor_id)) {
+        ESP_LOGE(TAG, "电机%u enable 失败", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        return false;
+    }
+
+    // 6) MIT：使能后补发一帧保持帧（零速/零位），进一步降低“上电瞬间乱动”的概率
+#if DEEP_DOG_USE_MIT_WALK
+    // 使用“初始化保持帧”增益（更软、更阻尼），避免刚使能时硬顶结构；行走增益仍由 DogControl 全局 mit_kp_/mit_kd_ 控制
+    if (!MotorProtocol::controlMotor(motor_id, 0.0f, 0.0f, DEEP_DOG_MIT_INIT_HOLD_KP, DEEP_DOG_MIT_INIT_HOLD_KD,
+                                     DEEP_DOG_MIT_DEFAULT_TAU_FF)) {
+        ESP_LOGE(TAG, "电机%u MIT init: 初始保持帧发送失败，立即 reset 停扭保护", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        return false;
+    }
+#endif
+    return true;
+}
+
 bool DeepMotor::setMotorTargetAngle(uint8_t motor_id, float target_angle) {
     int8_t motor_index = findMotorIndex(motor_id);
     if (motor_index == -1) {
@@ -825,6 +993,12 @@ bool DeepMotor::setMotorPosition(uint8_t motor_id, float position, float max_spe
 
     int8_t idx = findMotorIndex(motor_id);
     if (idx < 0) {
+        return false;
+    }
+    if (motor_statuses_[idx].collision) {
+        ESP_LOGE(TAG, "电机%u 已触发碰撞保护，拒绝下发位置指令并 reset 停扭", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
         return false;
     }
 
@@ -869,6 +1043,12 @@ bool DeepMotor::setMotorSpeedLimit(uint8_t motor_id, float max_speed_rad_s) {
         ESP_LOGW(TAG, "setMotorSpeedLimit: 电机 %d 未注册", motor_id);
         return false;
     }
+    if (motor_statuses_[idx].collision) {
+        ESP_LOGE(TAG, "电机%u 已触发碰撞保护，拒绝下发限速指令并 reset 停扭", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        return false;
+    }
 
     if (motor_cmd_cache_[idx].speed_known &&
         motorNearlyEqual(motor_cmd_cache_[idx].speed_limit_rad_s, max_speed_rad_s, kMotorEpsSpd)) {
@@ -893,6 +1073,12 @@ bool DeepMotor::setMotorPositionRefOnly(uint8_t motor_id, float position) {
     if (idx < 0) {
         return false;
     }
+    if (motor_statuses_[idx].collision) {
+        ESP_LOGE(TAG, "电机%u 已触发碰撞保护，拒绝下发位置参考并 reset 停扭", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        return false;
+    }
 
     if (motor_cmd_cache_[idx].position_known &&
         motorNearlyEqual(motor_cmd_cache_[idx].position_rad, position, kMotorEpsPosRad)) {
@@ -915,6 +1101,12 @@ bool DeepMotor::setMotorIqRef(uint8_t motor_id, float iq_ref) {
         ESP_LOGW(TAG, "setMotorIqRef: 电机 %d 未注册", motor_id);
         return false;
     }
+    if (motor_statuses_[idx].collision) {
+        ESP_LOGE(TAG, "电机%u 已触发碰撞保护，拒绝下发 IQ 指令并 reset 停扭", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        return false;
+    }
 
     if (motor_cmd_cache_[idx].iq_known && motorNearlyEqual(motor_cmd_cache_[idx].iq_ref, iq_ref, kMotorEpsIq)) {
         ESP_LOGD(TAG, "电机 %d setMotorIqRef: 与缓存一致，跳过 CAN", motor_id);
@@ -935,6 +1127,12 @@ bool DeepMotor::setMotorMitCommand(uint8_t motor_id, float position_rad, float v
     int8_t idx = findMotorIndex(motor_id);
     if (idx < 0) {
         ESP_LOGW(TAG, "setMotorMitCommand: 电机 %d 未注册", motor_id);
+        return false;
+    }
+    if (motor_statuses_[idx].collision) {
+        ESP_LOGE(TAG, "电机%u 已触发碰撞保护，拒绝下发 MIT 运控帧并 reset 停扭", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
         return false;
     }
     (void)setMotorTargetAngle(motor_id, position_rad);

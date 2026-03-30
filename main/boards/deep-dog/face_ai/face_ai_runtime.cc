@@ -2,7 +2,7 @@
 
 #include "face_ai_bridge.h"
 #include "face_ai_types.h"
-#include "config.h"
+#include "face_ai_config.h"
 
 #include <atomic>
 #include <cstdio>

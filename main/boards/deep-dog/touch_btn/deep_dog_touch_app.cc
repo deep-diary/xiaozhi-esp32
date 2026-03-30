@@ -1,5 +1,6 @@
 #include "deep_dog_touch_app.h"
 #include "config.h"
+#include "touch_config.h"
 #include "dog/dog_control.h"
 
 #include <esp_log.h>

@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "config.h"
+#include "face_ai_config.h"
 
 bool DeepDogFaceAiRuntimeStart();
 void DeepDogFaceAiRuntimeStop();

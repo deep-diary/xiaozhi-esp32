@@ -3,7 +3,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "config.h"
+#include "dog/dog_config.h"
+#include "motor/motor_config.h"
 
 class DeepMotor;
 

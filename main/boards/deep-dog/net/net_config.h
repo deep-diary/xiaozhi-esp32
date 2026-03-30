@@ -1,0 +1,33 @@
+#ifndef _DEEP_DOG_NET_CONFIG_H_
+#define _DEEP_DOG_NET_CONFIG_H_
+
+/**
+ * 网络/Wi‑Fi 相关配置（从 board `config.h` 拆分）。
+ */
+
+/**
+ * Wi‑Fi STA 静态 IPv4（调试用）：置 1 后不再向 AP 要 DHCP。
+ * 发布或换环境前建议改回 0 恢复 DHCP。
+ */
+#ifndef DEEP_DOG_WIFI_USE_STATIC_IP
+#define DEEP_DOG_WIFI_USE_STATIC_IP 1
+#endif
+
+#if DEEP_DOG_WIFI_USE_STATIC_IP
+#define DEEP_DOG_WIFI_STATIC_IP_O1 192
+#define DEEP_DOG_WIFI_STATIC_IP_O2 168
+#define DEEP_DOG_WIFI_STATIC_IP_O3 31
+#define DEEP_DOG_WIFI_STATIC_IP_O4 211
+
+#define DEEP_DOG_WIFI_STATIC_GW_O1 192
+#define DEEP_DOG_WIFI_STATIC_GW_O2 168
+#define DEEP_DOG_WIFI_STATIC_GW_O3 31
+#define DEEP_DOG_WIFI_STATIC_GW_O4 1
+
+#define DEEP_DOG_WIFI_STATIC_NM_O1 255
+#define DEEP_DOG_WIFI_STATIC_NM_O2 255
+#define DEEP_DOG_WIFI_STATIC_NM_O3 255
+#define DEEP_DOG_WIFI_STATIC_NM_O4 0
+#endif
+
+#endif  // _DEEP_DOG_NET_CONFIG_H_

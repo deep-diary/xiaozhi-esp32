@@ -346,8 +346,8 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
                 return std::string("registerMotor 失败");
             }
         }
-        if (MotorProtocol::initializeMotor(mid, target_velocity_rad_s)) {
-            ESP_LOGI(TAG, "电机%d 初始化成功，target_velocity=%.2f rad/s", motor_id, target_velocity_rad_s);
+        if (deep_motor->initializeMotor(mid, target_velocity_rad_s)) {
+            ESP_LOGI(TAG, "电机%d 初始化成功（带反馈校验），target_velocity=%.2f rad/s", motor_id, target_velocity_rad_s);
             return std::string("电机 " + std::to_string(motor_id) + " 初始化成功，target_velocity=" +
                    std::to_string(target_velocity_rad_s) + " rad/s");
         }

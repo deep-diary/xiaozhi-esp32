@@ -319,12 +319,26 @@ bool DogControl::init() {
 #if DEEP_DOG_MIT_VALIDATE_FL_ONLY
     ESP_LOGW(TAG, "MIT 台架模式：仅初始化/驱动左前腿(FL)");
 #endif
+#if DEEP_DOG_USE_MIT_WALK
+    // 初始化阶段机器狗趴下：使用更“软”的增益，降低误动作对结构的冲击
+    // 经验策略：kp 降低、kd 适当增大（但仍受 setMitGains clamp 约束）
+    const float saved_kp = mit_kp_;
+    const float saved_kd = mit_kd_;
+    const float init_kp = saved_kp * 0.25f;  // kp/4
+    const float init_kd = saved_kd * 2.0f;   // kd*2
+    setMitGains(init_kp, init_kd);
+    ESP_LOGI(TAG, "init 阶段 MIT 增益缩放：kp=%.2f->%.2f kd=%.2f->%.2f（完成后恢复）",
+             (double)saved_kp, (double)mit_kp_, (double)saved_kd, (double)mit_kd_);
+#endif
     for (int i = 0; i < 4; i++) {
         if (mit_fl_only_ && i != 0) {
             continue;
         }
         if (!legs_[i].init()) {
             ESP_LOGE(TAG, "leg %d init failed", i);
+#if DEEP_DOG_USE_MIT_WALK
+            setMitGains(saved_kp, saved_kd);
+#endif
             return false;
         }
     }
@@ -335,14 +349,21 @@ bool DogControl::init() {
     }
     initialized_ = true;
     state_machine_.onInitSuccess();
-    // 等待若干反馈帧，再读实际角（否则可能读到旧缓存）
-    vTaskDelay(pdMS_TO_TICKS(150));
+    // 单电机 init 已做“必须收到反馈+零位附近”校验；这里保留一次短延时后的整机兜底检查，便于日志汇总。
+    vTaskDelay(pdMS_TO_TICKS(40));
     const bool init_feedback_ok = logMotorActualPositionsAfterInit();
     if (!init_feedback_ok) {
         ESP_LOGE(TAG, "init 后反馈异常，立即整机失能保护");
         (void)disable();
+#if DEEP_DOG_USE_MIT_WALK
+        setMitGains(saved_kp, saved_kd);
+#endif
         return false;
     }
+#if DEEP_DOG_USE_MIT_WALK
+    setMitGains(saved_kp, saved_kd);
+    ESP_LOGI(TAG, "init 完成，已恢复 MIT 增益：kp=%.2f kd=%.2f", (double)mit_kp_, (double)mit_kd_);
+#endif
     return true;
 }
 

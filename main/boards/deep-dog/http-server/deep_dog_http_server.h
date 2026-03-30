@@ -11,7 +11,7 @@
 #include <esp_event.h>
 #include <esp_http_server.h>
 
-#include "config.h"
+#include "http_server_config.h"
 
 class EspVideo;
 class DogControl;

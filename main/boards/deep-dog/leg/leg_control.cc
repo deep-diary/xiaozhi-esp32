@@ -142,8 +142,8 @@ bool LegControl::init() {
                 return false;
             }
         }
-        if (!MotorProtocol::initializeMotor(id, 0.0f)) {
-            ESP_LOGE(TAG, "initializeMotor fail id=%d", id);
+        if (!deep_motor_->initializeMotor(id, 0.0f)) {
+            ESP_LOGE(TAG, "deep_motor initializeMotor fail id=%d", id);
             return false;
         }
     }

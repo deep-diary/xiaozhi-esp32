@@ -1,5 +1,5 @@
 #include "protocol_motor.h"
-#include "../config.h"
+#include "motor_config.h"
 #include <esp_log.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

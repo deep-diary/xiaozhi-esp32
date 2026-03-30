@@ -6,6 +6,7 @@
 #include <string.h>
 #include <math.h>
 #include "../can/ESP32-TWAI-CAN.hpp"
+#include "motor_config.h"
 
 /**
  * @brief 电机协议层（EL05 说明书：通信类型 1 运控帧等）
@@ -117,9 +118,17 @@ typedef struct {
     uint8_t current_error;
     uint8_t voltage_error;
     motor_mode_t mode_status;  // 电机模式状态（使用枚举类型）
+    /** 是否至少收到过一次反馈帧（MOTOR_CMD_FEEDBACK）。用于初始化阶段避免读到“全0默认缓存”。 */
+    bool has_feedback;
+    /** 反馈帧递增计数（仅在收到 MOTOR_CMD_FEEDBACK 时递增），用于判断“是否收到了新反馈”。 */
+    uint32_t feedback_seq;
     float current_angle;       // 当前角度 (弧度)
     float current_speed;       // 当前速度 (rad/s)
     float current_torque;      // 当前扭矩 (N·m)
+    /** 观测到的最大 |扭矩|（N·m），用于台架测极限/堵转测试 */
+    float max_abs_torque;
+    /** 碰撞/堵转保护标志：一旦置位，发送侧应拒绝下发并停扭保护（latch，需重新 init/清除） */
+    bool collision;
     float current_temp;        // 当前温度 (°C)
     char version[9];          // 软件版本号
 } motor_status_t;

@@ -418,6 +418,13 @@ public:
      * @return true 成功, false 失败（电机未注册）
      */
     bool getMotorSoftwareVersion(uint8_t motor_id, char* version, size_t buffer_size) const;
+
+    /**
+     * @brief 初始化单个电机（带“置零后反馈校验”与失败立即失能保护）
+     * - reset×2 → set_zero×3 → 设置运行模式 → enable
+     * - 之后主动触发若干次状态查询以拉取反馈，必须收到反馈且实际角在零位附近，否则立即 reset（停扭）并返回失败
+     */
+    bool initializeMotor(uint8_t motor_id, float target_velocity_rad_s = 0.0f);
 };
 
 #endif // _DEEP_MOTOR_H__
