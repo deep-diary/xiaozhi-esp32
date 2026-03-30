@@ -4,6 +4,14 @@
 #include <driver/gpio.h>
 #include <driver/uart.h>
 
+/** 须在 #include "motor/motor_config.h" 之前定义：否则 motor_config 会先默认 DEEP_DOG_CAN_RX_HEX_LOG=1，此处 #ifndef 不再生效。 */
+#ifndef DEEP_DOG_CAN_RX_HEX_LOG
+#define DEEP_DOG_CAN_RX_HEX_LOG 0
+#endif
+#ifndef DEEP_DOG_CAN_TX_HEX_LOG
+#define DEEP_DOG_CAN_TX_HEX_LOG 0
+#endif
+
 // 模块化配置拆分：电机相关宏移至 motor/motor_config.h（便于复用 motor/ 目录）
 #include "motor/motor_config.h"
 // 步态/底盘策略配置（便于复用 dog/、leg/）
@@ -66,6 +74,7 @@
 // 接线：ESP32 TX(38) -> 收发器 RXD；ESP32 RX(48) <- 收发器 TXD；共地；总线两端 120Ω 终端；波特率与从站一致（当前 1Mbps）。
 #define CAN_TX_GPIO GPIO_NUM_38   // TX -> 收发器 RXD
 #define CAN_RX_GPIO GPIO_NUM_48   // RX <- 收发器 TXD
+// CAN RX/TX 十六进制日志宏见文件顶部（须在 motor_config.h 之前）
 
 /**
  * 电机「速度档位」占位宏（0～100 整数比例），与 esp-sparkbot 等板级模板同源。

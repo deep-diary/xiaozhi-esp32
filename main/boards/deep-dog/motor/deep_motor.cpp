@@ -24,6 +24,7 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
         motor_target_angles_[i] = 0.0f;
+        torque_observe_enabled_[i] = false;
         motor_cmd_cache_[i].position_rad = 0.0f;
         motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
         motor_cmd_cache_[i].iq_ref = 0.0f;
@@ -129,21 +130,23 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
         motor_statuses_[motor_index].has_feedback = true;
         motor_statuses_[motor_index].feedback_seq++;
 
-        // 扭矩观测/碰撞保护：用 |扭矩| 判断，避免正负方向影响
-        const float abs_t = fabsf(motor_statuses_[motor_index].current_torque);
-        if (abs_t > motor_statuses_[motor_index].max_abs_torque + DEEP_DOG_TORQUE_MAX_LOG_DELTA_NM) {
-            motor_statuses_[motor_index].max_abs_torque = abs_t;
-            ESP_LOGW(TAG, "电机%u 观测到更大 |扭矩|=%.3f N·m (limit=%.2f，0=仅观测)",
-                     (unsigned)motor_id, (double)abs_t, (double)DEEP_DOG_TORQUE_LIMIT_NM);
-        } else if (abs_t > motor_statuses_[motor_index].max_abs_torque) {
-            motor_statuses_[motor_index].max_abs_torque = abs_t;
-        }
-
-        if (DEEP_DOG_TORQUE_LIMIT_NM > 0.0f && abs_t > DEEP_DOG_TORQUE_LIMIT_NM) {
-            if (!motor_statuses_[motor_index].collision) {
-                motor_statuses_[motor_index].collision = true;
-                ESP_LOGE(TAG, "电机%u 触发碰撞/堵转保护：|扭矩|=%.3f > limit=%.2f N·m，将拒绝后续下发并建议整机失能",
+        // 扭矩观测/碰撞保护：仅在初始化成功后启用，避免把 set_zero 前的脏反馈计入峰值
+        if (torque_observe_enabled_[motor_index]) {
+            const float abs_t = fabsf(motor_statuses_[motor_index].current_torque);
+            if (abs_t > motor_statuses_[motor_index].max_abs_torque + DEEP_DOG_TORQUE_MAX_LOG_DELTA_NM) {
+                motor_statuses_[motor_index].max_abs_torque = abs_t;
+                ESP_LOGW(TAG, "电机%u 观测到更大 |扭矩|=%.3f N·m (limit=%.2f，0=仅观测)",
                          (unsigned)motor_id, (double)abs_t, (double)DEEP_DOG_TORQUE_LIMIT_NM);
+            } else if (abs_t > motor_statuses_[motor_index].max_abs_torque) {
+                motor_statuses_[motor_index].max_abs_torque = abs_t;
+            }
+
+            if (DEEP_DOG_TORQUE_LIMIT_NM > 0.0f && abs_t > DEEP_DOG_TORQUE_LIMIT_NM) {
+                if (!motor_statuses_[motor_index].collision) {
+                    motor_statuses_[motor_index].collision = true;
+                    ESP_LOGE(TAG, "电机%u 触发碰撞/堵转保护：|扭矩|=%.3f > limit=%.2f N·m，将拒绝后续下发并建议整机失能",
+                             (unsigned)motor_id, (double)abs_t, (double)DEEP_DOG_TORQUE_LIMIT_NM);
+                }
             }
         }
 
@@ -238,6 +241,7 @@ bool DeepMotor::registerMotorId(uint8_t motor_id) {
             motor_statuses_[i].feedback_seq = 0;
             motor_statuses_[i].max_abs_torque = 0.0f;
             motor_statuses_[i].collision = false;
+            torque_observe_enabled_[i] = false;
             motor_cmd_cache_[i].position_known = false;
             motor_cmd_cache_[i].speed_known = false;
             motor_cmd_cache_[i].iq_known = false;
@@ -396,6 +400,7 @@ void DeepMotor::clearAllMotors() {
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
         motor_statuses_[i].max_abs_torque = 0.0f;
         motor_statuses_[i].collision = false;
+        torque_observe_enabled_[i] = false;
         motor_cmd_cache_[i].position_known = false;
         motor_cmd_cache_[i].speed_known = false;
         motor_cmd_cache_[i].iq_known = false;
@@ -835,10 +840,11 @@ bool DeepMotor::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
         if (idx >= 0) {
             motor_statuses_[idx].collision = false;
             motor_statuses_[idx].max_abs_torque = 0.0f;
+            torque_observe_enabled_[idx] = false;
         }
     }
 
-    ESP_LOGI(TAG, "电机%u 初始化：reset×2 -> set_zero×3 -> mode -> enable -> 校验零位反馈", (unsigned)motor_id);
+    ESP_LOGI(TAG, "电机%u 初始化：reset×2 -> set_zero(最多5轮等待反馈) -> mode -> enable -> 校验零位反馈", (unsigned)motor_id);
 
     // 1) reset 两帧（更可靠）
     bool reset_ok = false;
@@ -858,64 +864,111 @@ bool DeepMotor::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
     }
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    // 2) set_zero 三帧（置零是关键，额外增强可靠性）
-    // 记录写零前的反馈序号：写零过程通常会带来新的反馈帧，用于判定“已更新到写零后的真实角度”
-    motor_status_t st_before_zero{};
-    uint32_t seq_before_zero = 0;
-    if (getMotorStatus(motor_id, &st_before_zero) && st_before_zero.has_feedback) {
-        seq_before_zero = st_before_zero.feedback_seq;
-    }
-
-    bool zero_ok = false;
-    for (int k = 0; k < 3; ++k) {
-        if (MotorProtocol::setMotorZero(motor_id)) {
-            zero_ok = true;
-        } else {
-            ESP_LOGW(TAG, "电机%u set_zero 第%d帧发送失败", (unsigned)motor_id, k + 1);
+    // reset 后丢弃本电机缓存的反馈，避免轮询时读到「上一阶段」的旧角度（多轴总线上常见）。
+    {
+        int8_t idx = findMotorIndex(motor_id);
+        if (idx >= 0) {
+            motor_statuses_[idx].has_feedback = false;
+            motor_statuses_[idx].feedback_seq = 0;
+            motor_statuses_[idx].current_angle = 0.0f;
+            motor_statuses_[idx].current_speed = 0.0f;
+            motor_statuses_[idx].current_torque = 0.0f;
         }
-        vTaskDelay(pdMS_TO_TICKS(8));
     }
-    if (!zero_ok) {
-        ESP_LOGE(TAG, "电机%u set_zero 失败（三帧均失败）", (unsigned)motor_id);
-        return false;
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // 3) 写零后先校验反馈角度在零位附近（通过才允许进入使能/保持帧阶段）
-    // 说明：多数情况下写零帧/复位帧会触发电机主动回传反馈，因此此处不再额外发送“状态查询帧”。
+    // 2) set_zero：每轮发 set_zero 后仅依赖电机的周期反馈（不额外发查询帧，减轻 CAN 拥塞）。
     constexpr float kZeroTolRad = 0.15f;  // 与 DogControl::logMotorActualPositionsAfterInit 保持一致
-    constexpr int kPollCount = 3;         // 优先读一次；若还没收到“写零后的新反馈”则短暂等待
-    constexpr int kPollIntervalMs = 6;
+    constexpr int kZeroMaxAttempts = 5;
+    constexpr int kFeedbackPollCountPerAttempt = 10;
+    constexpr int kFeedbackPollIntervalMs = 8;
 
-    bool got_new_feedback_after_zero = false;
+    bool zero_verified = false;
     float rad_after_zero = 0.0f;
-    for (int i = 0; i < kPollCount; ++i) {
-        motor_status_t st{};
-        if (getMotorStatus(motor_id, &st) && st.has_feedback && st.feedback_seq != seq_before_zero) {
-            got_new_feedback_after_zero = true;
-            (void)getMotorActualPosition(motor_id, &rad_after_zero);
+
+    for (int attempt = 0; attempt < kZeroMaxAttempts; ++attempt) {
+        motor_status_t st_before_zero{};
+        uint32_t seq_before_zero = 0;
+        if (getMotorStatus(motor_id, &st_before_zero) && st_before_zero.has_feedback &&
+            st_before_zero.motor_id == motor_id) {
+            seq_before_zero = st_before_zero.feedback_seq;
+        }
+
+        if (!MotorProtocol::setMotorZero(motor_id)) {
+            ESP_LOGW(TAG, "电机%u set_zero 第%d轮发送失败", (unsigned)motor_id, attempt + 1);
+            vTaskDelay(pdMS_TO_TICKS(8));
+            continue;
+        }
+
+        bool got_any_feedback = false;
+        bool got_new_feedback_after_zero = false;
+        uint32_t seq_now = seq_before_zero;
+        float speed_now = 0.0f;
+        float torque_now = 0.0f;
+        for (int i = 0; i < kFeedbackPollCountPerAttempt; ++i) {
+            motor_status_t st{};
+            if (getMotorStatus(motor_id, &st) && st.has_feedback && st.motor_id == motor_id) {
+                got_any_feedback = true;
+                seq_now = st.feedback_seq;
+                rad_after_zero = st.current_angle;
+                speed_now = st.current_speed;
+                torque_now = st.current_torque;
+                if (st.feedback_seq != seq_before_zero) {
+                    got_new_feedback_after_zero = true;
+                }
+                // 判定以“当前位置是否回到零位附近”为主；seq 仅用于辅助观测时序。
+                if (fabsf(rad_after_zero) <= kZeroTolRad) {
+                    zero_verified = true;
+                    ESP_LOGI(TAG,
+                             "电机%u 写零反馈OK：第%d轮 pos=%.4f rad speed=%.3f torque=%.3f (seq %lu->%lu)",
+                             (unsigned)motor_id,
+                             attempt + 1,
+                             (double)rad_after_zero,
+                             (double)speed_now,
+                             (double)torque_now,
+                             (unsigned long)seq_before_zero,
+                             (unsigned long)seq_now);
+                    break;
+                }
+            }
+            if (i + 1 < kFeedbackPollCountPerAttempt) {
+                vTaskDelay(pdMS_TO_TICKS(kFeedbackPollIntervalMs));
+            }
+        }
+
+        if (zero_verified) {
             break;
         }
-        if (i + 1 < kPollCount) {
-            vTaskDelay(pdMS_TO_TICKS(kPollIntervalMs));
+
+        if (!got_any_feedback) {
+            ESP_LOGW(TAG,
+                     "电机%u set_zero 第%d轮后未收到反馈，继续重试 (seq_before=%lu)",
+                     (unsigned)motor_id,
+                     attempt + 1,
+                     (unsigned long)seq_before_zero);
+            continue;
         }
+
+        ESP_LOGW(TAG,
+                 "电机%u set_zero 第%d轮反馈仍未归零: pos=%.4f rad speed=%.3f torque=%.3f (seq %lu->%lu, new=%d)，继续重试",
+                 (unsigned)motor_id,
+                 attempt + 1,
+                 (double)rad_after_zero,
+                 (double)speed_now,
+                 (double)torque_now,
+                 (unsigned long)seq_before_zero,
+                 (unsigned long)seq_now,
+                 got_new_feedback_after_zero ? 1 : 0);
     }
 
-    if (!got_new_feedback_after_zero) {
-        ESP_LOGE(TAG, "电机%u init 失败：写零后未等到新的反馈帧，拒绝使能并 reset 停扭保护", (unsigned)motor_id);
+    if (!zero_verified) {
+        ESP_LOGE(TAG, "电机%u init 失败：set_zero 重试%d轮后仍未得到有效零位反馈，拒绝使能并 reset 停扭保护",
+                 (unsigned)motor_id, kZeroMaxAttempts);
         (void)MotorProtocol::resetMotor(motor_id);
         invalidateMotorCommandCache(motor_id);
         return false;
     }
-    if (fabsf(rad_after_zero) > kZeroTolRad) {
-        ESP_LOGE(TAG, "电机%u init 失败：写零后角度偏离零位 pos=%.4f rad (tol=%.3f)，拒绝使能并 reset 停扭保护",
-                 (unsigned)motor_id, (double)rad_after_zero, (double)kZeroTolRad);
-        (void)MotorProtocol::resetMotor(motor_id);
-        invalidateMotorCommandCache(motor_id);
-        return false;
-    }
-    ESP_LOGI(TAG, "电机%u 写零反馈OK：pos=%.4f rad (|pos|<=%.3f)，允许使能", (unsigned)motor_id,
-             (double)rad_after_zero, (double)kZeroTolRad);
+
+    // 3) 写零与反馈校验通过后，继续进入模式设置与使能阶段
 
     // 4) 设置运行模式（MIT/位置）
 #if DEEP_DOG_USE_MIT_WALK
@@ -951,6 +1004,15 @@ bool DeepMotor::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
         return false;
     }
 #endif
+    // 从此刻开始才统计该电机的 max_abs_torque / collision
+    {
+        int8_t idx = findMotorIndex(motor_id);
+        if (idx >= 0) {
+            torque_observe_enabled_[idx] = true;
+            motor_statuses_[idx].max_abs_torque = 0.0f;
+            motor_statuses_[idx].collision = false;
+        }
+    }
     return true;
 }
 

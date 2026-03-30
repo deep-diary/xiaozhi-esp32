@@ -368,7 +368,7 @@ uint32_t MotorProtocol::buildCanId(uint8_t motor_id, motor_cmd_t cmd) {
 }
 
 bool MotorProtocol::sendCanFrame(const CanFrame& frame) {
-#if DEEP_DOG_CAN_HEX_LOG
+#if DEEP_DOG_CAN_TX_HEX_LOG
     ESP_LOGI(TAG, "CAN TX ext id=0x%08lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
              (unsigned long)frame.identifier, (unsigned)frame.data_length_code, frame.data[0], frame.data[1],
              frame.data[2], frame.data[3], frame.data[4], frame.data[5], frame.data[6], frame.data[7]);

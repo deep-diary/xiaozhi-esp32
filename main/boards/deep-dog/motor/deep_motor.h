@@ -50,6 +50,9 @@ private:
     // 电机目标位置（软件侧期望/用于 LED 等），索引与 registered_motor_ids_ 对齐
     float motor_target_angles_[MAX_MOTOR_COUNT];
 
+    // 仅在该电机初始化成功后才允许统计 max_abs_torque / collision，避免把初始化前脏反馈记入峰值
+    bool torque_observe_enabled_[MAX_MOTOR_COUNT];
+
     /**
      * 最近一次成功下发到驱动器的指令缓存（用于去重：与协议 PARAM_* 一致时再发则跳过）。
      * position_known/speed_known/iq_known 为 false 表示尚未通过本类成功下发过对应量。

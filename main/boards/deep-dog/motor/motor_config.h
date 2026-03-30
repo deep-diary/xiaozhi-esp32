@@ -9,9 +9,23 @@
  * - 保持原有宏名不变，减少改动面
  */
 
-/** 1=UART 以 INFO 打印每条 CAN TX/RX hex（验总线用）；调完建议改 0 */
-#ifndef DEEP_DOG_CAN_HEX_LOG
-#define DEEP_DOG_CAN_HEX_LOG 0
+/**
+ * CAN 报文日志（motor 模块默认值；若板级 config.h 已定义同名宏会覆盖）。
+ * 兼容旧宏 DEEP_DOG_CAN_HEX_LOG：仅在新宏未定义时兜底。
+ */
+#ifndef DEEP_DOG_CAN_RX_HEX_LOG
+#ifdef DEEP_DOG_CAN_HEX_LOG
+#define DEEP_DOG_CAN_RX_HEX_LOG DEEP_DOG_CAN_HEX_LOG
+#else
+#define DEEP_DOG_CAN_RX_HEX_LOG 0
+#endif
+#endif
+#ifndef DEEP_DOG_CAN_TX_HEX_LOG
+#ifdef DEEP_DOG_CAN_HEX_LOG
+#define DEEP_DOG_CAN_TX_HEX_LOG DEEP_DOG_CAN_HEX_LOG
+#else
+#define DEEP_DOG_CAN_TX_HEX_LOG 0
+#endif
 #endif
 
 /** 运控（MIT）整步验证：1=关节下发改用运控 CAN 帧 */
@@ -45,7 +59,7 @@
  * - 目的：降低误动作/零位异常时对结构的冲击；与行走/姿态控制的全局增益解耦。
  */
 #ifndef DEEP_DOG_MIT_INIT_HOLD_KP
-#define DEEP_DOG_MIT_INIT_HOLD_KP (DEEP_DOG_MIT_DEFAULT_KP * 0.25f)  // kp/4
+#define DEEP_DOG_MIT_INIT_HOLD_KP (DEEP_DOG_MIT_DEFAULT_KP * 0.1f)  // kp/10
 #endif
 #ifndef DEEP_DOG_MIT_INIT_HOLD_KD
 #define DEEP_DOG_MIT_INIT_HOLD_KD (DEEP_DOG_MIT_DEFAULT_KD * 2.0f)   // kd*2

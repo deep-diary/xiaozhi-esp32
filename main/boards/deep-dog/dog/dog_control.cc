@@ -324,7 +324,7 @@ bool DogControl::init() {
     // 经验策略：kp 降低、kd 适当增大（但仍受 setMitGains clamp 约束）
     const float saved_kp = mit_kp_;
     const float saved_kd = mit_kd_;
-    const float init_kp = saved_kp * 0.25f;  // kp/4
+    const float init_kp = saved_kp * 0.1f;  // kp/10
     const float init_kd = saved_kd * 2.0f;   // kd*2
     setMitGains(init_kp, init_kd);
     ESP_LOGI(TAG, "init 阶段 MIT 增益缩放：kp=%.2f->%.2f kd=%.2f->%.2f（完成后恢复）",

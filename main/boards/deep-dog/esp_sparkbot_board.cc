@@ -137,7 +137,7 @@ private:
         CanFrame frame;
         while (1) {
             if (ESP32Can.readFrame(&frame, 50)) {
-#if DEEP_DOG_CAN_HEX_LOG
+#if DEEP_DOG_CAN_RX_HEX_LOG
                 ESP_LOGI(TAG, "CAN RX ext id=0x%08lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
                          (unsigned long)frame.identifier, (unsigned)frame.data_length_code, frame.data[0],
                          frame.data[1], frame.data[2], frame.data[3], frame.data[4], frame.data[5], frame.data[6],
@@ -149,7 +149,22 @@ private:
                          frame.data[7]);
 #endif
                 if (motor) {
-                    motor->processCanFrame(frame);
+                    if (motor->processCanFrame(frame)) {
+#if DEEP_DOG_CAN_RX_HEX_LOG
+                        const uint8_t parsed_motor_id = RX_29ID_DISASSEMBLE_MOTOR_ID(frame.identifier);
+                        motor_status_t st = {};
+                        if (motor->getMotorStatus(parsed_motor_id, &st) && st.has_feedback) {
+                            ESP_LOGI(TAG,
+                                     "CAN RX parsed motor=%u pos=%.4f rad speed=%.3f rad/s torque=%.3f N·m temp=%.1f°C seq=%lu",
+                                     (unsigned)parsed_motor_id,
+                                     (double)st.current_angle,
+                                     (double)st.current_speed,
+                                     (double)st.current_torque,
+                                     (double)st.current_temp,
+                                     (unsigned long)st.feedback_seq);
+                        }
+#endif
+                    }
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(1));
@@ -170,8 +185,11 @@ private:
         );
         if (ok) {
             ESP_LOGI(TAG, "CAN init ok, TX=%d RX=%d", (int)CAN_TX_GPIO, (int)CAN_RX_GPIO);
-#if DEEP_DOG_CAN_HEX_LOG
-            ESP_LOGI(TAG, "CAN RX 报文日志已开启 (DEEP_DOG_CAN_HEX_LOG)：每条接收帧打印 ext id / dlc / data[0..7]");
+#if DEEP_DOG_CAN_RX_HEX_LOG
+            ESP_LOGI(TAG, "CAN RX 报文日志已开启 (DEEP_DOG_CAN_RX_HEX_LOG)：每条接收帧打印 ext id / dlc / data[0..7]");
+#endif
+#if DEEP_DOG_CAN_TX_HEX_LOG
+            ESP_LOGI(TAG, "CAN TX 报文日志已开启 (DEEP_DOG_CAN_TX_HEX_LOG)");
 #endif
         } else {
             ESP_LOGE(TAG, "CAN init failed");
