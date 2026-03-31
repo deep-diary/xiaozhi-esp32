@@ -1,6 +1,7 @@
 #include "http-server/deep_dog_http_server.h"
 
 #include "dog/dog_control.h"
+#include "motor/deep_motor.h"
 #include "esp_video.h"
 
 #include "camera.h"
@@ -192,18 +193,20 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "<canvas id='fc' width='240' height='240' style='position:absolute;left:0;top:0;pointer-events:none'></canvas>"
         "</div>"
         "<div class='row'>"
-        "<button onclick=\"cmd('init')\">初始化</button>"
-        "<button onclick=\"cmd('forward')\">前进</button>"
-        "<button onclick=\"cmd('back')\">后退</button>"
-        "<button onclick=\"cmd('stand')\">站立</button>"
-        "<button onclick=\"cmd('liedown')\">卧倒</button>"
-        "<button onclick=\"cmd('dance')\">跳舞</button>"
-        "<button class='secondary' onclick=\"cmd('stop_walk')\">停走</button>"
+        "<button id='btnInit' onclick=\"cmd('init')\">初始化</button>"
+        "<button id='btnForward' onclick=\"cmd('forward')\">前进</button>"
+        "<button id='btnBack' onclick=\"cmd('back')\">后退</button>"
+        "<button id='btnStand' onclick=\"cmd('stand')\">站立</button>"
+        "<button id='btnLie' onclick=\"cmd('liedown')\">卧倒</button>"
+        "<button id='btnDance' onclick=\"cmd('dance')\">跳舞</button>"
+        "<button id='btnStop' class='secondary' onclick=\"cmd('stop_walk')\">停走</button>"
         "</div>"
+        "<div id='dogStat' style='margin-top:8px;font-size:12px;color:#ccc'></div>"
         "<script>"
         "const st=document.getElementById('st');const wrap=document.getElementById('vidWrap');"
         "const img=document.getElementById('m');const cv=document.getElementById('fc');const faceMeta=document.getElementById('faceMeta');"
-        "let facePoll=null;"
+        "const dogStat=document.getElementById('dogStat');"
+        "let facePoll=null;let lastStatus=null;"
         "function drawFaces(j){const c=cv.getContext('2d');c.clearRect(0,0,240,240);"
         "if(!j||!j.faces)return;(j.faces||[]).forEach(f=>{c.strokeStyle='#0f0';c.lineWidth=2;"
         "c.strokeRect(f.x0*240,f.y0*240,(f.x1-f.x0)*240,(f.y1-f.y0)*240);});}"
@@ -214,18 +217,38 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "function toggleFace(on){fetch('/api/face_enable?enabled='+(on?'1':'0'),{method:'POST'})"
         ".then(()=>pollFace()).catch(()=>{});if(on&&!facePoll){facePoll=setInterval(pollFace,200);pollFace();}"
         "else if(!on&&facePoll){clearInterval(facePoll);facePoll=null;drawFaces(null);faceMeta.textContent='';}}"
+        "function applyDogInitState(j){"
+        "const inited=!!j.dog_initialized;"
+        "const bi=document.getElementById('btnInit');"
+        "const bs=['btnForward','btnBack','btnStand','btnLie','btnDance','btnStop'].map(id=>document.getElementById(id));"
+        "if(bi)bi.disabled=inited;"
+        "bs.forEach(b=>{if(b)b.disabled=!inited;});"
+        "}"
         "function refresh(){return fetch('/api/status').then(r=>r.json()).then(j=>{"
+        "lastStatus=j;"
         "st.textContent='模式:'+j.mode+' 拉流:'+j.stream_clients+' JPEG:'+(j.has_jpeg?'有':'无')"
-        "+(j.face_ai_compiled?' 人脸模块:有':' 人脸模块:无');"
+        "+(j.face_ai_compiled?' 人脸模块:有':' 人脸模块:无')"
+        "+' 初始化:'+((j.dog_initialized)?'已完成':'未完成');"
+        "applyDogInitState(j);"
         "if(j.mode==='stream'){wrap.style.display='block';if(!img.src||img.src.indexOf('/stream')<0)img.src='/stream';}"
         "else{wrap.style.display='none';img.removeAttribute('src');if(facePoll){clearInterval(facePoll);facePoll=null;}"
         "document.getElementById('faceEn').checked=false;drawFaces(null);faceMeta.textContent='';}}).catch(()=>{st.textContent='状态获取失败';});}"
         "function setMode(m){fetch('/api/capture_mode?mode='+encodeURIComponent(m),{method:'POST'})"
         ".then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return refresh();})"
         ".catch(e=>{st.textContent='切换模式失败: '+e.message;});}"
+        "function updateDogStatus(){fetch('/api/dog_status').then(r=>r.json()).then(j=>{"
+        "if(!j.motors){dogStat.textContent='';return;}"
+        "let txt='电机状态: ';"
+        "txt+='limit='+(j.torque_limit_nm!=null?j.torque_limit_nm:'-')+' N·m; ';"
+        "txt+='fault='+(j.has_fault?'是':'否')+'; ';"
+        "txt+= '关节: '+j.motors.map(m=>m.id+':'+(m.deg!=null?m.deg.toFixed(1):'?')+'°/τ='+(m.torque_nm!=null?m.torque_nm.toFixed(2):'?')).join(' , ');"
+        "dogStat.textContent=txt;}).catch(()=>{});}"
         "function cmd(c){fetch('/api/cmd?cmd='+encodeURIComponent(c),{method:'POST'})"
-        ".then(r=>{if(!r.ok)st.textContent='指令失败 HTTP '+r.status;});}"
-        "refresh();setInterval(refresh,2000);"
+        ".then(r=>r.json().catch(()=>({})).then(j=>{"
+        "if(!r.ok||j.ok===false){st.textContent='指令失败: '+(j.error||('HTTP '+r.status));}"
+        "else{st.textContent='指令已发送: '+c;}"
+        "})).catch(e=>{st.textContent='指令失败: '+e.message;});}"
+        "refresh();setInterval(refresh,2000);setInterval(updateDogStatus,2000);"
         "</script></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -306,16 +329,23 @@ static esp_err_t ApiStatusHandler(httpd_req_t* req) {
     if (!srv) {
         return ESP_FAIL;
     }
-    char buf[192];
+    const DogControl* dog = srv->dog();
+    bool dog_initialized = false;
+    if (dog) {
+        dog_initialized = (dog->getPoseState() != DogPoseState::Uninitialized);
+    }
+    char buf[256];
     snprintf(buf, sizeof(buf),
-             "{\"mode\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u,\"face_ai_compiled\":%s}",
+             "{\"mode\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u,"
+             "\"face_ai_compiled\":%s,\"dog_initialized\":%s}",
              ModeToStr(srv->GetCaptureMode()), srv->StreamClientCount(), srv->HasJpegFrame() ? "true" : "false",
              (unsigned)srv->Port(),
 #if DEEP_DOG_FACE_AI_ENABLE
-             "true");
+             "true",
 #else
-             "false");
+             "false",
 #endif
+             dog_initialized ? "true" : "false");
     return SendCorsJson(req, buf);
 }
 
@@ -402,10 +432,85 @@ static esp_err_t ApiCmdHandler(httpd_req_t* req) {
     if (!srv->TryEnqueueDogCmd(c)) {
         ESP_LOGW(TAG, "网页 狗指令未入队(队列满): %s", val);
         httpd_resp_set_status(req, "503 Busy");
-        return httpd_resp_send(req, R"({"error":"queue full"})", HTTPD_RESP_USE_STRLEN);
+        return SendCorsJson(req, R"({"ok":false,"error":"queue full"})");
     }
     ESP_LOGI(TAG, "网页 狗指令已入队: %s", val);
     return SendCorsJson(req, R"({"ok":true})");
+}
+
+static esp_err_t ApiDogStatusHandler(httpd_req_t* req) {
+    auto* srv = static_cast<DeepDogHttpServer*>(req->user_ctx);
+    if (!srv) {
+        return ESP_FAIL;
+    }
+    DogControl* dog = srv->dog();
+    if (!dog) {
+        return SendCorsJson(req, R"({"motors":[],"torque_limit_nm":null,"has_fault":false})");
+    }
+    DeepMotor* motor = dog->getDeepMotor();
+    if (!motor) {
+        return SendCorsJson(req, R"({"motors":[],"torque_limit_nm":null,"has_fault":false})");
+    }
+
+    constexpr size_t kCap = 4096;
+    char* buf = static_cast<char*>(heap_caps_malloc(kCap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!buf) {
+        buf = static_cast<char*>(heap_caps_malloc(kCap, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
+    if (!buf) {
+        return SendCorsJson(req, R"({"error":"no_mem"})");
+    }
+
+    int8_t ids[MAX_MOTOR_COUNT];
+    uint8_t count = motor->getRegisteredMotorIds(ids, MAX_MOTOR_COUNT);
+    size_t off = 0;
+    bool has_fault = false;
+
+    off += snprintf(buf + off, kCap - off, "{\"motors\":[");
+    for (uint8_t i = 0; i < count && off < kCap - 128; ++i) {
+        const uint8_t id = (uint8_t)ids[i];
+        motor_status_t st{};
+        if (!motor->getMotorStatus(id, &st) || !st.has_feedback) {
+            continue;
+        }
+        const float deg = st.current_angle * 180.0f / (float)M_PI;
+        if (st.error_status || st.collision) {
+            has_fault = true;
+        }
+        off += snprintf(buf + off, kCap - off,
+                        "%s{\"id\":%u,\"rad\":%.6f,\"deg\":%.2f,\"torque_nm\":%.3f,"
+                        "\"max_abs_torque_nm\":%.3f,\"collision\":%s}",
+                        (off > 11 ? "," : ""), (unsigned)id,
+                        (double)st.current_angle, (double)deg,
+                        (double)st.current_torque,
+                        (double)st.max_abs_torque,
+                        st.collision ? "true" : "false");
+    }
+    if (off >= kCap - 64) {
+        heap_caps_free(buf);
+        return SendCorsJson(req, R"({"error":"dog_status_too_large"})");
+    }
+    const double torque_limit = (DEEP_DOG_TORQUE_LIMIT_NM > 0.0f) ? (double)DEEP_DOG_TORQUE_LIMIT_NM : 0.0;
+    const bool has_limit = (DEEP_DOG_TORQUE_LIMIT_NM > 0.0f);
+    off += snprintf(buf + off, kCap - off,
+                    "],\"torque_limit_nm\":%s,\"has_fault\":%s}",
+                    has_limit ? "" : "null",
+                    has_fault ? "true" : "false");
+    if (has_limit) {
+        // 回填数值到 "torque_limit_nm": 之后
+        // 简化处理：重新格式化整个对象避免回填复杂性
+        // 这里只在 has_limit=true 路径用更简单的重写
+        heap_caps_free(buf);
+        char small[256];
+        snprintf(small, sizeof(small),
+                 "{\"motors\":[],\"torque_limit_nm\":%.3f,\"has_fault\":%s}",
+                 torque_limit, has_fault ? "true" : "false");
+        return SendCorsJson(req, small);
+    }
+    buf[off] = '\0';
+    esp_err_t err = SendCorsJson(req, buf);
+    heap_caps_free(buf);
+    return err;
 }
 
 static esp_err_t ApiFaceHandler(httpd_req_t* req) {
@@ -750,14 +855,16 @@ bool DeepDogHttpServer::Start() {
     httpd_uri_t uri_status = {.uri = "/api/status", .method = HTTP_GET, .handler = ApiStatusHandler, .user_ctx = this};
     httpd_uri_t uri_mode = {.uri = "/api/capture_mode", .method = HTTP_POST, .handler = ApiModeHandler, .user_ctx = this};
     httpd_uri_t uri_cmd = {.uri = "/api/cmd", .method = HTTP_POST, .handler = ApiCmdHandler, .user_ctx = this};
+    httpd_uri_t uri_dog_status =
+        {.uri = "/api/dog_status", .method = HTTP_GET, .handler = ApiDogStatusHandler, .user_ctx = this};
     httpd_uri_t uri_face = {.uri = "/api/face", .method = HTTP_GET, .handler = ApiFaceHandler, .user_ctx = this};
     httpd_uri_t uri_face_en =
         {.uri = "/api/face_enable", .method = HTTP_POST, .handler = ApiFaceEnableHandler, .user_ctx = this};
 
     if (httpd_register_uri_handler(server_, &uri_root) != ESP_OK || httpd_register_uri_handler(server_, &uri_stream) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_status) != ESP_OK || httpd_register_uri_handler(server_, &uri_mode) != ESP_OK ||
-        httpd_register_uri_handler(server_, &uri_cmd) != ESP_OK || httpd_register_uri_handler(server_, &uri_face) != ESP_OK ||
-        httpd_register_uri_handler(server_, &uri_face_en) != ESP_OK) {
+        httpd_register_uri_handler(server_, &uri_cmd) != ESP_OK || httpd_register_uri_handler(server_, &uri_dog_status) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_face) != ESP_OK || httpd_register_uri_handler(server_, &uri_face_en) != ESP_OK) {
         httpd_stop(server_);
         server_ = nullptr;
 #if DEEP_DOG_FACE_AI_ENABLE
