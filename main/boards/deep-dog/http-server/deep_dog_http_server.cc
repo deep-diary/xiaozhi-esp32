@@ -144,6 +144,10 @@ static bool StrToMode(const char* s, DeepDogCaptureMode* out) {
 static esp_err_t SendCorsJson(httpd_req_t* req, const char* json) {
     httpd_resp_set_type(req, "application/json; charset=utf-8");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    // 页面端高频轮询状态接口，显式禁止缓存，避免浏览器/中间层返回旧 JSON。
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
@@ -176,6 +180,14 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "button{margin:4px;padding:10px 14px;border-radius:8px;border:0;background:#2a6df4;color:#fff;}"
         "button.secondary{background:#444;} #m{margin-top:12px;max-width:100%;border-radius:8px;background:#000;}"
         ".row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;} #st{font-size:14px;color:#9cf;margin:8px 0;}"
+        "#dogMeta{font-size:12px;color:#9cf;margin:8px 0 4px 0;}"
+        "#dogTbl{border-collapse:collapse;width:100%;max-width:640px;font-size:12px;color:#ddd;}"
+        "#dogTbl th,#dogTbl td{border:1px solid #333;padding:4px 6px;text-align:right;}"
+        "#dogTbl th:first-child,#dogTbl td:first-child{text-align:center;}"
+        "#dogTbl tr.fault td{background:#3a1f1f;color:#ffd2d2;}"
+        "#dogTbl td.tauWarn{background:#3a3215;color:#ffe28a;}"
+        "#dogTbl td.tauDanger{background:#4a1b1b;color:#ffb3b3;}"
+        "#dogTbl tr.changed td{box-shadow:inset 0 0 0 9999px rgba(64,128,255,0.14);}"
         "</style></head><body>"
         "<h2>DeepDog 遥控</h2>"
         "<p style='color:#888;font-size:13px;margin:0 0 10px 0'>"
@@ -201,19 +213,24 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "<button id='btnDance' onclick=\"cmd('dance')\">跳舞</button>"
         "<button id='btnStop' class='secondary' onclick=\"cmd('stop_walk')\">停走</button>"
         "</div>"
-        "<div id='dogStat' style='margin-top:8px;font-size:12px;color:#ccc'></div>"
+        "<div id='dogMeta'></div>"
+        "<table id='dogTbl'>"
+        "<thead><tr><th>ID</th><th>角度(°)</th><th>扭矩(N·m)</th><th>|τ|max(N·m)</th><th>碰撞</th></tr></thead>"
+        "<tbody id='dogTblBody'></tbody></table>"
         "<script>"
         "const st=document.getElementById('st');const wrap=document.getElementById('vidWrap');"
         "const img=document.getElementById('m');const cv=document.getElementById('fc');const faceMeta=document.getElementById('faceMeta');"
-        "const dogStat=document.getElementById('dogStat');"
-        "let facePoll=null;let lastStatus=null;"
+        "const dogMeta=document.getElementById('dogMeta');const dogTblBody=document.getElementById('dogTblBody');"
+        "let facePoll=null;let lastStatus=null;let cmdInFlight=false;let lastCmdTs=0;"
+        "let statusInFlight=false;let dogInFlight=false;let faceInFlight=false;"
+        "let lastDegById={};"
         "function drawFaces(j){const c=cv.getContext('2d');c.clearRect(0,0,240,240);"
         "if(!j||!j.faces)return;(j.faces||[]).forEach(f=>{c.strokeStyle='#0f0';c.lineWidth=2;"
         "c.strokeRect(f.x0*240,f.y0*240,(f.x1-f.x0)*240,(f.y1-f.y0)*240);});}"
-        "function pollFace(){fetch('/api/face').then(r=>r.json()).then(j=>{"
+        "function pollFace(){if(faceInFlight)return;faceInFlight=true;fetch('/api/face?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(j=>{"
         "if(!j.enabled){faceMeta.textContent='人脸检测未编译';drawFaces(null);return;}"
         "faceMeta.textContent='人脸:'+(j.feature_on?'开':'关')+' has_face:'+j.has_face+' n:'+j.n+' 帧:'+j.w+'x'+j.h;"
-        "if(j.feature_on)drawFaces(j);else drawFaces(null);}).catch(()=>{});}"
+        "if(j.feature_on)drawFaces(j);else drawFaces(null);}).catch(()=>{}).finally(()=>{faceInFlight=false;});}"
         "function toggleFace(on){fetch('/api/face_enable?enabled='+(on?'1':'0'),{method:'POST'})"
         ".then(()=>pollFace()).catch(()=>{});if(on&&!facePoll){facePoll=setInterval(pollFace,200);pollFace();}"
         "else if(!on&&facePoll){clearInterval(facePoll);facePoll=null;drawFaces(null);faceMeta.textContent='';}}"
@@ -224,7 +241,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "if(bi)bi.disabled=inited;"
         "bs.forEach(b=>{if(b)b.disabled=!inited;});"
         "}"
-        "function refresh(){return fetch('/api/status').then(r=>r.json()).then(j=>{"
+        "function refresh(){if(statusInFlight)return Promise.resolve();statusInFlight=true;return fetch('/api/status?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(j=>{"
         "lastStatus=j;"
         "st.textContent='模式:'+j.mode+' 拉流:'+j.stream_clients+' JPEG:'+(j.has_jpeg?'有':'无')"
         "+(j.face_ai_compiled?' 人脸模块:有':' 人脸模块:无')"
@@ -232,23 +249,48 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "applyDogInitState(j);"
         "if(j.mode==='stream'){wrap.style.display='block';if(!img.src||img.src.indexOf('/stream')<0)img.src='/stream';}"
         "else{wrap.style.display='none';img.removeAttribute('src');if(facePoll){clearInterval(facePoll);facePoll=null;}"
-        "document.getElementById('faceEn').checked=false;drawFaces(null);faceMeta.textContent='';}}).catch(()=>{st.textContent='状态获取失败';});}"
+        "document.getElementById('faceEn').checked=false;drawFaces(null);faceMeta.textContent='';}}).catch(()=>{st.textContent='状态获取失败';}).finally(()=>{statusInFlight=false;});}"
         "function setMode(m){fetch('/api/capture_mode?mode='+encodeURIComponent(m),{method:'POST'})"
         ".then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return refresh();})"
         ".catch(e=>{st.textContent='切换模式失败: '+e.message;});}"
-        "function updateDogStatus(){fetch('/api/dog_status').then(r=>r.json()).then(j=>{"
-        "if(!j.motors){dogStat.textContent='';return;}"
-        "let txt='电机状态: ';"
-        "txt+='limit='+(j.torque_limit_nm!=null?j.torque_limit_nm:'-')+' N·m; ';"
-        "txt+='fault='+(j.has_fault?'是':'否')+'; ';"
-        "txt+= '关节: '+j.motors.map(m=>m.id+':'+(m.deg!=null?m.deg.toFixed(1):'?')+'°/τ='+(m.torque_nm!=null?m.torque_nm.toFixed(2):'?')).join(' , ');"
-        "dogStat.textContent=txt;}).catch(()=>{});}"
-        "function cmd(c){fetch('/api/cmd?cmd='+encodeURIComponent(c),{method:'POST'})"
+        "function fmtNum(v,d){return (v==null||Number.isNaN(v))?'?':Number(v).toFixed(d);}"
+        "function updateDogStatus(){if(dogInFlight)return Promise.resolve();dogInFlight=true;const t0=Date.now();return fetch('/api/dog_status?ts='+t0,{cache:'no-store'}).then(r=>r.json()).then(j=>{"
+        "if(!j.motors){dogMeta.textContent='电机状态: 无';dogTblBody.innerHTML='';return;}"
+        "const now=new Date();const hh=String(now.getHours()).padStart(2,'0');"
+        "const mm=String(now.getMinutes()).padStart(2,'0');const ss=String(now.getSeconds()).padStart(2,'0');"
+        "dogMeta.textContent='更新: '+hh+':'+mm+':'+ss+'  延迟: '+(Date.now()-t0)+' ms  limit='+(j.torque_limit_nm!=null?fmtNum(j.torque_limit_nm,2):'-')+' N·m  fault='+(j.has_fault?'是':'否');"
+        "const limit=(j.torque_limit_nm!=null)?Number(j.torque_limit_nm):null;"
+        "const nextDegById={};"
+        "const rows=(j.motors||[]).slice().sort((a,b)=>(a.id||0)-(b.id||0)).map(m=>{"
+        "const id=Number(m.id||0);const degNum=Number(m.deg);const tauAbs=Math.abs(Number(m.torque_nm||0));"
+        "nextDegById[id]=degNum;"
+        "const prevDeg=lastDegById[id];"
+        "const changed=(Number.isFinite(prevDeg)&&Number.isFinite(degNum)&&Math.abs(degNum-prevDeg)>=0.3);"
+        "let tauCls='';"
+        "if(limit!=null&&limit>0){if(tauAbs>=limit)tauCls='tauDanger';else if(tauAbs>=limit*0.7)tauCls='tauWarn';}"
+        "else{if(tauAbs>=2.0)tauCls='tauDanger';else if(tauAbs>=1.0)tauCls='tauWarn';}"
+        "const col=(m.collision?'是':'否');"
+        "const rowCls=(m.collision?'fault':(changed?'changed':''));"
+        "return '<tr'+(rowCls?' class=\"'+rowCls+'\"':'')+'><td>'+id+'</td><td>'+fmtNum(m.deg,1)+'</td><td class=\"'+tauCls+'\">'+fmtNum(m.torque_nm,3)+'</td><td>'+fmtNum(m.max_abs_torque_nm,3)+'</td><td>'+col+'</td></tr>';"
+        "});"
+        "lastDegById=nextDegById;"
+        "dogTblBody.innerHTML=rows.join('');"
+        "}).catch(()=>{dogMeta.textContent='电机状态获取失败';}).finally(()=>{dogInFlight=false;});}"
+        "function setCmdButtonsDisabled(dis){['btnInit','btnForward','btnBack','btnStand','btnLie','btnDance','btnStop']"
+        ".forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=!!dis;});}"
+        "function cmd(c){const now=Date.now();"
+        "if(cmdInFlight||now-lastCmdTs<280){st.textContent='操作过快，请稍候...';return;}"
+        "lastCmdTs=now;cmdInFlight=true;setCmdButtonsDisabled(true);"
+        "fetch('/api/cmd?cmd='+encodeURIComponent(c),{method:'POST'})"
         ".then(r=>r.json().catch(()=>({})).then(j=>{"
         "if(!r.ok||j.ok===false){st.textContent='指令失败: '+(j.error||('HTTP '+r.status));}"
         "else{st.textContent='指令已发送: '+c;}"
-        "})).catch(e=>{st.textContent='指令失败: '+e.message;});}"
-        "refresh();setInterval(refresh,2000);setInterval(updateDogStatus,2000);"
+        "return Promise.all([refresh(),updateDogStatus()]);"
+        "})).catch(e=>{st.textContent='指令失败: '+e.message;})"
+        ".finally(()=>{setTimeout(()=>{cmdInFlight=false;refresh();},220);});}"
+        "function scheduleRefresh(){refresh().finally(()=>setTimeout(scheduleRefresh,1000));}"
+        "function scheduleDogStatus(){updateDogStatus().finally(()=>setTimeout(scheduleDogStatus,700));}"
+        "refresh();updateDogStatus();setTimeout(scheduleRefresh,1000);setTimeout(scheduleDogStatus,700);"
         "</script></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -623,7 +665,22 @@ bool DeepDogHttpServer::TryEnqueueDogCmd(uint8_t cmd) {
     if (!dog_cmd_queue_) {
         return false;
     }
-    return xQueueSend(dog_cmd_queue_, &cmd, pdMS_TO_TICKS(100)) == pdTRUE;
+    // HTTP 回调里不阻塞等待队列，优先快速返回给前端。
+    if (xQueueSend(dog_cmd_queue_, &cmd, 0) == pdTRUE) {
+        return true;
+    }
+
+    // 队列满时丢弃最旧命令，尽量保留“最新点击意图”，避免网页看起来卡顿数秒。
+    uint8_t dropped = 0;
+    if (xQueueReceive(dog_cmd_queue_, &dropped, 0) == pdTRUE) {
+        if (xQueueSend(dog_cmd_queue_, &cmd, 0) == pdTRUE) {
+            ESP_LOGW(TAG, "dog_web_cmd 队列满：已丢弃最旧命令 %s，保留最新 %s",
+                     DogWebCmdStr(static_cast<DogWebCmd>(dropped)),
+                     DogWebCmdStr(static_cast<DogWebCmd>(cmd)));
+            return true;
+        }
+    }
+    return false;
 }
 
 bool DeepDogHttpServer::EnqueueMjpegStreamJob(httpd_req_t* async_req) {
@@ -745,7 +802,23 @@ void DeepDogHttpServer::DogCmdTaskLoop() {
         if (!dog_) {
             continue;
         }
-        const auto cmd = static_cast<DogWebCmd>(raw);
+
+        // 突发点击时（例如连续点 stand），合并队列中的待执行命令，只执行最后一条。
+        // 这样可避免把多个耗时动作串行跑完，显著降低按钮“迟钝感”。
+        uint8_t latest_raw = raw;
+        uint8_t pending_raw = 0;
+        uint32_t merged = 0;
+        while (xQueueReceive(dog_cmd_queue_, &pending_raw, 0) == pdTRUE) {
+            latest_raw = pending_raw;
+            ++merged;
+        }
+        if (merged > 0) {
+            ESP_LOGI(TAG, "dog_web_cmd 合并突发命令 %lu 条，执行最新: %s",
+                     (unsigned long)merged,
+                     DogWebCmdStr(static_cast<DogWebCmd>(latest_raw)));
+        }
+
+        const auto cmd = static_cast<DogWebCmd>(latest_raw);
         ESP_LOGI(TAG, "dog_web_cmd 执行: %s", DogWebCmdStr(cmd));
         switch (cmd) {
             case DogWebCmd::Init:
