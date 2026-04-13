@@ -23,8 +23,8 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
-        motor_target_angles_[i] = 0.0f;
         torque_observe_enabled_[i] = false;
+        motor_target_angles_[i] = 0.0f;
         motor_cmd_cache_[i].position_rad = 0.0f;
         motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
         motor_cmd_cache_[i].iq_ref = 0.0f;

@@ -126,7 +126,8 @@ private:
 
     bool goForwardStepNoEnsure(float max_speed_rad_s);
     bool goBackStepNoEnsure(float max_speed_rad_s);
-    bool sendHoldCurrentPoseZeroSpeed(const char* reason);
+    bool sendHoldCurrentPoseZeroSpeed(const char* reason,
+                                      const float preferred_pos[4][LEG_JOINT_COUNT] = nullptr);
     bool moveToPoseJointsInterp(const char* label, const float target[4][LEG_JOINT_COUNT], float max_speed_rad_s);
 
     static void ContinuousWalkTask(void* arg);

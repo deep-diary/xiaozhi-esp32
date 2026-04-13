@@ -76,6 +76,14 @@
 #define CAN_RX_GPIO GPIO_NUM_48   // RX <- 收发器 TXD
 // CAN RX/TX 十六进制日志宏见文件顶部（须在 motor_config.h 之前）
 
+/** TWAI/CAN 队列深度（增大可降低高频下发时的 send timeout/丢帧概率，代价是少量 RAM 占用） */
+#ifndef DEEP_DOG_CAN_TX_QUEUE_SIZE
+#define DEEP_DOG_CAN_TX_QUEUE_SIZE 96
+#endif
+#ifndef DEEP_DOG_CAN_RX_QUEUE_SIZE
+#define DEEP_DOG_CAN_RX_QUEUE_SIZE 96
+#endif
+
 /**
  * 电机「速度档位」占位宏（0～100 整数比例），与 esp-sparkbot 等板级模板同源。
  * 当前 deep-dog 工程内 **无任何 .cc/.h 引用**（电机实际限速用 rad/s，见 protocol_motor / MCP / LegControl）。

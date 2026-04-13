@@ -29,10 +29,22 @@ enum class LegType {
 /** 默认步态总步数（一步周期内的采样点数） */
 #define LEG_DEFAULT_TOTAL_STEPS DEEP_DOG_GAIT_TOTAL_STEPS
 
+/** 默认站立位（相对零位，弧度） */
+#ifndef DEEP_DOG_STANCE_HIP_AA_RAD
+#define DEEP_DOG_STANCE_HIP_AA_RAD 0.0f
+#endif
+#ifndef DEEP_DOG_STANCE_HIP_FE_RAD
+#define DEEP_DOG_STANCE_HIP_FE_RAD 0.2f
+#endif
+#ifndef DEEP_DOG_STANCE_KNEE_RAD
+#define DEEP_DOG_STANCE_KNEE_RAD 1.4f
+#endif
+
 /** 默认迈步关节幅度（弧度），用于正弦偏移 */
-#define LEG_DEFAULT_HIP_FE_AMP   0.25f
-#define LEG_DEFAULT_KNEE_AMP    0.35f
-#define LEG_DEFAULT_HIP_AA_AMP  0.02f
+// 依据 minidog.urdf 关节可动范围，采用更保守的步态幅度以降低横摆与俯仰抖动。
+#define LEG_DEFAULT_HIP_FE_AMP   0.16f
+#define LEG_DEFAULT_KNEE_AMP     0.18f
+#define LEG_DEFAULT_HIP_AA_AMP   0.01f
 
 /**
  * 单腿控制类：一条腿 3 个关节，对应 3 个电机。
