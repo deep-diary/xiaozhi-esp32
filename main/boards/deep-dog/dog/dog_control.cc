@@ -125,7 +125,8 @@ bool DogControl::moveToPoseJointsInterp(const char* label, const float target[4]
             vTaskDelay(pdMS_TO_TICKS(dt_ms));
         }
     }
-    if (!sendHoldCurrentPoseZeroSpeed(label ? label : "pose_done")) {
+    // 末端保持优先使用“最后目标点”，避免读取反馈滞后造成回拉/抖动。
+    if (!sendHoldCurrentPoseZeroSpeed(label ? label : "pose_done", pos)) {
         return false;
     }
     return true;
@@ -271,7 +272,7 @@ bool DogControl::resendLastJointTargetsWithUpdatedGains() {
     return sendAllLegJointTargets(last_joint_targets_, last_max_speed_rad_s_);
 }
 
-bool DogControl::sendHoldCurrentPoseZeroSpeed(const char* reason) {
+bool DogControl::sendHoldCurrentPoseZeroSpeed(const char* reason, const float preferred_pos[4][LEG_JOINT_COUNT]) {
     if (!deep_motor_) {
         return false;
     }
@@ -285,10 +286,19 @@ bool DogControl::sendHoldCurrentPoseZeroSpeed(const char* reason) {
             if (id == 0) {
                 continue;
             }
+            if (preferred_pos) {
+                hold_pos[leg][j] = preferred_pos[leg][j];
+                continue;
+            }
+
             float rad = 0.0f;
             if (!deep_motor_->getMotorActualPosition(id, &rad)) {
-                // 读不到反馈时退化为站立目标，避免发送空姿态。
-                rad = legs_[leg].getStanceTargetJoint(j);
+                // 读不到反馈时退化为“最近一次已下发目标”；再退化到站立目标，避免发送空姿态。
+                if (has_last_joint_targets_) {
+                    rad = last_joint_targets_[leg][j];
+                } else {
+                    rad = legs_[leg].getStanceTargetJoint(j);
+                }
             }
             hold_pos[leg][j] = rad;
         }

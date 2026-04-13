@@ -43,6 +43,7 @@ enum class DogWebCmd : uint8_t {
     LieDown = 5,
     Dance = 6,
     StopWalk = 7,
+    Disable = 8,
 };
 
 static v4l2_pix_fmt_t V4lFromCameraFrame(const CameraFrame& cf) {
@@ -117,6 +118,8 @@ static const char* DogWebCmdStr(DogWebCmd c) {
             return "dance";
         case DogWebCmd::StopWalk:
             return "stop_walk";
+        case DogWebCmd::Disable:
+            return "disable";
         default:
             return "?";
     }
@@ -212,6 +215,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "<button id='btnLie' onclick=\"cmd('liedown')\">卧倒</button>"
         "<button id='btnDance' onclick=\"cmd('dance')\">跳舞</button>"
         "<button id='btnStop' class='secondary' onclick=\"cmd('stop_walk')\">停走</button>"
+        "<button id='btnDisable' class='secondary' onclick=\"cmd('disable')\">失能</button>"
         "</div>"
         "<div id='dogMeta'></div>"
         "<table id='dogTbl'>"
@@ -237,7 +241,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "function applyDogInitState(j){"
         "const inited=!!j.dog_initialized;"
         "const bi=document.getElementById('btnInit');"
-        "const bs=['btnForward','btnBack','btnStand','btnLie','btnDance','btnStop'].map(id=>document.getElementById(id));"
+        "const bs=['btnForward','btnBack','btnStand','btnLie','btnDance','btnStop','btnDisable'].map(id=>document.getElementById(id));"
         "if(bi)bi.disabled=inited;"
         "bs.forEach(b=>{if(b)b.disabled=!inited;});"
         "}"
@@ -276,7 +280,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "lastDegById=nextDegById;"
         "dogTblBody.innerHTML=rows.join('');"
         "}).catch(()=>{dogMeta.textContent='电机状态获取失败';}).finally(()=>{dogInFlight=false;});}"
-        "function setCmdButtonsDisabled(dis){['btnInit','btnForward','btnBack','btnStand','btnLie','btnDance','btnStop']"
+        "function setCmdButtonsDisabled(dis){['btnInit','btnForward','btnBack','btnStand','btnLie','btnDance','btnStop','btnDisable']"
         ".forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=!!dis;});}"
         "function cmd(c){const now=Date.now();"
         "if(cmdInFlight||now-lastCmdTs<280){st.textContent='操作过快，请稍候...';return;}"
@@ -464,6 +468,8 @@ static esp_err_t ApiCmdHandler(httpd_req_t* req) {
         cmd = DogWebCmd::Dance;
     } else if (strcmp(val, "stop_walk") == 0) {
         cmd = DogWebCmd::StopWalk;
+    } else if (strcmp(val, "disable") == 0) {
+        cmd = DogWebCmd::Disable;
     } else {
         ESP_LOGW(TAG, "网页 狗指令未知: %s", val);
         httpd_resp_set_status(req, "400 Bad Request");
@@ -825,10 +831,10 @@ void DeepDogHttpServer::DogCmdTaskLoop() {
                 dog_->init();
                 break;
             case DogWebCmd::Forward:
-                dog_->goForward();
+                (void)dog_->startContinuousForward(dog_->getContinuousSpeed(), dog_->getContinuousStepPeriodMs());
                 break;
             case DogWebCmd::Back:
-                dog_->goBack();
+                (void)dog_->startContinuousBackward(dog_->getContinuousSpeed(), dog_->getContinuousStepPeriodMs());
                 break;
             case DogWebCmd::Stand:
                 dog_->stand();
@@ -841,6 +847,9 @@ void DeepDogHttpServer::DogCmdTaskLoop() {
                 break;
             case DogWebCmd::StopWalk:
                 dog_->stopContinuousLocomotion();
+                break;
+            case DogWebCmd::Disable:
+                (void)dog_->disable();
                 break;
             default:
                 break;
