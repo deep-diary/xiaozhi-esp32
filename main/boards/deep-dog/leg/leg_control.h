@@ -47,6 +47,19 @@ enum class LegType {
 #define LEG_DEFAULT_HIP_AA_AMP   0.01f
 
 /**
+ * 摆动相抬脚：sin 半周内 sin² 包络；左膝站立为负、右膝为正，抬脚项为左加右减（见 leg_control.cc）。
+ */
+#ifndef LEG_KNEE_SWING_LIFT_RAD
+#define LEG_KNEE_SWING_LIFT_RAD 0.30f
+#endif
+/**
+ * 髋前后 cos 分量：打破纯 sin 对称；实机若「前进后退都向后漂」可维持负号或加大模长试参。
+ */
+#ifndef LEG_HIP_FE_COS_AMP
+#define LEG_HIP_FE_COS_AMP (-0.10f)
+#endif
+
+/**
  * 单腿控制类：一条腿 3 个关节，对应 3 个电机。
  * 负责站立/卧倒/迈一步的目标位置计算，通过 DeepMotor 下发。
  */
@@ -143,6 +156,8 @@ private:
     float hip_fe_amp_ = LEG_DEFAULT_HIP_FE_AMP;
     float knee_amp_ = LEG_DEFAULT_KNEE_AMP;
     float hip_aa_amp_ = LEG_DEFAULT_HIP_AA_AMP;
+    float knee_swing_lift_ = LEG_KNEE_SWING_LIFT_RAD;
+    float hip_fe_cos_amp_ = LEG_HIP_FE_COS_AMP;
 
     /** 根据步数索引计算 3 关节目标（弧度）；forward=false 时正弦项取反，表示后退摆动方向 */
     void computeStepPositionAt(uint16_t step_index, float out_position[LEG_JOINT_COUNT], bool forward) const;

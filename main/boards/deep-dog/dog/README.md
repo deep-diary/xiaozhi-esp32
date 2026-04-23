@@ -74,8 +74,8 @@
 
 > 当前实现中，行走上下限由“站立位 + 默认迈步幅度”自动推导：  
 > - HipAA：`DEEP_DOG_STANCE_HIP_AA_RAD ± LEG_DEFAULT_HIP_AA_AMP`  
-> - HipFE：`±DEEP_DOG_STANCE_HIP_FE_RAD ± LEG_DEFAULT_HIP_FE_AMP`（左右腿符号相反）  
-> - Knee：`±DEEP_DOG_STANCE_KNEE_RAD ± LEG_DEFAULT_KNEE_AMP`（左右腿符号相反）
+> - HipFE：`±DEEP_DOG_STANCE_HIP_FE_RAD ± LEG_DEFAULT_HIP_FE_AMP`（左右腿符号相反），另加经 `hip_fe_sign` 后的 **`LEG_HIP_FE_COS_AMP * cos(phase)`**（默认负小幅，抵消后漂时可再微调符号/模长）  
+> - Knee：`±DEEP_DOG_STANCE_KNEE_RAD ± LEG_DEFAULT_KNEE_AMP`（左右腿符号相反），摆动半周叠加 **`LEG_KNEE_SWING_LIFT_RAD * sin²`**（**左膝加、右膝减**，与左右膝角极性一致）
 
 - **行走上下极限**：正常行走时关节活动范围（与 `leg_control.cc` 中 `LEG_DEFAULTS` 的 `limit_low`/`limit_high` 一致）。步态正弦项叠加后再经 `clampJoint`。
 - **机械上下极限**：实测机械限位（`mech_limit_low`/`mech_limit_high`）；**下发前**再经 `clampJointPositionsMechanical`。

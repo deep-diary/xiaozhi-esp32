@@ -127,17 +127,25 @@ void LegControl::computeStepPositionAt(uint16_t step_index, float out_position[L
         return;
     }
     float phase = 2.0f * (float)M_PI * (float)step_index / (float)total_steps_;
-    float s = sinf(phase);
-    if (!forward) {
-        s = -s;
-    }
+    float s0 = sinf(phase);
+    float c0 = cosf(phase);
+    float s = forward ? s0 : -s0;
+    float c = forward ? c0 : -c0;
+    /* 摆动半周：与前进方向一致的 sin 半周上抬脚（sin² 包络） */
+    float swing_phase = forward ? s0 : -s0;
+    float swing_bump = (swing_phase > 0.f) ? (swing_phase * swing_phase) : 0.f;
+
     bool right_leg = (leg_type_ == LegType::FR || leg_type_ == LegType::RR);
     float hip_fe_sign = right_leg ? -1.0f : 1.0f;
     float knee_sign = right_leg ? -1.0f : 1.0f;
+    /* 左膝负向站立、弯向 0 为加正；右膝正向站立、弯向 0 为减正 → 抬脚为左 +、右 - */
+    float knee_lift_sign = right_leg ? -1.0f : 1.0f;
 
     out_position[LEG_JOINT_HIP_AA] = clampJoint(LEG_JOINT_HIP_AA, stance_position_[LEG_JOINT_HIP_AA] + hip_aa_amp_ * s);
-    out_position[LEG_JOINT_HIP_FE] = clampJoint(LEG_JOINT_HIP_FE, stance_position_[LEG_JOINT_HIP_FE] + hip_fe_sign * hip_fe_amp_ * s);
-    out_position[LEG_JOINT_KNEE]   = clampJoint(LEG_JOINT_KNEE,   stance_position_[LEG_JOINT_KNEE]   + knee_sign * knee_amp_ * s);
+    out_position[LEG_JOINT_HIP_FE] = clampJoint(LEG_JOINT_HIP_FE,
+        stance_position_[LEG_JOINT_HIP_FE] + hip_fe_sign * (hip_fe_amp_ * s + hip_fe_cos_amp_ * c));
+    out_position[LEG_JOINT_KNEE] = clampJoint(LEG_JOINT_KNEE,
+        stance_position_[LEG_JOINT_KNEE] + knee_sign * knee_amp_ * s + knee_lift_sign * knee_swing_lift_ * swing_bump);
 }
 
 void LegControl::computeStepPosition(float out_position[LEG_JOINT_COUNT], bool forward) const {
