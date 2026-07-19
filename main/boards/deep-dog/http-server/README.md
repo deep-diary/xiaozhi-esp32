@@ -35,6 +35,11 @@
 | GET | `/api/status` | JSON：`mode`、`stream_clients`、`has_jpeg`、`port` |
 | POST | `/api/capture_mode?mode=off` 或 `periodic` 或 `stream` | 切换采集模式 |
 | POST | `/api/cmd?cmd=...` | 投递狗指令，见下表 |
+| GET | `/api/face` | 人脸框 + `local_id` / `display_name` |
+| POST | `/api/face_enable?enabled=0\|1` | 开关人脸检测/识别 |
+| POST | `/api/immich_config?api_key=...&api_url=...` | Immich Key 写入 NVS（S05） |
+| GET | `/api/immich_status` | Immich 配置/上次结果（无 Key 明文） |
+| POST | `/api/face_refresh_name?local_id=` | 强制下次再取 Immich 真名 |
 
 **`cmd` 取值**：`init`、`forward`、`back`、`stand`、`liedown`、`dance`、`stop_walk`。  
 指令进 **FreeRTOS 队列**，由 **`dog_web_cmd`** 任务调用 `DogControl`，避免在 httpd 回调里长时间阻塞（CAN/状态机安全）。

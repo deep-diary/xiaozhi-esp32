@@ -22,7 +22,7 @@ struct DeepDogFaceBox {
     int kp[10] = {};
     uint8_t kp_n = 0;
     int local_id = 0;
-    char display_name[16] = {};
+    char display_name[32] = {};
     DeepDogFaceRecognizeSource recognize_source = DeepDogFaceRecognizeSource::None;
 };
 
@@ -36,7 +36,7 @@ struct DeepDogFaceSnapshot {
     DeepDogFaceBox faces[8];
     /** 主脸（最高分）识别结果，便于顶层 JSON */
     int primary_local_id = 0;
-    char primary_display_name[16] = {};
+    char primary_display_name[32] = {};
     DeepDogFaceRecognizeSource primary_source = DeepDogFaceRecognizeSource::None;
 };
 

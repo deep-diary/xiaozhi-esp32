@@ -24,7 +24,8 @@
 | **V-S02** | HTTP MJPEG | [vision/server/S02](./vision/server/S02-http-mjpeg.md) | S01 | ✅ |
 | **V-S03** | 人脸框叠加 | [vision/server/S03](./vision/server/S03-http-face-overlay.md) | S02 | 一期 ✅ |
 | **V-S04** | 本地数字 ID | [vision/server/S04](./vision/server/S04-local-face-numeric-id.md) | S03 | **下一步** |
-| **V-S05** | Immich 真名 | [vision/server/S05](./vision/server/S05-immich-real-name.md) | S04 | 待办 |
+| **V-S05** | Immich 真名 | [vision/server/S05](./vision/server/S05-immich-real-name.md) | S04 | ✅ |
+| **V-S06** | 预览/检测 480 分辨率 | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | 待办（需求已写） |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 待办 |
 | V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | 待办（复用 face） |
 | V-C03 | MQTT 推流开关 | [vision/client/C03](./vision/client/C03-mqtt-stream-control.md) | C02 | 待办 |
@@ -34,11 +35,11 @@
 ## 依赖关系
 
 ```text
-S01 → S02 → S03 → S04 → S05 → C02 → C03 → C04
-                    │              ↑
-                    └── face_ai ───┘
-C01 ─────────────────────────────→ C02
-S05 ─────────────────────────────→ P01
+S01 → S02 → S03 → S04 → S05 → S06 → C02 → C03 → C04
+                    │                      ↑
+                    └── face_ai ───────────┘
+C01 ─────────────────────────────────────→ C02
+S05 ─────────────────────────────────────→ P01
 ```
 
 ## 视觉轨验收速查
@@ -50,6 +51,7 @@ S05 ─────────────────────────�
 | S03 | Streaming + 人脸开 → Canvas 有框 |
 | S04 | **不同人显示不同数字 ID**；同人稳定同一 ID；不调 Immich |
 | S05 | 本地 ID 可绑定 Immich 真名；失败仍显示数字 ID |
+| S06 | 预览/检测约 **480×480**；Immich 上传短边更易 ≥320；拉流仍可遥控 |
 | C02 | 设备推到 MediaMTX，外网/内网可拉；人脸逻辑复用 |
 
 ## 基础设施

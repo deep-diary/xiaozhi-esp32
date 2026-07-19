@@ -47,7 +47,9 @@ Topic 前缀建议：`deepdiary/deep-dog/<device_id>/...`
 | **本机（默认）** | `http://192.168.31.25:2283/api` | S05 上传裁剪图取真名 |
 | 生产 | `http://im.deep-diary.com/api` | 可选；只读 Key **不可**作上传 |
 
-Key 存 NVS；无同步搜人 API → 上传 asset → 轮询 person（[S05](./server/S05-immich-real-name.md)）。须先有 [S04](./server/S04-local-face-numeric-id.md) 去重。
+Key 存设备 NVS（`fdog_im`），经 `POST /api/immich_config` 下发；**禁止**写入本仓库。无同步搜人 API → 上传临时 asset → 轮询 `people` → **删除临时 asset**（[S05](./server/S05-immich-real-name.md)）。须先有 [S04](./server/S04-local-face-numeric-id.md) 去重。
+
+联调图：[`fixtures/ge_weidong.png`](./fixtures/ge_weidong.png)（葛维冬）。**240 预览帧 Immich 易失败** → 提分辨率见 [S06](./server/S06-higher-resolution.md)。
 
 ## 4. 安全
 

@@ -1114,6 +1114,8 @@ if(BOARD_TYPE STREQUAL "deep-dog")
         esp-dl
         fatfs
         wear_levelling
+        esp_http_client
+        json
     )
 endif()
 
@@ -1123,6 +1125,7 @@ idf_component_register(SRCS ${SOURCES}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
                         esp_http_server
+                        esp_http_client
                         esp_pm
                         esp_psram
                         esp_netif
@@ -1141,6 +1144,7 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        json
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
 

@@ -6,6 +6,8 @@
 
 #include "camera.h"
 #include "face_ai_bridge.h"
+#include "face_ai_config.h"
+#include "immich_client.h"
 #include "image_to_jpeg.h"
 
 #include <wifi_manager.h>
@@ -229,15 +231,25 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "let statusInFlight=false;let dogInFlight=false;let faceInFlight=false;"
         "let lastDegById={};"
         "function drawFaces(j){const c=cv.getContext('2d');c.clearRect(0,0,240,240);"
-        "if(!j||!j.faces)return;(j.faces||[]).forEach(f=>{c.strokeStyle='#0f0';c.lineWidth=2;"
+        "if(!j||!j.faces)return;(j.faces||[]).forEach(f=>{"
+        "const hasId=!!f.local_id;const real=f.display_name&&f.display_name.length&&f.display_name.charAt(0)!=='#';"
+        "c.strokeStyle=real?'#6cf':(hasId?'#0f0':'#8a8');c.lineWidth=2;"
         "c.strokeRect(f.x0*240,f.y0*240,(f.x1-f.x0)*240,(f.y1-f.y0)*240);"
-        "const label=(f.display_name&&f.display_name.length)?f.display_name:(f.local_id?('#'+f.local_id):'');"
-        "if(label){c.fillStyle='#0f0';c.font='12px sans-serif';c.fillText(label,f.x0*240+2,Math.max(12,f.y0*240-4));}"
+        "let label='';"
+        "if(real){label=f.display_name+(f.local_id?(' #'+f.local_id):'');}"
+        "else if(f.display_name&&f.display_name.length){label=f.display_name;}"
+        "else if(f.local_id){label='#'+f.local_id;}"
+        "if(label){c.fillStyle=c.strokeStyle;c.font='bold 13px sans-serif';"
+        "c.fillText(label,f.x0*240+2,Math.max(14,f.y0*240-4));}"
         "});}"
         "function pollFace(){if(faceInFlight)return;faceInFlight=true;fetch('/api/face?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(j=>{"
         "if(!j.enabled){faceMeta.textContent='人脸检测未编译';drawFaces(null);return;}"
-        "const idTxt=(j.local_id?(' id:'+(j.display_name||('#'+j.local_id))+'/'+(j.recognize_source||'none')):'');"
-        "faceMeta.textContent='人脸:'+(j.feature_on?'开':'关')+' has_face:'+j.has_face+' n:'+j.n+' 帧:'+j.w+'x'+j.h+idTxt;"
+        "const names=(j.faces||[]).filter(f=>f.local_id||(f.display_name&&f.display_name.length))"
+        ".map(f=>{const real=f.display_name&&f.display_name.charAt(0)!=='#';"
+        "return real?(f.display_name+'(#'+f.local_id+')'):(f.display_name||('#'+f.local_id));}).join(', ');"
+        "const primary=j.display_name?(j.display_name+(j.local_id?('/'+j.recognize_source):'')):'';"
+        "faceMeta.textContent='人脸:'+(j.feature_on?'开':'关')+' has_face:'+j.has_face+' n:'+j.n"
+        "+' 帧:'+j.w+'x'+j.h+(names?(' | '+names):'')+(primary&&!names.includes(j.display_name)?(' | 主:'+primary):'');"
         "if(j.feature_on)drawFaces(j);else drawFaces(null);}).catch(()=>{}).finally(()=>{faceInFlight=false;});}"
         "function toggleFace(on){fetch('/api/face_enable?enabled='+(on?'1':'0'),{method:'POST'})"
         ".then(()=>pollFace()).catch(()=>{});if(on&&!facePoll){facePoll=setInterval(pollFace,200);pollFace();}"
@@ -617,6 +629,109 @@ static esp_err_t ApiFaceEnableHandler(httpd_req_t* req) {
 #endif
 }
 
+static void UrlDecodeInPlace(char* s) {
+    if (!s) {
+        return;
+    }
+    char* w = s;
+    for (char* r = s; *r; ++r) {
+        if (*r == '%' && r[1] && r[2]) {
+            auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            const int hi = hex(r[1]);
+            const int lo = hex(r[2]);
+            if (hi >= 0 && lo >= 0) {
+                *w++ = (char)((hi << 4) | lo);
+                r += 2;
+                continue;
+            }
+        } else if (*r == '+') {
+            *w++ = ' ';
+            continue;
+        }
+        *w++ = *r;
+    }
+    *w = '\0';
+}
+
+static esp_err_t ApiImmichConfigHandler(httpd_req_t* req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_set_status(req, "405 Method Not Allowed");
+        return httpd_resp_send(req, nullptr, 0);
+    }
+    if (DrainPostBody(req) != ESP_OK) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_send(req, nullptr, 0);
+    }
+#if !DEEP_DOG_FACE_IMMICH_ENABLE
+    return SendCorsJson(req, R"({"ok":false,"reason":"immich_disabled"})");
+#else
+    char query[256];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, R"({"error":"need api_key=..."})", HTTPD_RESP_USE_STRLEN);
+    }
+    char key[96] = {};
+    char url[96] = {};
+    if (httpd_query_key_value(query, "api_key", key, sizeof(key)) != ESP_OK || key[0] == '\0') {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, R"({"error":"need api_key"})", HTTPD_RESP_USE_STRLEN);
+    }
+    (void)httpd_query_key_value(query, "api_url", url, sizeof(url));
+    UrlDecodeInPlace(key);
+    UrlDecodeInPlace(url);
+    const bool ok = DeepDogImmichSetConfig(url[0] ? url : nullptr, key);
+    return SendCorsJson(req, ok ? R"({"ok":true})" : R"({"ok":false})");
+#endif
+}
+
+static esp_err_t ApiImmichStatusHandler(httpd_req_t* req) {
+#if !DEEP_DOG_FACE_IMMICH_ENABLE
+    return SendCorsJson(req, R"({"configured":false,"enabled":false})");
+#else
+    char buf[256];
+    const size_t n = DeepDogImmichFormatStatusJson(buf, sizeof(buf));
+    if (n == 0) {
+        return SendCorsJson(req, R"({"error":"status"})");
+    }
+    return SendCorsJson(req, buf);
+#endif
+}
+
+static esp_err_t ApiFaceRefreshNameHandler(httpd_req_t* req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_set_status(req, "405 Method Not Allowed");
+        return httpd_resp_send(req, nullptr, 0);
+    }
+    if (DrainPostBody(req) != ESP_OK) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_send(req, nullptr, 0);
+    }
+#if !DEEP_DOG_FACE_IMMICH_ENABLE
+    return SendCorsJson(req, R"({"ok":false,"reason":"immich_disabled"})");
+#else
+    int local_id = 0;
+    char query[64];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char val[16];
+        if (httpd_query_key_value(query, "local_id", val, sizeof(val)) == ESP_OK) {
+            local_id = atoi(val);
+        }
+    }
+    if (local_id <= 0) {
+        local_id = DeepDogFaceAiPrimaryLocalId();
+    }
+    DeepDogImmichRequestRefresh(local_id > 0 ? local_id : 0);
+    char buf[80];
+    snprintf(buf, sizeof(buf), "{\"ok\":true,\"local_id\":%d}", local_id);
+    return SendCorsJson(req, buf);
+#endif
+}
+
 }  // namespace
 
 DeepDogHttpServer::DeepDogHttpServer(EspVideo* camera, DogControl* dog, uint16_t port)
@@ -915,6 +1030,8 @@ bool DeepDogHttpServer::Start() {
     /* 须满足 max_open_sockets + 3 <= CONFIG_LWIP_MAX_SOCKETS（常见为 10 → 最多 7） */
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
+    /* 默认 8：S05 增加 immich_config/status/face_refresh_name 后需更多槽位 */
+    config.max_uri_handlers = 16;
 #if DEEP_DOG_FACE_AI_ENABLE
     /* 人脸相关 API + 解析/日志链略深，略高于默认 4096，避免边缘场景栈溢出 */
     if (config.stack_size < 8192) {
@@ -946,11 +1063,20 @@ bool DeepDogHttpServer::Start() {
     httpd_uri_t uri_face = {.uri = "/api/face", .method = HTTP_GET, .handler = ApiFaceHandler, .user_ctx = this};
     httpd_uri_t uri_face_en =
         {.uri = "/api/face_enable", .method = HTTP_POST, .handler = ApiFaceEnableHandler, .user_ctx = this};
+    httpd_uri_t uri_immich_cfg =
+        {.uri = "/api/immich_config", .method = HTTP_POST, .handler = ApiImmichConfigHandler, .user_ctx = this};
+    httpd_uri_t uri_immich_st =
+        {.uri = "/api/immich_status", .method = HTTP_GET, .handler = ApiImmichStatusHandler, .user_ctx = this};
+    httpd_uri_t uri_face_refresh =
+        {.uri = "/api/face_refresh_name", .method = HTTP_POST, .handler = ApiFaceRefreshNameHandler, .user_ctx = this};
 
     if (httpd_register_uri_handler(server_, &uri_root) != ESP_OK || httpd_register_uri_handler(server_, &uri_stream) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_status) != ESP_OK || httpd_register_uri_handler(server_, &uri_mode) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_cmd) != ESP_OK || httpd_register_uri_handler(server_, &uri_dog_status) != ESP_OK ||
-        httpd_register_uri_handler(server_, &uri_face) != ESP_OK || httpd_register_uri_handler(server_, &uri_face_en) != ESP_OK) {
+        httpd_register_uri_handler(server_, &uri_face) != ESP_OK || httpd_register_uri_handler(server_, &uri_face_en) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_immich_cfg) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_immich_st) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_face_refresh) != ESP_OK) {
         httpd_stop(server_);
         server_ = nullptr;
 #if DEEP_DOG_FACE_AI_ENABLE

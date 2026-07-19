@@ -104,4 +104,45 @@
 #define DEEP_DOG_FACE_RECOG_NVS_NS "fdog_fr"
 #endif
 
+/** 同一帧最多识别几张脸（检测可多于该数，按 score 取前 N） */
+#ifndef DEEP_DOG_FACE_RECOG_MULTI_MAX
+#define DEEP_DOG_FACE_RECOG_MULTI_MAX 4
+#endif
+
+/** 1=启用 Immich 真名（S05）；需 NVS 配置 api_key */
+#ifndef DEEP_DOG_FACE_IMMICH_ENABLE
+#define DEEP_DOG_FACE_IMMICH_ENABLE 1
+#endif
+
+#ifndef DEEP_DOG_FACE_IMMICH_NVS_NS
+#define DEEP_DOG_FACE_IMMICH_NVS_NS "fdog_im"
+#endif
+
+#ifndef DEEP_DOG_FACE_IMMICH_DEFAULT_URL
+#define DEEP_DOG_FACE_IMMICH_DEFAULT_URL "http://192.168.31.25:2283/api"
+#endif
+
+/** 失败后同一 local_id 的退避（秒） */
+#ifndef DEEP_DOG_FACE_IMMICH_BACKOFF_S
+#define DEEP_DOG_FACE_IMMICH_BACKOFF_S 60
+#endif
+
+/** 轮询 GET /assets/{id} 次数与间隔 */
+#ifndef DEEP_DOG_FACE_IMMICH_POLL_MAX
+#define DEEP_DOG_FACE_IMMICH_POLL_MAX 40
+#endif
+#ifndef DEEP_DOG_FACE_IMMICH_POLL_MS
+#define DEEP_DOG_FACE_IMMICH_POLL_MS 1500
+#endif
+
+/** 裁剪脸 JPEG 质量 */
+#ifndef DEEP_DOG_FACE_IMMICH_JPEG_QUALITY
+#define DEEP_DOG_FACE_IMMICH_JPEG_QUALITY 85
+#endif
+
+/** 裁剪边长下限（过小 Immich 难识别） */
+#ifndef DEEP_DOG_FACE_IMMICH_MIN_CROP_PX
+#define DEEP_DOG_FACE_IMMICH_MIN_CROP_PX 160
+#endif
+
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

@@ -8,6 +8,9 @@
 | V-S02 | [S02-http-mjpeg.md](./S02-http-mjpeg.md) | ✅ |
 | V-S03 | [S03-http-face-overlay.md](./S03-http-face-overlay.md) | 一期 ✅ |
 | V-S04 | [S04-local-face-numeric-id.md](./S04-local-face-numeric-id.md) | **下一步** |
-| V-S05 | [S05-immich-real-name.md](./S05-immich-real-name.md) | 待办 |
+| V-S05 | [S05-immich-real-name.md](./S05-immich-real-name.md) | ✅ |
+| V-S06 | [S06-higher-resolution.md](./S06-higher-resolution.md) | 待办 |
 
-顺序：S01 → S02 → S03 → S04 → S05。总表见 [ROADMAP](../../ROADMAP.md)。
+顺序：S01 → S02 → S03 → S04 → S05 → **S06**。总表见 [ROADMAP](../../ROADMAP.md)。
+
+> S05 联调：240 预览翻拍 Immich 常认不出；清晰原图可认。下一步优先 [S06](./S06-higher-resolution.md) 提分辨率。
