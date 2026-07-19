@@ -8,7 +8,7 @@
 2. **设备 = 流媒体客户端**：MediaMTX 推流，**复用**同一套 `face_ai`  
 3. 产品化：Kiosk / 对话个性化  
 
-不并行把 Immich 与推流和本地 ID 绑死；下一实现切片为 **V-S04**。
+不并行把 Immich 与推流和本地 ID 绑死；视觉轨当前切片为 **V-S06**（分辨率）。
 
 ## 总表
 
@@ -23,9 +23,9 @@
 | **V-S01** | HTTP 狗控 | [vision/server/S01](./vision/server/S01-http-dog-motion.md) | DogControl | 主体 ✅ |
 | **V-S02** | HTTP MJPEG | [vision/server/S02](./vision/server/S02-http-mjpeg.md) | S01 | ✅ |
 | **V-S03** | 人脸框叠加 | [vision/server/S03](./vision/server/S03-http-face-overlay.md) | S02 | 一期 ✅ |
-| **V-S04** | 本地数字 ID | [vision/server/S04](./vision/server/S04-local-face-numeric-id.md) | S03 | **下一步** |
+| **V-S04** | 本地数字 ID | [vision/server/S04](./vision/server/S04-local-face-numeric-id.md) | S03 | ✅ |
 | **V-S05** | Immich 真名 | [vision/server/S05](./vision/server/S05-immich-real-name.md) | S04 | ✅ |
-| **V-S06** | 预览/检测 480 分辨率 | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | 待办（需求已写） |
+| **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | ✅（真名待 Immich 队列空闲复验） |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 待办 |
 | V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | 待办（复用 face） |
 | V-C03 | MQTT 推流开关 | [vision/client/C03](./vision/client/C03-mqtt-stream-control.md) | C02 | 待办 |
@@ -51,7 +51,7 @@ S05 ─────────────────────────�
 | S03 | Streaming + 人脸开 → Canvas 有框 |
 | S04 | **不同人显示不同数字 ID**；同人稳定同一 ID；不调 Immich |
 | S05 | 本地 ID 可绑定 Immich 真名；失败仍显示数字 ID |
-| S06 | 预览/检测约 **480×480**；Immich 上传短边更易 ≥320；拉流仍可遥控 |
+| S06 | 预览/检测 **640×480**；Immich 裁剪短边 ≥320；拉流仍可遥控 |
 | C02 | 设备推到 MediaMTX，外网/内网可拉；人脸逻辑复用 |
 
 ## 基础设施

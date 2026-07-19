@@ -10,9 +10,9 @@
 #define DEEP_DOG_FACE_AI_ENABLE 1
 #endif
 
-/** 向人脸任务送帧的最小间隔（ms），用于降载 */
+/** 向人脸任务送帧的最小间隔（ms），用于降载（VGA 下 250 易触发 task_wdt） */
 #ifndef DEEP_DOG_FACE_AI_MIN_INTERVAL_MS
-#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 250
+#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 500
 #endif
 
 /** 1=检测前对 RGB565 每像素做高/低字节对调（仅在 INPUT_RGB888=0 时有意义） */
@@ -53,9 +53,15 @@
 #define DEEP_DOG_FACE_DETECT_MIN_BOX_PX 20
 #endif
 
-/** 1=Init 后对 240×240 全黑帧跑一次检测并打 log */
+/** 1=Init 后对全黑帧跑一次检测并打 log（尺寸见 SELFTEST_W/H） */
 #ifndef DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_LOG
 #define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_LOG 1
+#endif
+#ifndef DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_W
+#define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_W 640
+#endif
+#ifndef DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_H
+#define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_H 480
 #endif
 
 /** 1=在跑模型前对 RGB565 做稀疏采样，过暗且起伏小则跳过推理 */
@@ -140,9 +146,24 @@
 #define DEEP_DOG_FACE_IMMICH_JPEG_QUALITY 85
 #endif
 
-/** 裁剪边长下限（过小 Immich 难识别） */
+/** 裁剪边长下限（过小 Immich 难识别；S06 对齐短边 ≥320） */
 #ifndef DEEP_DOG_FACE_IMMICH_MIN_CROP_PX
-#define DEEP_DOG_FACE_IMMICH_MIN_CROP_PX 160
+#define DEEP_DOG_FACE_IMMICH_MIN_CROP_PX 320
+#endif
+/** 裁剪边长上限，避免 VGA 下过大 crop/整帧 JPEG 抢内存导致 encode/WDT 失败 */
+#ifndef DEEP_DOG_FACE_IMMICH_MAX_CROP_PX
+#define DEEP_DOG_FACE_IMMICH_MAX_CROP_PX 400
+#endif
+/** 帧面积超过该值时不再整帧回退 Immich（仅 crop） */
+#ifndef DEEP_DOG_FACE_IMMICH_FULLFRAME_MAX_PX
+#define DEEP_DOG_FACE_IMMICH_FULLFRAME_MAX_PX (320 * 320)
+#endif
+/**
+ * 识别流程结束后是否 DELETE 临时 asset。
+ * 默认 0：保留在 Immich 便于人工核对；1=旧行为（用后即删）。
+ */
+#ifndef DEEP_DOG_FACE_IMMICH_DELETE_ASSET
+#define DEEP_DOG_FACE_IMMICH_DELETE_ASSET 0
 #endif
 
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

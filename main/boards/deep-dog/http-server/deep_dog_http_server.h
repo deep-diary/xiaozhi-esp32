@@ -96,14 +96,14 @@ private:
     httpd_handle_t server_ = nullptr;
     TaskHandle_t camera_worker_ = nullptr;
     TaskHandle_t dog_cmd_task_ = nullptr;
-    TaskHandle_t mjpeg_stream_task_ = nullptr;
+    TaskHandle_t mjpeg_stream_tasks_[2] = {nullptr, nullptr};
 
     std::atomic<bool> worker_stop_{false};
     std::atomic<uint8_t> capture_mode_{static_cast<uint8_t>(DeepDogCaptureMode::Off)};
     std::atomic<int> stream_clients_{0};
 
-    int stream_target_fps_ = 8;
-    int jpeg_quality_ = 75;
+    int stream_target_fps_ = 5;  // VGA 传感器约 10fps；略降以免 JPEG/人脸抢内存
+    int jpeg_quality_ = 60;
 
     mutable std::mutex jpeg_mutex_;
     std::vector<uint8_t> jpeg_latest_;

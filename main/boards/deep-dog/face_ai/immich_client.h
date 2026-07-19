@@ -5,14 +5,19 @@
 #include <cstddef>
 #include <cstdint>
 
-/** Immich 真名客户端（S05）：配置存 NVS；异步 upload→poll people→delete。 */
+/** Immich 真名客户端（S05）：配置存 NVS；异步 upload→poll people；可选 delete。 */
 
 bool DeepDogImmichInit();
 void DeepDogImmichDeinit();
 
 bool DeepDogImmichIsConfigured();
-/** 写入 NVS；api_url 可空则用默认局域网地址。禁止把 Key 打进完整日志。 */
-bool DeepDogImmichSetConfig(const char* api_url, const char* api_key);
+/**
+ * 写入 NVS。api_url 可空则用默认局域网地址。
+ * delete_asset：<0 不改；0/1 写入「识别后是否删临时 asset」。
+ * 若 api_key 为空但已配置过 Key，仍可只更新 delete_asset。
+ * 禁止把 Key 打进完整日志。
+ */
+bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset = -1);
 
 /** 状态 JSON（无 Key 明文），写入 buf。 */
 size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size);

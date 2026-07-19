@@ -66,6 +66,9 @@ static bool CropFaceToJpeg(const uint8_t* rgb565, uint16_t fw, uint16_t fh, cons
     if (side < (float)DEEP_DOG_FACE_IMMICH_MIN_CROP_PX) {
         side = (float)DEEP_DOG_FACE_IMMICH_MIN_CROP_PX;
     }
+    if (side > (float)DEEP_DOG_FACE_IMMICH_MAX_CROP_PX) {
+        side = (float)DEEP_DOG_FACE_IMMICH_MAX_CROP_PX;
+    }
     const float cx = (x0 + x1) * 0.5f;
     const float cy = (y0 + y1) * 0.5f;
     x0 = cx - side * 0.5f;
@@ -204,11 +207,20 @@ static void MaybeRequestImmichName(const uint8_t* rgb565, uint16_t w, uint16_t h
     }
     uint8_t* jpeg = nullptr;
     size_t jpeg_len = 0;
-    // 优先带 padding 的脸部裁剪（多人时避免整帧绑错人）；失败再整帧
+    // 优先带 padding 的脸部裁剪（多人时避免整帧绑错人）
+    // VGA 整帧 JPEG 易与 MJPEG 争抢 heap（image_to_jpeg alloc fail），仅小分辨率回退整帧
     if (!CropFaceToJpeg(rgb565, w, h, primary, &jpeg, &jpeg_len)) {
-        ESP_LOGW(TAG, "immich crop failed, fallback full frame local_id=%d", primary.local_id);
-        if (!FullFrameToJpeg(rgb565, w, h, &jpeg, &jpeg_len)) {
-            ESP_LOGW(TAG, "immich jpeg failed local_id=%d", primary.local_id);
+        const bool allow_full =
+            ((uint32_t)w * (uint32_t)h) <= (uint32_t)DEEP_DOG_FACE_IMMICH_FULLFRAME_MAX_PX;
+        if (allow_full) {
+            ESP_LOGW(TAG, "immich crop failed, fallback full frame local_id=%d", primary.local_id);
+            if (!FullFrameToJpeg(rgb565, w, h, &jpeg, &jpeg_len)) {
+                ESP_LOGW(TAG, "immich jpeg failed local_id=%d", primary.local_id);
+                return;
+            }
+        } else {
+            ESP_LOGW(TAG, "immich crop failed local_id=%d (skip full-frame @%ux%u)", primary.local_id,
+                     (unsigned)w, (unsigned)h);
             return;
         }
     }
@@ -232,6 +244,8 @@ static void FaceAiTask(void* /*arg*/) {
         if (job.data == nullptr || job.len == 0) {
             continue;
         }
+        // 给 IDLE 喘息，降低 VGA 推理触发 task_wdt 的概率
+        vTaskDelay(pdMS_TO_TICKS(1));
 
         std::vector<DeepDogFaceBox> boxes;
         DeepDogFaceSnapshot snap{};

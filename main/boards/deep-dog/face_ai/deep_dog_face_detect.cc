@@ -241,7 +241,8 @@ bool DeepDogFaceDetectInit() {
 
 #if DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_LOG
     {
-        const uint16_t tw = 240, th = 240;
+        const uint16_t tw = (uint16_t)DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_W;
+        const uint16_t th = (uint16_t)DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_H;
         const size_t tb = (size_t)tw * (size_t)th * 2u;
         uint8_t* black = (uint8_t*)heap_caps_calloc(1, tb, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!black) {
@@ -251,9 +252,11 @@ bool DeepDogFaceDetectInit() {
             std::vector<DeepDogFaceBox> self_out;
             (void)DeepDogFaceDetectRun(black, tb, tw, th, &self_out, nullptr);
             if (!self_out.empty()) {
-                ESP_LOGW(TAG, "black 240x240 self-test: still %zu box(es)", self_out.size());
+                ESP_LOGW(TAG, "black %ux%u self-test: still %zu box(es)", (unsigned)tw, (unsigned)th,
+                         self_out.size());
             } else {
-                ESP_LOGI(TAG, "black 240x240 self-test: 0 boxes (threshold pipeline ok for black)");
+                ESP_LOGI(TAG, "black %ux%u self-test: 0 boxes (threshold pipeline ok for black)",
+                         (unsigned)tw, (unsigned)th);
             }
             heap_caps_free(black);
         }

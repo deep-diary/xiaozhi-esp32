@@ -22,7 +22,7 @@
 |------|------|
 | **Off** | 不采帧，worker 低占空休眠。 |
 | **PeriodicSample** | 约 **1Hz** `CaptureOnly()`，日志占位，便于后续接人脸/检测；不刷 LCD。 |
-| **Streaming** | 约 **8fps**（代码内 `stream_target_fps_`）采帧 → JPEG → 共享缓冲；`/stream` 只读该缓冲推送。 |
+| **Streaming** | 约 **5fps**（VGA 默认 `stream_target_fps_`）采帧 → JPEG → 共享缓冲；`/stream` 最多 **2** 路并发（双 `dog_mjpeg` worker）。 |
 
 默认上电为 **Off**，需在网页切到 **视频流** 再观看 MJPEG，以省 CPU/带宽。
 
@@ -37,7 +37,7 @@
 | POST | `/api/cmd?cmd=...` | 投递狗指令，见下表 |
 | GET | `/api/face` | 人脸框 + `local_id` / `display_name` |
 | POST | `/api/face_enable?enabled=0\|1` | 开关人脸检测/识别 |
-| POST | `/api/immich_config?api_key=...&api_url=...` | Immich Key 写入 NVS（S05） |
+| POST | `/api/immich_config?api_key=...&api_url=...&delete_asset=0\|1` | Immich Key / 是否删临时图写入 NVS（S05；默认不删） |
 | GET | `/api/immich_status` | Immich 配置/上次结果（无 Key 明文） |
 | POST | `/api/face_refresh_name?local_id=` | 强制下次再取 Immich 真名 |
 

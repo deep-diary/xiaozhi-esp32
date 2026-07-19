@@ -15,13 +15,16 @@ S04 已用数字 ID 区分人。本阶段在**已有或新建 local_id** 上，�
 
 ## 2. Immich 约束
 
-无同步「上传即返回姓名」API。契约：
+无同步「上传即返回姓名」API。契约（对齐 xiaozhi-server，**不主动触发 jobs**）：
 
 ```text
-裁剪 JPEG → 上传临时 asset（优先整帧，过小裁剪 Immich 易无脸）→ 轮询 people → name + person_id → 删除临时 asset
+裁剪 JPEG → POST /assets → 轮询 GET /assets/{id} 的 people[] → 绑 name + person_id
+         → （可选）DELETE 临时 asset；默认不删，便于在 Immich 网页核对
 ```
 
 延迟秒级；须配合 S04 去重，禁止 1Hz 狂刷。详见 [infra](../infra.md)。
+
+Immich 开启 Facial Recognition 后，**上传本身会入队**检测/识别；设备**不得** `PUT /jobs/faceDetection|facialRecognition`，以免误伤全局队列或已命名库。
 
 Immich 2.x `GET /assets/{id}` 的人物在 **`people[]`**（含 `name` / `id`），勿只等顶层 `faces`。
 
@@ -47,7 +50,9 @@ AND 未处于失败退避窗口
 
 ## 4. 临时 asset
 
-识别流程结束后**删除**临时上传（成功 / unknown / 超时均删）。小裁剪图无保留价值；删除失败只打日志。
+- 默认 **`delete_asset=0`**：识别结束后**保留**临时图，便于在 Immich 核对检测/识别。
+- 设为 `1` 时：成功 / unknown / 超时均 DELETE（旧行为）；删除失败只打日志。
+- 编译默认：`DEEP_DOG_FACE_IMMICH_DELETE_ASSET=0`；NVS 键 `del_asset`。
 
 ## 5. 结果与 UI
 
@@ -62,7 +67,15 @@ AND 未处于失败退避窗口
 - 成功：写 NVS（`display_name`、`immich_person_id`）；`/api/face` 显示真名。  
 - unknown/error：保留数字 ID；退避，不覆盖有效真名缓存。
 
-Key：NVS（`fdog_im`）；禁止 git 明文。配置：`POST /api/immich_config?api_key=...&api_url=...`。默认 `http://192.168.31.25:2283/api`。
+Key：NVS（`fdog_im`）；禁止 git 明文。
+
+配置：
+
+- `POST /api/immich_config?api_key=...&api_url=...&delete_asset=0|1`
+- 可只发 `delete_asset=0|1`（已有 Key 时）
+- `GET /api/immich_status` 含 `delete_asset`
+
+默认 URL：`http://192.168.31.25:2283/api`。
 
 ## 6. 功能需求
 
@@ -72,14 +85,15 @@ Key：NVS（`fdog_im`）；禁止 git 明文。配置：`POST /api/immich_config
 | NAM-02 | 异步不阻塞检测/MJPEG/狗控 |
 | NAM-03 | 成功绑定 local_id ↔ 真名 |
 | NAM-04 | 失败降级为数字 ID |
-| NAM-05 | 可观测（upload/poll/result/delete 日志） |
-| NAM-06 | 临时 asset 用后即删 |
+| NAM-05 | 可观测（upload/poll/result/可选 delete 日志） |
+| NAM-06 | **不主动触发** Immich face jobs；只上传 + 轮询 |
+| NAM-07 | 临时 asset 删除可配；**默认保留** |
 
 ## 7. 实现前健康检查
 
 1. `GET http://192.168.31.25:2283/api/server/ping` → 200  
 2. 带可写 Key：`GET /users/me` → 200  
-3. 用 [fixtures/ge_weidong.png](../fixtures/ge_weidong.png)（人物 **葛维冬**）upload → poll `people` → 应得「葛维冬」→ DELETE asset  
+3. 用 [fixtures/ge_weidong.png](../fixtures/ge_weidong.png)（人物 **葛维冬**）upload → poll `people` → 应得「葛维冬」（主机探针**不要** `PUT /jobs`）
 
 若 Key 无效或库中无人脸命名，先修好 Immich 再改固件。
 
@@ -89,10 +103,11 @@ Key：NVS（`fdog_im`）；禁止 git 明文。配置：`POST /api/immich_config
 - [ ] 已有 `#1` 无真名时再次出镜：会触发 Immich，最终显示真名  
 - [ ] Immich 宕机 / 无 Key：仍显示 S04 数字 ID，推流/检测可用  
 - [ ] 同人 ≥5s：Immich 调用符合去重（有真名后不再狂刷）  
-- [ ] 临时 asset 被删除  
+- [ ] 默认不删临时 asset；`delete_asset=1` 时可删  
+- [ ] 串口无 `job faceDetection` / `facialRecognition` 主动触发日志  
 - [ ] 仓库无 API Key 明文  
 
-> **已知局限（推动 S06）**：设备 **240×240** 预览/翻拍上传 Immich 时经常 `people=[]`，画面只保留 `#id`；主机用清晰 [`ge_weidong.png`](../fixtures/ge_weidong.png) 可识别。见 [S06 提分辨率](./S06-higher-resolution.md)。
+> **已知局限（S06 应对）**：设备旧 **240×240** 预览/翻拍上传 Immich 时经常 `people=[]`；主机清晰 [`ge_weidong.png`](../fixtures/ge_weidong.png) 可识别。S06 实选 **640×480**，见 [S06](./S06-higher-resolution.md)。
 
 ## 9. 不包含
 

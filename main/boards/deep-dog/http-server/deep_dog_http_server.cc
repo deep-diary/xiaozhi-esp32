@@ -27,6 +27,7 @@
 
 /** 并发拉 /stream 的路数（每路在独立任务里跑，不阻塞 httpd） */
 #define MJPEG_STREAM_QUEUE_DEPTH 2
+#define MJPEG_STREAM_WORKER_COUNT 2
 #define MJPEG_STREAM_TASK_STACK 10240
 #define MJPEG_STREAM_TASK_PRIO 3
 
@@ -205,9 +206,9 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "<div class='row' style='margin-top:8px'><label style='color:#ccc;font-size:14px'>"
         "<input type='checkbox' id='faceEn' onchange='toggleFace(this.checked)'/> 网页人脸框（需视频流，轮询 /api/face）</label></div>"
         "<p id='faceMeta' style='font-size:12px;color:#9cf;margin:4px 0'></p>"
-        "<div style='position:relative;width:240px;height:240px;display:none' id='vidWrap'>"
-        "<img id='m' width='240' height='240' alt='mjpeg' style='display:block;width:240px;height:240px'/>"
-        "<canvas id='fc' width='240' height='240' style='position:absolute;left:0;top:0;pointer-events:none'></canvas>"
+        "<div style='position:relative;display:none;max-width:100%;width:640px;aspect-ratio:4/3' id='vidWrap'>"
+        "<img id='m' width='640' height='480' alt='mjpeg' style='display:block;width:100%;height:100%;object-fit:contain'/>"
+        "<canvas id='fc' width='640' height='480' style='position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none'></canvas>"
         "</div>"
         "<div class='row'>"
         "<button id='btnInit' onclick=\"cmd('init')\">初始化</button>"
@@ -230,17 +231,20 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "let facePoll=null;let lastStatus=null;let cmdInFlight=false;let lastCmdTs=0;"
         "let statusInFlight=false;let dogInFlight=false;let faceInFlight=false;"
         "let lastDegById={};"
-        "function drawFaces(j){const c=cv.getContext('2d');c.clearRect(0,0,240,240);"
+        "function syncVidSize(w,h){if(!w||!h)return;if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h;}"
+        "wrap.style.width=w+'px';wrap.style.aspectRatio=w+'/'+h;img.width=w;img.height=h;}"
+        "function drawFaces(j){const w=(j&&j.w)||cv.width||640;const h=(j&&j.h)||cv.height||480;"
+        "syncVidSize(w,h);const c=cv.getContext('2d');c.clearRect(0,0,w,h);"
         "if(!j||!j.faces)return;(j.faces||[]).forEach(f=>{"
         "const hasId=!!f.local_id;const real=f.display_name&&f.display_name.length&&f.display_name.charAt(0)!=='#';"
         "c.strokeStyle=real?'#6cf':(hasId?'#0f0':'#8a8');c.lineWidth=2;"
-        "c.strokeRect(f.x0*240,f.y0*240,(f.x1-f.x0)*240,(f.y1-f.y0)*240);"
+        "c.strokeRect(f.x0*w,f.y0*h,(f.x1-f.x0)*w,(f.y1-f.y0)*h);"
         "let label='';"
         "if(real){label=f.display_name+(f.local_id?(' #'+f.local_id):'');}"
         "else if(f.display_name&&f.display_name.length){label=f.display_name;}"
         "else if(f.local_id){label='#'+f.local_id;}"
         "if(label){c.fillStyle=c.strokeStyle;c.font='bold 13px sans-serif';"
-        "c.fillText(label,f.x0*240+2,Math.max(14,f.y0*240-4));}"
+        "c.fillText(label,f.x0*w+2,Math.max(14,f.y0*h-4));}"
         "});}"
         "function pollFace(){if(faceInFlight)return;faceInFlight=true;fetch('/api/face?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(j=>{"
         "if(!j.enabled){faceMeta.textContent='人脸检测未编译';drawFaces(null);return;}"
@@ -670,21 +674,33 @@ static esp_err_t ApiImmichConfigHandler(httpd_req_t* req) {
 #if !DEEP_DOG_FACE_IMMICH_ENABLE
     return SendCorsJson(req, R"({"ok":false,"reason":"immich_disabled"})");
 #else
-    char query[256];
+    char query[288];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_send(req, R"({"error":"need api_key=..."})", HTTPD_RESP_USE_STRLEN);
+        return httpd_resp_send(req, R"({"error":"need api_key=... and/or delete_asset=0|1"})", HTTPD_RESP_USE_STRLEN);
     }
     char key[96] = {};
     char url[96] = {};
-    if (httpd_query_key_value(query, "api_key", key, sizeof(key)) != ESP_OK || key[0] == '\0') {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_send(req, R"({"error":"need api_key"})", HTTPD_RESP_USE_STRLEN);
-    }
+    char del[8] = {};
+    (void)httpd_query_key_value(query, "api_key", key, sizeof(key));
     (void)httpd_query_key_value(query, "api_url", url, sizeof(url));
+    (void)httpd_query_key_value(query, "delete_asset", del, sizeof(del));
     UrlDecodeInPlace(key);
     UrlDecodeInPlace(url);
-    const bool ok = DeepDogImmichSetConfig(url[0] ? url : nullptr, key);
+    int delete_asset = -1;
+    if (del[0] == '0') {
+        delete_asset = 0;
+    } else if (del[0] == '1') {
+        delete_asset = 1;
+    } else if (del[0] != '\0') {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, R"({"error":"delete_asset must be 0 or 1"})", HTTPD_RESP_USE_STRLEN);
+    }
+    if (key[0] == '\0' && delete_asset < 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_send(req, R"({"error":"need api_key and/or delete_asset"})", HTTPD_RESP_USE_STRLEN);
+    }
+    const bool ok = DeepDogImmichSetConfig(url[0] ? url : nullptr, key[0] ? key : nullptr, delete_asset);
     return SendCorsJson(req, ok ? R"({"ok":true})" : R"({"ok":false})");
 #endif
 }
@@ -693,7 +709,7 @@ static esp_err_t ApiImmichStatusHandler(httpd_req_t* req) {
 #if !DEEP_DOG_FACE_IMMICH_ENABLE
     return SendCorsJson(req, R"({"configured":false,"enabled":false})");
 #else
-    char buf[256];
+    char buf[320];
     const size_t n = DeepDogImmichFormatStatusJson(buf, sizeof(buf));
     if (n == 0) {
         return SendCorsJson(req, R"({"error":"status"})");
@@ -1011,11 +1027,16 @@ bool DeepDogHttpServer::Start() {
         return false;
     }
     if (xTaskCreate(MjpegStreamWorkerEntry, "dog_mjpeg", MJPEG_STREAM_TASK_STACK, this, MJPEG_STREAM_TASK_PRIO,
-                    &mjpeg_stream_task_) != pdPASS) {
+                    &mjpeg_stream_tasks_[0]) != pdPASS) {
         vQueueDelete(mjpeg_stream_queue_);
         mjpeg_stream_queue_ = nullptr;
         ESP_LOGE(TAG, "dog_mjpeg task failed");
         return false;
+    }
+    if (xTaskCreate(MjpegStreamWorkerEntry, "dog_mjpeg2", MJPEG_STREAM_TASK_STACK, this, MJPEG_STREAM_TASK_PRIO,
+                    &mjpeg_stream_tasks_[1]) != pdPASS) {
+        ESP_LOGW(TAG, "dog_mjpeg2 task failed (single stream only)");
+        mjpeg_stream_tasks_[1] = nullptr;
     }
 
 #if DEEP_DOG_FACE_AI_ENABLE
@@ -1030,6 +1051,9 @@ bool DeepDogHttpServer::Start() {
     /* 须满足 max_open_sockets + 3 <= CONFIG_LWIP_MAX_SOCKETS（常见为 10 → 最多 7） */
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
+    /* 死掉的 /stream 客户端若无发送超时会永久占住 dog_mjpeg worker */
+    config.send_wait_timeout = 2;
+    config.recv_wait_timeout = 2;
     /* 默认 8：S05 增加 immich_config/status/face_refresh_name 后需更多槽位 */
     config.max_uri_handlers = 16;
 #if DEEP_DOG_FACE_AI_ENABLE
@@ -1041,9 +1065,11 @@ bool DeepDogHttpServer::Start() {
 
     if (httpd_start(&server_, &config) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");
-        if (mjpeg_stream_task_) {
-            vTaskDelete(mjpeg_stream_task_);
-            mjpeg_stream_task_ = nullptr;
+        for (TaskHandle_t& t : mjpeg_stream_tasks_) {
+            if (t) {
+                vTaskDelete(t);
+                t = nullptr;
+            }
         }
         vQueueDelete(mjpeg_stream_queue_);
         mjpeg_stream_queue_ = nullptr;

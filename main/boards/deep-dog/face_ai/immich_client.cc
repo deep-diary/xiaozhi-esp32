@@ -1,5 +1,6 @@
 /**
- * Immich 真名（S05）：esp_http_client 上传裁剪脸 → 轮询 people → 删临时 asset。
+ * Immich 真名（S05）：esp_http_client 上传裁剪脸 → 轮询 people；可选删临时 asset。
+ * 不主动 PUT /jobs（由 Immich 上传入队即可）。
  */
 #include "sdkconfig.h"
 
@@ -40,6 +41,7 @@ static bool s_started = false;
 
 static char s_api_url[96] = DEEP_DOG_FACE_IMMICH_DEFAULT_URL;
 static char s_api_key[96] = {};
+static uint8_t s_delete_asset = DEEP_DOG_FACE_IMMICH_DELETE_ASSET ? 1 : 0;
 static std::atomic<int> s_force_refresh_id{0};
 static std::atomic<int> s_inflight_id{0};
 static int64_t s_backoff_until_us[DEEP_DOG_FACE_RECOG_MAX + 1]{};
@@ -62,6 +64,12 @@ static void LoadConfigFromNvs() {
     }
     sz = sizeof(s_api_key);
     (void)nvs_get_str(h, "api_key", s_api_key, &sz);
+    uint8_t del = DEEP_DOG_FACE_IMMICH_DELETE_ASSET ? 1 : 0;
+    if (nvs_get_u8(h, "del_asset", &del) == ESP_OK) {
+        s_delete_asset = del ? 1 : 0;
+    } else {
+        s_delete_asset = DEEP_DOG_FACE_IMMICH_DELETE_ASSET ? 1 : 0;
+    }
     nvs_close(h);
 }
 
@@ -73,6 +81,9 @@ static bool SaveConfigToNvs() {
     esp_err_t err = nvs_set_str(h, "api_url", s_api_url);
     if (err == ESP_OK) {
         err = nvs_set_str(h, "api_key", s_api_key);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(h, "del_asset", s_delete_asset ? 1 : 0);
     }
     if (err == ESP_OK) {
         err = nvs_commit(h);
@@ -264,20 +275,6 @@ static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out
     return ok;
 }
 
-static void TriggerFaceJobs() {
-    // Immich 2.x：主动拉起人脸检测/识别队列，避免新 asset 长时间无 people
-    for (const char* job : {"faceDetection", "facialRecognition"}) {
-        char url[160];
-        snprintf(url, sizeof(url), "%s/jobs/%s", s_api_url, job);
-        const char* body = "{\"command\":\"start\"}";
-        HttpBuf resp{};
-        const int status =
-            HttpDo(HTTP_METHOD_PUT, url, "application/json", (const uint8_t*)body, strlen(body), &resp);
-        ESP_LOGI(TAG, "job %s http=%d", job, status);
-        heap_caps_free(resp.data);
-    }
-}
-
 static bool PollPerson(const char* asset_id, char* name_out, size_t name_sz, char* pid_out, size_t pid_sz) {
     char url[160];
     snprintf(url, sizeof(url), "%s/assets/%s", s_api_url, asset_id);
@@ -288,10 +285,6 @@ static bool PollPerson(const char* asset_id, char* name_out, size_t name_sz, cha
             heap_caps_free(resp.data);
             ESP_LOGI(TAG, "poll#%d matched name=%s", i, name_out);
             return true;
-        }
-        // 前几次若仍无人脸，再踢一次任务
-        if (i == 2 || i == 10) {
-            TriggerFaceJobs();
         }
         heap_caps_free(resp.data);
         if (i + 1 < DEEP_DOG_FACE_IMMICH_POLL_MAX) {
@@ -351,12 +344,15 @@ static void ProcessJob(ImmichJob job) {
             SetBackoff(job.local_id);
             goto done;
         }
-        TriggerFaceJobs();
 
         char name[32] = {};
         char person_id[40] = {};
         const bool matched = PollPerson(asset_id, name, sizeof(name), person_id, sizeof(person_id));
-        DeleteAsset(asset_id);
+        if (s_delete_asset) {
+            DeleteAsset(asset_id);
+        } else {
+            ESP_LOGI(TAG, "keep asset=%s (delete_asset=0)", asset_id);
+        }
 
         if (matched && name[0]) {
             if (DeepDogFaceRecognizeBindImmichName(job.local_id, name, person_id)) {
@@ -405,7 +401,8 @@ bool DeepDogImmichInit() {
         return false;
     }
     s_started = true;
-    ESP_LOGI(TAG, "immich worker ready configured=%d url=%s", (int)DeepDogImmichIsConfigured(), s_api_url);
+    ESP_LOGI(TAG, "immich worker ready configured=%d url=%s delete_asset=%u",
+             (int)DeepDogImmichIsConfigured(), s_api_url, (unsigned)s_delete_asset);
     return true;
 }
 
@@ -434,21 +431,32 @@ bool DeepDogImmichIsConfigured() {
     return s_api_key[0] != '\0';
 }
 
-bool DeepDogImmichSetConfig(const char* api_url, const char* api_key) {
-    if (!api_key || !api_key[0]) {
+bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset) {
+    const bool has_key = api_key && api_key[0];
+    if (!has_key && !DeepDogImmichIsConfigured()) {
         return false;
     }
-    if (api_url && api_url[0]) {
+    if (has_key) {
+        if (api_url && api_url[0]) {
+            strncpy(s_api_url, api_url, sizeof(s_api_url) - 1);
+            s_api_url[sizeof(s_api_url) - 1] = '\0';
+            TrimTrailingSlash(s_api_url);
+        } else if (!s_api_url[0]) {
+            strncpy(s_api_url, DEEP_DOG_FACE_IMMICH_DEFAULT_URL, sizeof(s_api_url) - 1);
+        }
+        strncpy(s_api_key, api_key, sizeof(s_api_key) - 1);
+        s_api_key[sizeof(s_api_key) - 1] = '\0';
+    } else if (api_url && api_url[0]) {
         strncpy(s_api_url, api_url, sizeof(s_api_url) - 1);
         s_api_url[sizeof(s_api_url) - 1] = '\0';
         TrimTrailingSlash(s_api_url);
-    } else {
-        strncpy(s_api_url, DEEP_DOG_FACE_IMMICH_DEFAULT_URL, sizeof(s_api_url) - 1);
     }
-    strncpy(s_api_key, api_key, sizeof(s_api_key) - 1);
-    s_api_key[sizeof(s_api_key) - 1] = '\0';
+    if (delete_asset == 0 || delete_asset == 1) {
+        s_delete_asset = (uint8_t)delete_asset;
+    }
     const bool ok = SaveConfigToNvs();
-    ESP_LOGI(TAG, "config saved ok=%d url=%s key_len=%u", (int)ok, s_api_url, (unsigned)strlen(s_api_key));
+    ESP_LOGI(TAG, "config saved ok=%d url=%s key_len=%u delete_asset=%u", (int)ok, s_api_url,
+             (unsigned)strlen(s_api_key), (unsigned)s_delete_asset);
     return ok;
 }
 
@@ -458,9 +466,10 @@ size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size) {
     }
     return (size_t)snprintf(
         buf, buf_size,
-        "{\"configured\":%s,\"url\":\"%s\",\"key_len\":%u,\"inflight\":%d,\"last\":\"%s\",\"last_local_id\":%d}",
+        "{\"configured\":%s,\"url\":\"%s\",\"key_len\":%u,\"delete_asset\":%u,\"inflight\":%d,\"last\":\"%s\","
+        "\"last_local_id\":%d}",
         DeepDogImmichIsConfigured() ? "true" : "false", s_api_url, (unsigned)strlen(s_api_key),
-        s_inflight_id.load(std::memory_order_relaxed), s_last_result, s_last_local_id);
+        (unsigned)s_delete_asset, s_inflight_id.load(std::memory_order_relaxed), s_last_result, s_last_local_id);
 }
 
 bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool force) {
@@ -530,7 +539,7 @@ void DeepDogImmichDeinit() {}
 bool DeepDogImmichIsConfigured() {
     return false;
 }
-bool DeepDogImmichSetConfig(const char*, const char*) {
+bool DeepDogImmichSetConfig(const char*, const char*, int) {
     return false;
 }
 size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size) {
