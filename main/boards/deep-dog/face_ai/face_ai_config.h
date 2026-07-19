@@ -23,17 +23,21 @@
 /**
  * 1=先把紧密 RGB565（小端内存布局）展开为 RGB888 再送入 HumanFaceDetect
  * 为 1 时不再使用 DEEP_DOG_FACE_DETECT_RGB565_SWAP（按 LE 拆 R/G/B）
+ * 默认 0：与 deep-thumble / esp-who 一致直接送 RGB565，避免每帧 ~173KB 分配失败导致静默 n=0
  */
 #ifndef DEEP_DOG_FACE_DETECT_INPUT_RGB888
-#define DEEP_DOG_FACE_DETECT_INPUT_RGB888 1
+#define DEEP_DOG_FACE_DETECT_INPUT_RGB888 0
 #endif
 
-/** MSR / MNP 阶段置信度阈值 */
+/**
+ * MSR / MNP 阶段置信度阈值。
+ * 过高（如 0.88）会压住全黑假框，但真人/照片脸也易漏检；默认对齐组件 0.5，挡镜头靠暗场门控 + min_box。
+ */
 #ifndef DEEP_DOG_FACE_DETECT_MSR_SCORE_THR
-#define DEEP_DOG_FACE_DETECT_MSR_SCORE_THR 0.88f
+#define DEEP_DOG_FACE_DETECT_MSR_SCORE_THR 0.5f
 #endif
 #ifndef DEEP_DOG_FACE_DETECT_MNP_SCORE_THR
-#define DEEP_DOG_FACE_DETECT_MNP_SCORE_THR 0.88f
+#define DEEP_DOG_FACE_DETECT_MNP_SCORE_THR 0.5f
 #endif
 
 /** NMS IoU 阈值 */

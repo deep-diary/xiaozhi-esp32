@@ -1,49 +1,41 @@
-# diary-brain SWRS
+# deep-dog SWRS
 
-存放 **Diary Brain** 板级开发需求（Software Requirements）。
+Deep-Dog 板级**需求与路线图**唯一入口。
 
 | 项 | 说明 |
 |----|------|
-| 硬件基线 | 与 `esp-sparkbot` 兼容（相机 OV3660 DVP、屏幕、ES8311） |
-| 代码基线 | xiaozhi **v2.3.0**，分支 `brain` |
-| 实现约定 | 功能尽量落在 `main/boards/diary-brain/`；未写入本目录的需求不要扩大改动面 |
-| 编译 | IDF **5.5.x**（`get_idf55`） |
+| 硬件 | 四足 + OV3660 等（见板级 `config.h`） |
+| 代码 | 优先 `main/boards/deep-dog/` |
+| **权威顺序** | [ROADMAP.md](./ROADMAP.md) |
 
-## 文档索引（建议实现顺序）
+## 下一步
 
-| 编号 | 文档 | 优先级 | 摘要 |
-|------|------|--------|------|
-| 00 | [共享基础设施](./00-shared-infra.md) | — | MediaMTX / EMQX 地址与约束（被后续文档引用） |
-| 01 | [流媒体服务验收](./01-stream-server-verify.md) | P0 | 不结合硬件，确认推拉流可用 |
-| 02 | [设备视频流上传](./02-camera-stream-upload.md) | P0 | 板端开机推流，外网/内网可拉流验收 |
-| 03 | [MQTT 视频流开关](./03-mqtt-stream-control.md) | P0 | 用 MQTT 控制推流启停，复用现有 MQTT 能力 |
-| 04 | [MQTT 云台控制](./04-mqtt-gimbal-control.md) | P1 | 删除底盘 UART；GPIO 38/48 专用于 PWM 云台 |
-| 05 | [本地人脸检测与上传](./05-face-detect-upload.md) | P1 | 约 1Hz 检测，裁剪人脸图上传 |
-| 06 | [Immich 人脸识别与回传](./06-face-recognize-immich.md) | P1 | 后台调 Immich，结果回设备 + 通知前端 |
-| 07 | [Kiosk 轮播与对话个性化](./07-kiosk-personalization.md) | P2 | 前端轮播人物相册，对话结合个人档案 |
+**V-S04** — [本地人脸数字 ID](./vision/server/S04-local-face-numeric-id.md)（自动建档；不同人不同 ID；**不调 Immich**）
 
-## 端到端关系（概览）
+顺序：Server S01→S05 → Client C01→C03 → Product P01。
 
-```text
-┌─────────────┐  RTMP/RTSP   ┌──────────┐  HLS(live.)  ┌────────┐
-│ diary-brain │ ───────────► │ MediaMTX │ ───────────► │ 观看端 │
-│  相机推流   │              └──────────┘              └────────┘
-└──────┬──────┘
-       │ MQTT(控制/事件)          HTTP(人脸 JPEG)
-       ▼                          ▼
-┌─────────────┐            ┌──────────────┐     ┌────────┐
-│    EMQX     │ ◄─────────►│ DeepDiary 后台│ ──► │ Immich │
-└──────┬──────┘            └──────┬───────┘     └────────┘
-       │                          │ person 事件
-       ▼                          ▼
-┌─────────────┐            ┌──────────────┐
-│ 设备侧回传  │            │ 前端 + Kiosk │
-│ (人物身份)  │            │ 轮播 / 档案  │
-└─────────────┘            └──────────────┘
-```
+## 目录
 
-## 编写约定
+| 路径 | 内容 |
+|------|------|
+| [ROADMAP.md](./ROADMAP.md) | 可追溯总表、依赖、验收指针 |
+| [dog/](./dog/) | 四足运动计划（单文件 DEVELOPMENT_PLAN） |
+| [vision/](./vision/) | HTTP 服务器 / Immich / MediaMTX 客户端 / Kiosk |
+| [vision/infra.md](./vision/infra.md) | MediaMTX、EMQX、Immich 地址（无明文密钥） |
 
-- 单文档聚焦一个可独立验收的交付切片。
-- 共享地址与账号只维护在 `00-shared-infra.md`，其它文档用链接引用，避免多处漂移。
-- 每份文档尽量包含：背景、目标、范围、功能需求、非功能、验收标准、开放问题。
+## 交付序号（摘要）
+
+| ID | 主题 | 状态 |
+|----|------|------|
+| D1～D9, D11～D13 | 运动域 | [dog/DEVELOPMENT_PLAN](./dog/DEVELOPMENT_PLAN.md) |
+| V-S01～S03 | HTTP 狗控 / MJPEG / 人脸框 | 主体 ✅ |
+| **V-S04** | 本地数字 ID | **下一步** |
+| V-S05 | Immich 真名 | 待办 |
+| V-C01～C02 | MediaMTX 验收 + 设备推流（复用 face） | 待办 |
+| V-C03～C04 | MQTT 推流 / 云台 | 更后 |
+| V-P01 | Kiosk | 更后 |
+
+## 约定
+
+- 未写入 ROADMAP / 对应 SWRS 的需求不要扩大改动面。
+- 禁止将 Immich API Key / 密码写入本仓库。

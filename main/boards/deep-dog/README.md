@@ -142,4 +142,4 @@ main/boards/deep-dog/
 
 各子模块的接口约定、数据结构与注意事项见对应子目录 README。
 
-更细的**分阶段任务表**与完成标准见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)。
+更细的**分阶段任务表**与完成标准见 [swrs/dog/DEVELOPMENT_PLAN.md](./swrs/dog/DEVELOPMENT_PLAN.md)；视觉/人脸/推流见 [swrs/ROADMAP.md](./swrs/ROADMAP.md)。

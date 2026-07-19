@@ -51,4 +51,4 @@
 - **屏幕无显示**：若日志里是 **`bread-compact-wifi`** 且 **`SSD1306` / `i2c transaction failed`**，说明当前固件是面包板 OLED 板型而非 **deep-dog**，或 I2C 接线/地址与配置不符。要用 DeepDog 的 SPI 屏与 HTTP 功能，请在 **`menuconfig` / `sdkconfig` 中选 deep-dog 板** 并重新编译烧录，硬件需与板型一致。
 - **与 MCP 拍照、触摸 Explain 共用同一 `EspVideo`**，无板级互斥时可能互抢；高负载下建议文档约定优先级或后续加锁。
 - 参考实现见 `boards/deep-diary/streaming/mjpeg_server`（基于 `esp_camera`）；本实现针对 **EspVideo + V4L2 帧格式**，RGB565 行 stride 在编码前会压成紧密缓冲。
-- 更完整的产品化项（鉴权、限连接数、FPS/画质可配）见 `DEVELOPMENT_PLAN.md` 阶段 10.1 / 10.2。
+- 更完整的产品化项（鉴权、限连接数、FPS/画质可配）与需求切片见 [../swrs/ROADMAP.md](../swrs/ROADMAP.md)（V-S01/S02 等）。

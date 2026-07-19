@@ -249,7 +249,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "lastStatus=j;"
         "st.textContent='模式:'+j.mode+' 拉流:'+j.stream_clients+' JPEG:'+(j.has_jpeg?'有':'无')"
         "+(j.face_ai_compiled?' 人脸模块:有':' 人脸模块:无')"
-        "+' 初始化:'+((j.dog_initialized)?'已完成':'未完成');"
+        "+' 狗初始化:'+((j.dog_initialized)?'已完成':'未完成');"
         "applyDogInitState(j);"
         "if(j.mode==='stream'){wrap.style.display='block';if(!img.src||img.src.indexOf('/stream')<0)img.src='/stream';}"
         "else{wrap.style.display='none';img.removeAttribute('src');if(facePoll){clearInterval(facePoll);facePoll=null;}"

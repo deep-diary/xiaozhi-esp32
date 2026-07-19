@@ -16,11 +16,12 @@
 ## 依赖与配置
 
 - **组件**：`human_face_detect`、`esp-dl`（由 `main/CMakeLists.txt` 在 `BOARD_TYPE=deep-dog` 时加入 `PRIV_REQUIRES`）；模型与 Flash 占用见 `managed_components` 内组件说明。
-- **板级宏**（`boards/deep-dog/config.h`）：
+- **板级宏**（`face_ai/face_ai_config.h`，由 `boards/deep-dog/config.h` include）：
   - `DEEP_DOG_FACE_AI_ENABLE`：总开关（0 为桩，无推理）。
   - `DEEP_DOG_FACE_AI_MIN_INTERVAL_MS`：送帧节流。
-  - **`DEEP_DOG_FACE_DETECT_INPUT_RGB888`**（默认 **1**）：先把紧密 **RGB565 LE** 展开为 **RGB888** 再 `run()`，等价于正点原子例子里 **`infer(..., 3)` 三通道** 思路；绕开 S3 上 RGB565 的 **BIG_ENDIAN** 预处理，常能缓解「脸在中间、框全在边上」。为 1 时请保持 **`RGB565_SWAP=0`**（由 LE 正确拆 R/G/B）。
+  - **`DEEP_DOG_FACE_DETECT_INPUT_RGB888`**（默认 **0**）：与 deep-thumble / esp-who 一致，直接送紧密 **RGB565** 给 `run()`，避免每帧再 malloc ~173KB RGB888（MJPEG 拉流时分配失败会静默变成 `n=0`）。若出现「脸在中间、框贴边」，可试 **`RGB565_SWAP=1`**，或临时改回 `INPUT_RGB888=1`（此时保持 `RGB565_SWAP=0`）。
   - **`DEEP_DOG_FACE_DETECT_RGB565_SWAP`**：仅在 **`INPUT_RGB888=0`** 时使用。
+  - **`DEEP_DOG_FACE_DETECT_MSR_SCORE_THR` / `MNP_SCORE_THR`**（默认 **0.5**，与组件一致）：略高可压假框，但**切勿再提到 0.88 一类过高值**，否则真人/照片脸易漏检（`has_face=false` / `n=0`）。挡镜头主要靠暗场门控 + `MIN_BOX_PX`，而不是靠过高 score。
   - **`DEEP_DOG_FACE_DETECT_SKIP_UNIFORM_DARK`**：见下节「自检 0 框 vs 挡镜头仍有框」。
 
 **与 esp-who / 正点原子例程**：本工程**未**依赖 esp-who 应用框架，只用了 **`espressif/human_face_detect` + `esp-dl`**。手册里的 `HumanFaceDetectMSR01` / `MNP01`、`infer` 属于**旧版 API**；当前组件为 **`HumanFaceDetect` + `run(img_t)`**，功能对应同一套 MSR+MNP 模型。若需完全手写管线，可再往下只调 `dl::Model`，但维护成本更高。
@@ -30,6 +31,8 @@
 
 当前仅在 **HTTP 采集模式为 Streaming** 且用户打开 **网页人脸开关** 时才会 `SubmitFrameIfDue`。语音拍照、Explain、触摸采图走其它路径，不经过本送帧逻辑；若未来统一相机锁，应在「独占相机」期间停止送帧并在本文档更新。
 
+**网页提示**：控制页状态行的「狗初始化」对应电机姿态 `dog_initialized`，**与人脸模块是否就绪无关**；人脸开关打开且帧 `w/h` 非 0 即表示检测链路在跑。
+
 ## 全黑 / 暗场仍多框、框贴边（与 deep-thumble 一致时）
 
 `boards/deep-thumble/docs/face-detection-root-cause.md` 已说明：在 **240×240 全黑** 下若 **RGB565 与 RGB888 都会出现多张脸**，则问题**不在** RGB565 大小端，而在 **MSR/MNP 量化输出、默认 score 阈值 0.5 过低、或与本工程编译优化/组件版本组合** 等「公共路径」；**不是** `human_face_detect` 分区绑错（当前 `sdkconfig` 为 `CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=y`，模型经 CMake `pack_espdl_models` 打进 `human_face_detect` 组件并链接进固件）。
@@ -37,8 +40,9 @@
 本目录对策：
 
 - 启动时 **黑图自检**（`DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_LOG`）：串口见 `dog_face_det: black 240x240 self-test: ...`。
-- 提高 **`DEEP_DOG_FACE_DETECT_MSR_SCORE_THR` / `MNP_SCORE_THR`**（默认 0.88）与略收紧 **NMS**；按需再调高。
+- **`DEEP_DOG_FACE_DETECT_MSR_SCORE_THR` / `MNP_SCORE_THR`**（默认 **0.5**）与略收紧 **NMS**；假框仍多时可略调高（如 0.6～0.7），但需用真人脸回归，避免再次漏检。
 - **`DEEP_DOG_FACE_DETECT_MIN_BOX_PX`**（默认 20）滤掉贴边细条假框。
+- 串口诊断：`dog_face_det: diag … raw=… filtered=…`（约每 40 次推理一次），可区分「模型真 0 框」与「min_box 滤空」。
 - 若仍与官方例程差异大，应用 **同板烧录 esp-who `human_face_recognition`** 做 A/B，或锁定 **esp-dl / human_face_detect** 版本与官方示例一致。
 
 ### 自检 `black … 0 boxes` 但挡住镜头仍有框
