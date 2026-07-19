@@ -1,12 +1,15 @@
 #include "sdkconfig.h"
 
+#include "deep_dog_face_detect.h"
 #include "face_ai_bridge.h"
-#include "face_ai_types.h"
 #include "face_ai_config.h"
+#include "face_ai_types.h"
+#include "face_recognize.h"
 
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <list>
 #include <mutex>
 #include <vector>
 
@@ -18,11 +21,6 @@
 #include <freertos/task.h>
 
 #if DEEP_DOG_FACE_AI_ENABLE && defined(CONFIG_IDF_TARGET_ESP32S3)
-
-extern bool DeepDogFaceDetectInit();
-extern void DeepDogFaceDetectDeinit();
-extern bool DeepDogFaceDetectRun(const uint8_t* rgb565, size_t len, uint16_t w, uint16_t h,
-                                 std::vector<DeepDogFaceBox>* out);
 
 #define TAG "dog_face_ai"
 
@@ -50,17 +48,33 @@ static void FaceAiTask(void* /*arg*/) {
         if (job.data == nullptr || job.len == 0) {
             continue;
         }
-        std::vector<DeepDogFaceBox> boxes;
-        if (s_user_enabled.load(std::memory_order_relaxed)) {
-            (void)DeepDogFaceDetectRun(job.data, job.len, job.w, job.h, &boxes);
-        }
-        heap_caps_free(job.data);
 
+        std::vector<DeepDogFaceBox> boxes;
         DeepDogFaceSnapshot snap{};
         snap.frame_w = job.w;
         snap.frame_h = job.h;
         snap.ts_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
         snap.feature_enabled = s_user_enabled.load(std::memory_order_relaxed);
+
+        if (s_user_enabled.load(std::memory_order_relaxed)) {
+#if DEEP_DOG_FACE_RECOG_ENABLE
+            std::list<dl::detect::result_t> raw;
+            if (DeepDogFaceDetectRun(job.data, job.len, job.w, job.h, &boxes, &raw)) {
+                dl::image::img_t img{};
+                uint8_t* owned = nullptr;
+                if (!boxes.empty() && DeepDogFaceDetectMakeImg(job.data, job.len, job.w, job.h, &img, &owned)) {
+                    DeepDogFaceRecognizeProcess(img, raw, &boxes, &snap);
+                    if (owned) {
+                        heap_caps_free(owned);
+                    }
+                }
+            }
+#else
+            (void)DeepDogFaceDetectRun(job.data, job.len, job.w, job.h, &boxes, nullptr);
+#endif
+        }
+        heap_caps_free(job.data);
+
         snap.count = static_cast<int>(boxes.size());
         if (snap.count > 8) {
             snap.count = 8;
@@ -83,20 +97,33 @@ bool DeepDogFaceAiRuntimeStart() {
         s_runtime_started = false;
         return false;
     }
+#if DEEP_DOG_FACE_RECOG_ENABLE
+    if (!DeepDogFaceRecognizeInit()) {
+        ESP_LOGW(TAG, "face recognize init failed (detect still available)");
+    }
+#endif
     s_queue = xQueueCreate(1, sizeof(FaceFrameJob));
     if (!s_queue) {
+#if DEEP_DOG_FACE_RECOG_ENABLE
+        DeepDogFaceRecognizeDeinit();
+#endif
         DeepDogFaceDetectDeinit();
         s_runtime_started = false;
         return false;
     }
-    if (xTaskCreate(FaceAiTask, "dog_face_ai", 8192, nullptr, 2, &s_task) != pdPASS) {
+    // 识别 MFN ~250ms，加大栈
+    if (xTaskCreate(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task) != pdPASS) {
         vQueueDelete(s_queue);
         s_queue = nullptr;
+#if DEEP_DOG_FACE_RECOG_ENABLE
+        DeepDogFaceRecognizeDeinit();
+#endif
         DeepDogFaceDetectDeinit();
         s_runtime_started = false;
         return false;
     }
-    ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms)", DEEP_DOG_FACE_AI_MIN_INTERVAL_MS);
+    ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms, recog=%d)", DEEP_DOG_FACE_AI_MIN_INTERVAL_MS,
+             DEEP_DOG_FACE_RECOG_ENABLE);
     return true;
 }
 
@@ -118,6 +145,9 @@ void DeepDogFaceAiRuntimeStop() {
         vQueueDelete(s_queue);
         s_queue = nullptr;
     }
+#if DEEP_DOG_FACE_RECOG_ENABLE
+    DeepDogFaceRecognizeDeinit();
+#endif
     DeepDogFaceDetectDeinit();
     s_runtime_started = false;
 }
@@ -128,6 +158,9 @@ void DeepDogFaceAiSetEnabled(bool on) {
         std::lock_guard<std::mutex> lock(s_snap_mu);
         s_snapshot.count = 0;
         s_snapshot.feature_enabled = false;
+        s_snapshot.primary_local_id = 0;
+        s_snapshot.primary_display_name[0] = '\0';
+        s_snapshot.primary_source = DeepDogFaceRecognizeSource::None;
     } else {
         std::lock_guard<std::mutex> lock(s_snap_mu);
         s_snapshot.feature_enabled = true;
@@ -184,10 +217,13 @@ size_t DeepDogFaceAiFormatJson(char* buf, size_t buf_size) {
         snap = s_snapshot;
     }
     const bool has = snap.count > 0;
-    int n = snprintf(buf, buf_size,
-                     "{\"enabled\":true,\"feature_on\":%s,\"w\":%u,\"h\":%u,\"has_face\":%s,\"n\":%d,\"ts\":%u,\"faces\":[",
-                     snap.feature_enabled ? "true" : "false", (unsigned)snap.frame_w, (unsigned)snap.frame_h,
-                     has ? "true" : "false", snap.count, (unsigned)snap.ts_ms);
+    int n = snprintf(
+        buf, buf_size,
+        "{\"enabled\":true,\"feature_on\":%s,\"w\":%u,\"h\":%u,\"has_face\":%s,\"n\":%d,\"ts\":%u,"
+        "\"local_id\":%d,\"display_name\":\"%s\",\"recognize_source\":\"%s\",\"faces\":[",
+        snap.feature_enabled ? "true" : "false", (unsigned)snap.frame_w, (unsigned)snap.frame_h,
+        has ? "true" : "false", snap.count, (unsigned)snap.ts_ms, snap.primary_local_id,
+        snap.primary_display_name, DeepDogFaceRecognizeSourceStr(snap.primary_source));
     if (n < 0 || (size_t)n >= buf_size) {
         return 0;
     }
@@ -203,8 +239,10 @@ size_t DeepDogFaceAiFormatJson(char* buf, size_t buf_size) {
         const float cx = (nx0 + nx1) * 0.5f;
         const float cy = (ny0 + ny1) * 0.5f;
         int w = snprintf(buf + pos, buf_size - pos,
-                         "%s{\"x0\":%.4f,\"y0\":%.4f,\"x1\":%.4f,\"y1\":%.4f,\"cx\":%.4f,\"cy\":%.4f,\"score\":%.4f}",
-                         i ? "," : "", nx0, ny0, nx1, ny1, cx, cy, b.score);
+                         "%s{\"x0\":%.4f,\"y0\":%.4f,\"x1\":%.4f,\"y1\":%.4f,\"cx\":%.4f,\"cy\":%.4f,\"score\":%.4f,"
+                         "\"local_id\":%d,\"display_name\":\"%s\",\"recognize_source\":\"%s\"}",
+                         i ? "," : "", nx0, ny0, nx1, ny1, cx, cy, b.score, b.local_id, b.display_name,
+                         DeepDogFaceRecognizeSourceStr(b.recognize_source));
         if (w < 0 || (size_t)w >= buf_size - pos) {
             break;
         }
@@ -233,7 +271,9 @@ size_t DeepDogFaceAiFormatJson(char* buf, size_t buf_size) {
     if (!buf || buf_size == 0) {
         return 0;
     }
-    const char* s = "{\"enabled\":false,\"feature_on\":false,\"w\":0,\"h\":0,\"has_face\":false,\"n\":0,\"ts\":0,\"faces\":[]}";
+    const char* s =
+        "{\"enabled\":false,\"feature_on\":false,\"w\":0,\"h\":0,\"has_face\":false,\"n\":0,\"ts\":0,"
+        "\"local_id\":0,\"display_name\":\"\",\"recognize_source\":\"none\",\"faces\":[]}";
     size_t i = 0;
     for (; s[i] && i + 1 < buf_size; i++) {
         buf[i] = s[i];

@@ -1110,7 +1110,10 @@ endif()
 if(BOARD_TYPE STREQUAL "deep-dog")
     list(APPEND MAIN_PRIV_REQUIRES_EXTRA
         human_face_detect
+        human_face_recognition
         esp-dl
+        fatfs
+        wear_levelling
     )
 endif()
 

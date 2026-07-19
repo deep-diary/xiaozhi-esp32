@@ -1,8 +1,10 @@
-# ESP-IDF Partition Table (deep-dog: larger OTA for face-detect + v2.3.0)
+# ESP-IDF Partition Table (deep-dog: OTA + face detect/recog + assets)
 # Name,   Type, SubType, Offset,  Size, Flags
 nvs,      data, nvs,     0x9000,    0x4000,
 otadata,  data, ota,     0xd000,    0x2000,
 phy_init, data, phy,     0xf000,    0x1000,
 ota_0,    app,  ota_0,   0x20000,   0x4E0000,
 ota_1,    app,  ota_1,   ,          0x4E0000,
-assets,   data, spiffs,  0x9E0000,  0x620000
+human_face_feat, data, spiffs, ,    0x200000,
+facedb,   data, fat,     ,          0x80000,
+assets,   data, spiffs,  ,          0x3A0000

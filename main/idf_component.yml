@@ -135,6 +135,12 @@ dependencies:
     rules:
     - if: target in [esp32s3]
 
+  # 人脸特征 / 本地识别（S04）：vendored 自 esp-dl（Registry 0.3.2 仍锁 detect 0.4）
+  espressif/human_face_recognition:
+    path: ../components/human_face_recognition
+    rules:
+    - if: target in [esp32s3]
+
   espressif/touch_slider_sensor:
     version: ^0.2.0~1
     rules:

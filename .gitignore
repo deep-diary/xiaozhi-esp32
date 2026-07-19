@@ -1,5 +1,8 @@
 tmp/
-components/
+# 忽略本地组件目录，但跟踪 vendored 的 human_face_recognition（S04）
+components/*
+!components/human_face_recognition/
+!components/human_face_recognition/**
 managed_components/
 build/
 dist/

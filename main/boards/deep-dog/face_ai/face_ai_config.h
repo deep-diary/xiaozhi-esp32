@@ -72,4 +72,36 @@
 #define DEEP_DOG_FACE_DETECT_UD_MAX_RANGE_G 22
 #endif
 
+/** 1=启用本地数字 ID 识别（S04）；依赖 human_face_recognition + facedb 分区 */
+#ifndef DEEP_DOG_FACE_RECOG_ENABLE
+#define DEEP_DOG_FACE_RECOG_ENABLE 1
+#endif
+
+/** 本地库最大人数 */
+#ifndef DEEP_DOG_FACE_RECOG_MAX
+#define DEEP_DOG_FACE_RECOG_MAX 16
+#endif
+
+/** 会话去重窗口（ms）：窗口内相似则复用同一 local_id */
+#ifndef DEEP_DOG_FACE_RECOG_SESSION_MS
+#define DEEP_DOG_FACE_RECOG_SESSION_MS 5000
+#endif
+
+/** 1:N / 会话相似度阈值（与 DataBase query 一致） */
+#ifndef DEEP_DOG_FACE_RECOG_SIM_THR
+#define DEEP_DOG_FACE_RECOG_SIM_THR 0.5f
+#endif
+
+#ifndef DEEP_DOG_FACE_RECOG_DB_MOUNT
+#define DEEP_DOG_FACE_RECOG_DB_MOUNT "/facedb"
+#endif
+
+#ifndef DEEP_DOG_FACE_RECOG_DB_PATH
+#define DEEP_DOG_FACE_RECOG_DB_PATH "/facedb/db"
+#endif
+
+#ifndef DEEP_DOG_FACE_RECOG_NVS_NS
+#define DEEP_DOG_FACE_RECOG_NVS_NS "fdog_fr"
+#endif
+
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

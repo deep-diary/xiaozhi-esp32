@@ -3,6 +3,7 @@
  */
 #include "sdkconfig.h"
 
+#include "deep_dog_face_detect.h"
 #include "face_ai_config.h"
 #include "face_ai_types.h"
 
@@ -15,9 +16,9 @@
 
 #if DEEP_DOG_FACE_AI_ENABLE && defined(CONFIG_IDF_TARGET_ESP32S3)
 
-#include "human_face_detect.hpp"
 #include "dl_image_define.hpp"
 #include "dl_tensor_base.hpp"
+#include "human_face_detect.hpp"
 
 #define TAG "dog_face_det"
 
@@ -30,13 +31,10 @@
 #endif
 
 static HumanFaceDetect* s_detector = nullptr;
-/** 轻量诊断：每 N 次推理打一次 raw vs filtered，避免刷屏 */
 static uint32_t s_run_diag_n = 0;
 
-bool DeepDogFaceDetectRun(const uint8_t* rgb565, size_t len, uint16_t w, uint16_t h, std::vector<DeepDogFaceBox>* out);
-
 static void LogRawVsFiltered(size_t raw_n, size_t filtered_n, uint16_t w, uint16_t h) {
-    constexpr uint32_t kEvery = 40;  // ~10s @ 250ms 节流
+    constexpr uint32_t kEvery = 40;
     if ((++s_run_diag_n % kEvery) != 0) {
         return;
     }
@@ -52,10 +50,6 @@ static void LogRawVsFiltered(size_t raw_n, size_t filtered_n, uint16_t w, uint16
 }
 
 #if DEEP_DOG_FACE_DETECT_SKIP_UNIFORM_DARK
-/**
- * 挡镜头/暗箱：像素常为非零噪声但整幅仍「很暗、对比度低」，与 calloc 全黑自检不同。
- * 若采样全为 0 返回 false，让上层照常跑模型（自检仍验证链路）。
- */
 static bool FrameIsUniformDarkNoFaceRgb565(const uint8_t* buf, uint16_t w, uint16_t h) {
     const int step = DEEP_DOG_FACE_DETECT_UD_SAMPLE_STEP;
     if (step <= 0 || w < 8 || h < 8 || buf == nullptr) {
@@ -92,7 +86,6 @@ static bool FrameIsUniformDarkNoFaceRgb565(const uint8_t* buf, uint16_t w, uint1
 }
 #endif
 
-/** 摄像头紧密 RGB565 小端 → 8bit RGB，供 DL_IMAGE_PIX_TYPE_RGB888（与旧 who 例「3 通道」一致） */
 #if DEEP_DOG_FACE_DETECT_INPUT_RGB888
 static void Rgb565PackedLeToRgb888(const uint8_t* src565, uint8_t* dst888, uint16_t w, uint16_t h) {
     const size_t n = (size_t)w * (size_t)h;
@@ -156,12 +149,74 @@ static void rescale_boxes(const std::list<dl::detect::result_t>& raw, uint16_t f
         b.x1 = x1;
         b.y1 = y1;
         b.score = r.score;
+        b.kp_n = 0;
+        if (r.keypoint.size() >= 10) {
+            for (int i = 0; i < 10; i++) {
+                const float v = static_cast<float>(r.keypoint[static_cast<size_t>(i)]);
+                if ((i % 2) == 0) {
+                    b.kp[i] = static_cast<int>(v * sx + 0.5f);
+                } else {
+                    b.kp[i] = static_cast<int>(v * sy + 0.5f);
+                }
+            }
+            b.kp_n = 10;
+        }
         out->push_back(b);
     }
 #undef BOX_X0
 #undef BOX_Y0
 #undef BOX_X1
 #undef BOX_Y1
+}
+
+bool DeepDogFaceDetectMakeImg(const uint8_t* rgb565, size_t len, uint16_t w, uint16_t h, dl::image::img_t* img,
+                              uint8_t** owned_buf) {
+    if (!rgb565 || !img || !owned_buf || w == 0 || h == 0) {
+        return false;
+    }
+    *owned_buf = nullptr;
+    const size_t need = (size_t)w * (size_t)h * 2u;
+    if (len < need) {
+        return false;
+    }
+#if DEEP_DOG_FACE_DETECT_INPUT_RGB888
+    const size_t rgb_len = (size_t)w * (size_t)h * 3u;
+    uint8_t* rgb888 = (uint8_t*)heap_caps_malloc(rgb_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!rgb888) {
+        rgb888 = (uint8_t*)heap_caps_malloc(rgb_len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (!rgb888) {
+        return false;
+    }
+    Rgb565PackedLeToRgb888(rgb565, rgb888, w, h);
+    *img = {.data = rgb888, .width = w, .height = h, .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB888};
+    *owned_buf = rgb888;
+    return true;
+#else
+#if DEEP_DOG_FACE_DETECT_RGB565_SWAP
+    uint8_t* swap_buf = (uint8_t*)heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!swap_buf) {
+        swap_buf = (uint8_t*)heap_caps_malloc(need, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (!swap_buf) {
+        return false;
+    }
+    memcpy(swap_buf, rgb565, need);
+    auto* p = reinterpret_cast<uint16_t*>(swap_buf);
+    for (size_t i = 0; i < (size_t)w * h; i++) {
+        p[i] = static_cast<uint16_t>((p[i] >> 8) | (p[i] << 8));
+    }
+    *img = {.data = swap_buf, .width = w, .height = h, .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565LE};
+    *owned_buf = swap_buf;
+    return true;
+#else
+    *img = {.data = const_cast<uint8_t*>(rgb565),
+            .width = w,
+            .height = h,
+            .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565LE};
+    return true;
+#endif
+#endif
 }
 
 bool DeepDogFaceDetectInit() {
@@ -174,7 +229,6 @@ bool DeepDogFaceDetectInit() {
         ESP_LOGE(TAG, "HumanFaceDetect alloc failed");
         return false;
     }
-    /** 组件默认 MSR/MNP score=0.5，在部分集成下量化输出易大量过阈；与 thumble 文档中「全黑仍多框」同属后验过滤问题。 */
     s_detector->set_score_thr(DEEP_DOG_FACE_DETECT_MSR_SCORE_THR, 0);
     s_detector->set_score_thr(DEEP_DOG_FACE_DETECT_MNP_SCORE_THR, 1);
     s_detector->set_nms_thr(DEEP_DOG_FACE_DETECT_MSR_NMS_THR, 0);
@@ -195,12 +249,9 @@ bool DeepDogFaceDetectInit() {
         }
         if (black) {
             std::vector<DeepDogFaceBox> self_out;
-            (void)DeepDogFaceDetectRun(black, tb, tw, th, &self_out);
+            (void)DeepDogFaceDetectRun(black, tb, tw, th, &self_out, nullptr);
             if (!self_out.empty()) {
-                ESP_LOGW(TAG,
-                         "black 240x240 self-test: still %zu box(es) after thr/NMS/min_box — 与 thumble "
-                         "face-detection-root-cause.md「全黑仍多框」一致，非分区错绑；可再调高 *_SCORE_THR 或对照 esp-who 同板示例",
-                         self_out.size());
+                ESP_LOGW(TAG, "black 240x240 self-test: still %zu box(es)", self_out.size());
             } else {
                 ESP_LOGI(TAG, "black 240x240 self-test: 0 boxes (threshold pipeline ok for black)");
             }
@@ -216,83 +267,50 @@ void DeepDogFaceDetectDeinit() {
     s_detector = nullptr;
 }
 
-bool DeepDogFaceDetectRun(const uint8_t* rgb565, size_t len, uint16_t w, uint16_t h, std::vector<DeepDogFaceBox>* out) {
+bool DeepDogFaceDetectRun(const uint8_t* rgb565, size_t len, uint16_t w, uint16_t h, std::vector<DeepDogFaceBox>* out,
+                          std::list<dl::detect::result_t>* raw_out) {
     if (!out || !rgb565 || w == 0 || h == 0) {
-        ESP_LOGW(TAG, "run rejected: bad args (out=%p rgb565=%p w=%u h=%u)", (void*)out, (const void*)rgb565,
-                 (unsigned)w, (unsigned)h);
+        ESP_LOGW(TAG, "run rejected: bad args");
         return false;
     }
     const size_t need = (size_t)w * (size_t)h * 2u;
     if (len < need) {
-        ESP_LOGW(TAG, "run rejected: len=%zu need=%zu (%ux%u)", len, need, (unsigned)w, (unsigned)h);
+        ESP_LOGW(TAG, "run rejected: len=%zu need=%zu", len, need);
         return false;
     }
     if (!DeepDogFaceDetectInit()) {
-        ESP_LOGW(TAG, "run rejected: HumanFaceDetect init failed");
         return false;
     }
 
 #if DEEP_DOG_FACE_DETECT_SKIP_UNIFORM_DARK
     if (FrameIsUniformDarkNoFaceRgb565(rgb565, w, h)) {
         out->clear();
+        if (raw_out) {
+            raw_out->clear();
+        }
         return true;
     }
 #endif
 
-#if DEEP_DOG_FACE_DETECT_INPUT_RGB888
-    const size_t rgb_len = (size_t)w * (size_t)h * 3u;
-    uint8_t* rgb888 = (uint8_t*)heap_caps_malloc(rgb_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (rgb888 == nullptr) {
-        rgb888 = (uint8_t*)heap_caps_malloc(rgb_len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    if (rgb888 == nullptr) {
-        ESP_LOGW(TAG, "RGB888 alloc failed (%zu bytes) — will report n=0 until memory frees", rgb_len);
+    dl::image::img_t img{};
+    uint8_t* owned = nullptr;
+    if (!DeepDogFaceDetectMakeImg(rgb565, len, w, h, &img, &owned)) {
         out->clear();
         return false;
     }
-    Rgb565PackedLeToRgb888(rgb565, rgb888, w, h);
-    dl::image::img_t img = {.data = rgb888, .width = w, .height = h, .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB888};
     const auto& raw = s_detector->run(img);
+    if (raw_out) {
+        *raw_out = raw;
+    }
     rescale_boxes(raw, w, h, img.width, img.height, out);
     LogRawVsFiltered(raw.size(), out->size(), w, h);
-    heap_caps_free(rgb888);
-#else
-    const void* detect_src = rgb565;
-    uint8_t* swap_buf = nullptr;
-#if DEEP_DOG_FACE_DETECT_RGB565_SWAP
-    swap_buf = (uint8_t*)heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!swap_buf) {
-        swap_buf = (uint8_t*)heap_caps_malloc(need, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (owned) {
+        heap_caps_free(owned);
     }
-    if (!swap_buf) {
-        ESP_LOGW(TAG, "RGB565 swap alloc failed (%zu bytes)", need);
-        out->clear();
-        return false;
-    }
-    memcpy(swap_buf, rgb565, need);
-    auto* p = reinterpret_cast<uint16_t*>(swap_buf);
-    for (size_t i = 0; i < (size_t)w * h; i++) {
-        p[i] = static_cast<uint16_t>((p[i] >> 8) | (p[i] << 8));
-    }
-    detect_src = swap_buf;
-#endif
-
-    dl::image::img_t img = {.data = const_cast<void*>(detect_src),
-                            .width = w,
-                            .height = h,
-                            .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565LE};
-    const auto& raw = s_detector->run(img);
-    rescale_boxes(raw, w, h, img.width, img.height, out);
-    LogRawVsFiltered(raw.size(), out->size(), w, h);
-
-    if (swap_buf) {
-        heap_caps_free(swap_buf);
-    }
-#endif
     return true;
 }
 
-#else  // !ENABLE || !S3
+#else
 
 bool DeepDogFaceDetectInit() {
     return false;

@@ -7,7 +7,7 @@
 | 依赖 | [S03](./S03-http-face-overlay.md) |
 | 下一切片 | [S05 Immich 真名](./S05-immich-real-name.md) |
 | 代码落点 | `face_ai/face_recognize.*` + NVS；不在 httpd 回调推理 |
-| 基线状态 | **未实现（当前下一步）** |
+| 基线状态 | **已落地（检测+数字 ID；待你方用多人/重启再验收）** |
 
 ## 1. 背景
 
