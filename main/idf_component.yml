@@ -123,15 +123,15 @@ dependencies:
     rules:
     - if: target in [esp32s3, esp32c5]
 
-  # ESP-DL: 用于本地人脸检测/识别（0.3.0 需 esp-dl 3.2.x）
+  # ESP-DL: 与 esp-sr ~2.4.6（需 esp-dsp 1.8）对齐，需 esp-dl 3.3.x
   espressif/esp-dl:
-    version: "~3.2.0"
+    version: "~3.3.0"
     rules:
     - if: target in [esp32s3]
 
-  # 人脸检测模型与 API（与 esp-who 对齐用 0.3.0）
+  # 人脸检测：0.5.x 依赖 esp-dl ~3.3.0（0.3/0.4 仍锁 ~3.2，会与 esp-sr 2.4.6 冲突）
   espressif/human_face_detect:
-    version: "~0.3.0"
+    version: "~0.5.0"
     rules:
     - if: target in [esp32s3]
 
