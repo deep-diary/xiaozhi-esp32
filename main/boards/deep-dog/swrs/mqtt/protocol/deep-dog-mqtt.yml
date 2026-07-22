@@ -1,0 +1,527 @@
+# deep-dog board MQTT protocol — field source of truth
+# Docs: ../M01-board-mqtt-protocol.md  |  Broker: ../../vision/infra.md
+
+protocol:
+  id: deep-dog-mqtt
+  version: "0.1.1"
+  product: deep-dog
+  description: >
+    Modular full-feature board MQTT contract. Topics are split by module;
+    trim via device/info.capabilities (e.g. disable dog for non-quadruped builds).
+  topic_prefix: "deepdiary/deep-dog/{device_id}"
+  payload: json
+  conventions:
+    cmd_qos: 1
+    status_qos: 0
+    timestamp_field: ts
+    timestamp_unit: unix_seconds
+    sparse_cmd: true  # only include keys to change
+
+broker:
+  device_preferred: "mqtt://192.168.31.25:1883"
+  web_ws: "wss://mqtt-ws.deep-diary.com/mqtt"
+  note: "Addresses owned by vision/infra.md; credentials in NVS / secret store only."
+
+modules:
+  device:
+    status: defined
+    required: true
+  dog:
+    status: defined
+    required: false
+    trim_note: "Disable for non-quadruped products"
+  stream:
+    status: defined
+    required: false
+    impl: V-C03
+  face:
+    status: defined
+    required: false
+    impl: V-C03
+  imu:
+    status: defined
+    required: false
+    chip: BMI270
+    impl: D9
+    ref: main/boards/deep-thumble/sensor/
+  led:
+    status: defined
+    required: false
+    ref: main/boards/deep-thumble/led/
+  servo:
+    status: defined
+    required: false
+    ref: main/boards/deep-diary/servo/
+  gimbal:
+    status: defined
+    required: false
+    depends: [servo]
+    impl: V-C04
+    ref: main/boards/deep-diary/gimbal/
+  handle:
+    status: defined
+    required: false
+    note: "Skeleton; axis map may patch in 0.1.x after hardware pick"
+    ref: main/boards/deep-diary/handle/
+  touch:
+    status: defined
+    required: false
+    note: "Driver exists; MQTT publish pending client"
+    ref: main/boards/deep-dog/touch_btn/
+  can:
+    status: defined
+    required: false
+    note: >
+      TWAI tunnel to MQTT for web frame table. Pins GPIO38/48 from esp-sparkbot UART
+      reused as CAN_TX/RX on deep-dog. Align web UI with deep-trace 80-can-web-tunnel.
+    ref: main/boards/deep-dog/can/
+    pins:
+      tx_gpio: 38
+      rx_gpio: 48
+      sparkbot_was: "UART_ECHO_TXD/RXD"
+  person:
+    status: reserved
+    required: false
+    impl: V-P01
+  track:
+    status: reserved
+    required: false
+    depends_optional: [face, gimbal, dog]
+
+topics:
+  # ---- device ----
+  device/info:
+    module: device
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect
+    payload:
+      device_id: { type: string }
+      firmware: { type: string }
+      mac: { type: string, optional: true }
+      ip: { type: string, optional: true }
+      http_port: { type: int, optional: true }
+      capabilities:
+        type: object
+        fields:
+          dog: { type: bool }
+          stream: { type: bool }
+          face: { type: bool }
+          imu: { type: bool }
+          led: { type: bool }
+          servo: { type: bool }
+          gimbal: { type: bool }
+          handle: { type: bool }
+          touch: { type: bool }
+          can: { type: bool }
+      ts: { type: int }
+
+  device/status:
+    module: device
+    dir: uplink
+    qos: 0
+    retain: false
+    when: heartbeat
+    publish_hz: 0.2
+    payload:
+      online: { type: bool }
+      uptime_s: { type: int, optional: true }
+      free_heap: { type: int, optional: true }
+      rssi: { type: int, optional: true }
+      ts: { type: int }
+
+  # ---- dog ----
+  dog/cmd:
+    module: dog
+    dir: downlink
+    qos: 1
+    retain: false
+    http: "POST /api/cmd?cmd="
+    payload:
+      cmd:
+        type: enum
+        values: [init, forward, back, stand, liedown, dance, stop_walk, disable]
+      ts: { type: int }
+
+  dog/status:
+    module: dog
+    dir: uplink
+    qos: 0
+    retain: true
+    http: "GET /api/status + /api/dog_status summary"
+    payload:
+      dog_initialized: { type: bool }
+      has_fault: { type: bool, optional: true }
+      ts: { type: int }
+
+  # ---- stream ----
+  stream/cmd:
+    module: stream
+    dir: downlink
+    qos: 1
+    retain: false
+    http: "POST /api/vision_publish"
+    payload:
+      action: { type: enum, values: [start, stop] }
+      mode:
+        type: enum
+        values: [off, stream, rtsp_push]
+        optional: true
+        note: "default start->rtsp_push, stop->off"
+      ts: { type: int }
+
+  stream/status:
+    module: stream
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_change
+    http: "GET /api/status push_status/push_url/mode"
+    payload:
+      state: { type: enum, values: [idle, starting, streaming, error] }
+      mode: { type: enum, values: [off, stream, rtsp_push] }
+      url: { type: string }
+      error: { type: string, optional: true }
+      ts: { type: int }
+
+  # ---- face ----
+  face/cmd:
+    module: face
+    dir: downlink
+    qos: 1
+    retain: false
+    http: "POST /api/face_enable"
+    payload:
+      enabled: { type: bool }
+      ts: { type: int }
+
+  face/status:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: false
+    when: on_change_or_poll
+    http: "GET /api/face"
+    payload:
+      enabled: { type: bool }
+      has_person: { type: bool, alias: has_face }
+      n: { type: int }
+      w: { type: int }
+      h: { type: int }
+      primary:
+        type: object
+        optional: true
+        fields:
+          cx: { type: number }
+          cy: { type: number }
+          score: { type: number, optional: true }
+      faces:
+        type: array
+        item:
+          x0: { type: number }
+          y0: { type: number }
+          x1: { type: number }
+          y1: { type: number }
+          cx: { type: number }
+          cy: { type: number }
+          score: { type: number, optional: true }
+          local_id: { type: int, optional: true }
+          display_name: { type: string, optional: true }
+      ts: { type: int }
+
+  # ---- imu ----
+  imu/status:
+    module: imu
+    dir: uplink
+    qos: 0
+    retain: false
+    chip: BMI270
+    publish_hz: 10
+    units:
+      accel: m_s2
+      gyro: dps
+      angle: deg
+    payload:
+      ok: { type: bool }
+      accel_x: { type: float }
+      accel_y: { type: float }
+      accel_z: { type: float }
+      accel_g: { type: float, note: "sqrt(x^2+y^2+z^2)" }
+      gyro_x: { type: float }
+      gyro_y: { type: float }
+      gyro_z: { type: float }
+      pitch: { type: float, note: "estimated from accel" }
+      roll: { type: float, note: "estimated from accel" }
+      ts: { type: int }
+
+  # ---- led ----
+  led/cmd:
+    module: led
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    payload:
+      mode: { type: enum, values: [0, 1, 2, 3, 4, 5], note: "off/static/blink/breathe/scroll/system" }
+      brightness: { type: int, range: [0, 255], optional: true }
+      low_brightness: { type: int, range: [0, 255], optional: true }
+      r: { type: int, range: [0, 255], optional: true }
+      g: { type: int, range: [0, 255], optional: true }
+      b: { type: int, range: [0, 255], optional: true }
+      low_r: { type: int, range: [0, 255], optional: true }
+      low_g: { type: int, range: [0, 255], optional: true }
+      low_b: { type: int, range: [0, 255], optional: true }
+      interval_ms: { type: int, optional: true }
+      scroll_length: { type: int, optional: true }
+      ts: { type: int }
+
+  led/status:
+    module: led
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      mode: { type: int }
+      brightness: { type: int }
+      low_brightness: { type: int, optional: true }
+      r: { type: int }
+      g: { type: int }
+      b: { type: int }
+      interval_ms: { type: int, optional: true }
+      scroll_length: { type: int, optional: true }
+      led_count: { type: int, optional: true }
+      ok: { type: bool }
+      ts: { type: int }
+
+  # ---- servo ----
+  servo/cmd:
+    module: servo
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "Low-level; prefer gimbal/* for pan-tilt product path"
+    payload:
+      index: { type: int }
+      angle: { type: int, optional: true }
+      attach: { type: bool, optional: true }
+      type: { type: enum, values: [90, 180, 270, 360], optional: true }
+      ts: { type: int }
+
+  servo/status:
+    module: servo
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      servos:
+        type: array
+        item:
+          index: { type: int }
+          angle: { type: int }
+          attached: { type: bool }
+          type: { type: int, optional: true }
+          min: { type: int, optional: true }
+          max: { type: int, optional: true }
+      ts: { type: int }
+
+  # ---- gimbal ----
+  gimbal/cmd:
+    module: gimbal
+    dir: downlink
+    qos: 1
+    retain: false
+    payload:
+      mode: { type: enum, values: [absolute, relative] }
+      pan: { type: number }
+      tilt: { type: number }
+      speed: { type: number, optional: true, note: "0 = ASAP" }
+      ts: { type: int }
+
+  gimbal/status:
+    module: gimbal
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      pan: { type: number }
+      tilt: { type: number }
+      ready: { type: bool }
+      lim_pan: { type: array, item: number, optional: true }
+      lim_tilt: { type: array, item: number, optional: true }
+      ts: { type: int }
+
+  # ---- handle ----
+  handle/cmd:
+    module: handle
+    dir: downlink
+    qos: 1
+    retain: false
+    payload:
+      action: { type: enum, values: [enable, disable, pair] }
+      ts: { type: int }
+
+  handle/status:
+    module: handle
+    dir: uplink
+    qos: 0
+    retain: false
+    when: on_change_or_poll
+    note: "Reports actual control request values for web/actuators"
+    payload:
+      connected: { type: bool }
+      source: { type: enum, values: [bt, usb, wifi], optional: true }
+      axes:
+        type: object
+        fields:
+          lx: { type: float, range: [-1, 1] }
+          ly: { type: float, range: [-1, 1] }
+          rx: { type: float, range: [-1, 1] }
+          ry: { type: float, range: [-1, 1] }
+      buttons:
+        type: object
+        fields:
+          a: { type: bool }
+          b: { type: bool }
+          x: { type: bool }
+          y: { type: bool }
+          l1: { type: bool }
+          r1: { type: bool }
+          l2: { type: float, range: [0, 1] }
+          r2: { type: float, range: [0, 1] }
+          start: { type: bool }
+          select: { type: bool }
+      raw: { type: object, optional: true }
+      ts: { type: int }
+
+  # ---- touch ----
+  touch/status:
+    module: touch
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_button_event
+    note: "Full 3-button snapshot; no touch/cmd in v0.1"
+    payload:
+      ok: { type: bool }
+      buttons:
+        type: array
+        length: 3
+        item:
+          id: { type: int, values: [1, 2, 3] }
+          pressed: { type: bool }
+          long_press: { type: bool }
+          last_event: { type: enum, values: [press, release, long_press] }
+      debug:
+        type: array
+        optional: true
+        item:
+          id: { type: int }
+          value: { type: int }
+          baseline: { type: int }
+          abs_diff: { type: int }
+      ts: { type: int }
+
+  # ---- can (TWAI MQTT tunnel for web frame table) ----
+  can/cmd:
+    module: can
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    note: "Enable tunnel + rate limits; allow_tx default false"
+    payload:
+      tunnel: { type: bool, optional: true }
+      mirror_tx: { type: bool, optional: true }
+      allow_tx: { type: bool, optional: true, default: false }
+      max_hz: { type: int, optional: true, default: 50 }
+      batch_max: { type: int, optional: true, default: 32 }
+      id_filter:
+        type: array
+        optional: true
+        item: { type: [int, string], note: "decimal or 0x hex string" }
+      ext_only: { type: bool, optional: true }
+      ts: { type: int }
+
+  can/status:
+    module: can
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      ok: { type: bool }
+      tunnel: { type: bool }
+      allow_tx: { type: bool }
+      bitrate_kbps: { type: int }
+      tx_gpio: { type: int }
+      rx_gpio: { type: int }
+      bus_state: { type: int, optional: true }
+      rx_err: { type: int, optional: true }
+      tx_err: { type: int, optional: true }
+      bus_err: { type: int, optional: true }
+      dropped: { type: int, optional: true }
+      ts: { type: int }
+
+  can/frames:
+    module: can
+    dir: uplink
+    qos: 0
+    retain: false
+    when: tunnel_batch
+    note: "Packed frames for web CAN table; throttle via max_hz/batch_max"
+    web_ref: "deep-trace docs/requirements/features/iot/80-can-web-tunnel.md"
+    payload:
+      frames:
+        type: array
+        item:
+          dir: { type: enum, values: [rx, tx] }
+          id: { type: int }
+          id_hex: { type: string }
+          ext: { type: bool }
+          rtr: { type: bool }
+          dlc: { type: int, range: [0, 8] }
+          data_hex: { type: string, note: "even-length hex, 0..16 chars" }
+          ts_ms: { type: int, optional: true }
+      dropped: { type: int, optional: true }
+      ts: { type: int }
+
+  can/tx:
+    module: can
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "Inject frames only if can/status.allow_tx==true"
+    payload:
+      frames:
+        type: array
+        item:
+          id: { type: int, optional: true }
+          id_hex: { type: string, optional: true }
+          ext: { type: bool }
+          rtr: { type: bool, optional: true }
+          dlc: { type: int, range: [0, 8] }
+          data_hex: { type: string }
+      ts: { type: int }
+
+  # ---- reserved ----
+  person/active:
+    module: person
+    dir: uplink
+    qos: 0
+    retain: true
+    status: reserved
+    payload:
+      local_id: { type: int, optional: true }
+      display_name: { type: string, optional: true }
+      ts: { type: int }
+
+  track/cmd:
+    module: track
+    dir: downlink
+    qos: 1
+    retain: false
+    status: reserved
+    note: "Face tracking control; consume face/status primary cx/cy"
+    payload:
+      action: { type: enum, values: [enable, disable], optional: true }
+      ts: { type: int }

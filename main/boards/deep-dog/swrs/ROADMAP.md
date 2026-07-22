@@ -1,12 +1,14 @@
 # deep-dog 可追溯路线图
 
-> 权威交付顺序。需求正文在 `dog/`、`vision/`；本文件只维护**序号、依赖、状态、验收指针**。
+> 权威交付顺序。需求正文在 `dog/`、`vision/`、`mqtt/`；本文件只维护**序号、依赖、状态、验收指针**。  
+> 板型定位：**可裁剪全功能模块板**（狗控可选，见 [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md)）。
 
 ## 交付顺序（拍板）
 
 1. **设备 = HTTP 服务器**：遥控 → MJPEG → 人脸框 → **本地数字 ID** → Immich 真名  
 2. **设备 = 流媒体客户端**：MediaMTX 推流，**复用**同一套 `face_ai`  
-3. 产品化：Kiosk / 对话个性化  
+3. **板级 MQTT 契约（M01）** → 客户端实现（C03 起按模块落地）  
+4. 产品化：Kiosk / 对话个性化  
 
 不并行把 Immich 与推流和本地 ID 绑死；视觉轨当前切片为 **V-C02**（设备推 MediaMTX，人脸永驻）。
 
@@ -18,7 +20,7 @@
 | D6 | 力矩保护 | 同上 §阶段六 | D1～D5 | 待办 |
 | D7 | 大步插值/运控 | 同上 §阶段七 | D3 | 部分进行中 |
 | D8 | 晃身/横移 | 同上 §阶段八 | D5 | ✅ |
-| D9 | IMU | 同上 §阶段九 | — | 待办 |
+| D9 | IMU（BMI270） | 同上 §阶段九；MQTT `imu/status` | — | 待办（型号已拍板） |
 | D11～D13 | RK3588 / ROS | 同上 | — | 远期 |
 | **V-S01** | HTTP 狗控 | [vision/server/S01](./vision/server/S01-http-dog-motion.md) | DogControl | 主体 ✅ |
 | **V-S02** | HTTP MJPEG | [vision/server/S02](./vision/server/S02-http-mjpeg.md) | S01 | ✅ |
@@ -28,8 +30,9 @@
 | **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | ✅（真名待 Immich 队列空闲复验） |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 基建可达；完整推拉待稳定 LAN 复验 |
 | V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | **固件已实现**（人脸永驻 + MJPEG/RTSP 互斥）；实机长稳待勾 |
-| V-C03 | MQTT 推流开关 | [vision/client/C03](./vision/client/C03-mqtt-stream-control.md) | C02 | 待办 |
-| V-C04 | MQTT 云台 | [vision/client/C04](./vision/client/C04-mqtt-gimbal.md) | C03 | 更后 |
+| **M01** | 板级 MQTT 契约 | [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md) / [YAML](./mqtt/protocol/deep-dog-mqtt.yml) | infra | **文档 ✅** |
+| V-C03 | MQTT 推流开关 | [vision/client/C03](./vision/client/C03-mqtt-stream-control.md) | C02、**M01** | 待办（协议见 M01/YAML） |
+| V-C04 | MQTT 云台 | [vision/client/C04](./vision/client/C04-mqtt-gimbal.md) | C03、**M01** | 更后（协议已细化） |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |
 
 ## 依赖关系
@@ -39,7 +42,9 @@ S01 → S02 → S03 → S04 → S05 → S06 → C02 → C03 → C04
                     │                      ↑
                     └── face_ai ───────────┘
 C01 ─────────────────────────────────────→ C02
+M01 ─────────────────────────────────────→ C03 / C04 / 其它模块 MQTT
 S05 ─────────────────────────────────────→ P01
+D9 (BMI270) ─────────────────────────────→ imu/status (M01)
 ```
 
 ## 视觉轨验收速查
@@ -54,6 +59,7 @@ S05 ─────────────────────────�
 | S06 | 预览/检测 **640×480**；Immich 裁剪短边 ≥320；拉流仍可遥控 |
 | C02 | 设备推到 MediaMTX，外网/内网可拉；人脸逻辑复用 |
 
-## 基础设施
+## 基础设施与 MQTT
 
-见 [vision/infra.md](./vision/infra.md)（MediaMTX / EMQX / Immich，无明文密钥）。
+- 地址：[vision/infra.md](./vision/infra.md)（MediaMTX / EMQX / Immich，无明文密钥）。
+- 整板 Topic / 字段：[mqtt/](./mqtt/)（可裁剪模块：dog/stream/face/imu/led/servo/gimbal/handle/touch/can…）。

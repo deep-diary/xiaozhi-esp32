@@ -32,13 +32,24 @@
 
 密码见密钥库；固件用 NVS。ESP 勿裸连公网 `mqtt-tcp.`（须 Access TCP）。
 
-Topic 前缀建议：`deepdiary/deep-dog/<device_id>/...`
+Topic 前缀：`deepdiary/deep-dog/<device_id>/...`  
+**字段真源**：[mqtt/protocol/deep-dog-mqtt.yml](../mqtt/protocol/deep-dog-mqtt.yml)（需求 [M01](../mqtt/M01-board-mqtt-protocol.md)）。
 
 | Topic | 方向 | 关联 |
 |-------|------|------|
+| `device/info` / `device/status` | ↑ | [M01](../mqtt/M01-board-mqtt-protocol.md) |
 | `stream/cmd` / `stream/status` | 双向 | [C03](./client/C03-mqtt-stream-control.md) |
+| `face/cmd` / `face/status` | 双向 | [C03](./client/C03-mqtt-stream-control.md) / M01 |
+| `dog/cmd` / `dog/status` | 双向 | M01（映射 HTTP `/api/cmd`） |
+| `imu/status` | ↑ | M01 / D9 BMI270 |
+| `led/cmd` / `led/status` | 双向 | M01 |
+| `servo/cmd` / `servo/status` | 双向 | M01 |
 | `gimbal/cmd` / `gimbal/status` | 双向 | [C04](./client/C04-mqtt-gimbal.md) |
-| `person/active` | 设备→前端 | [P01](./product/P01-kiosk-personalization.md)（可选） |
+| `handle/cmd` / `handle/status` | 双向 | M01 |
+| `touch/status` | ↑ | M01 / `touch_btn` |
+| `can/cmd` / `can/status` / `can/frames` / `can/tx` | 双向 | M01 CAN 透传（GPIO38/48 TWAI；网页 deep-trace `80-can-web-tunnel`） |
+| `person/active` | ↑ | [P01](./product/P01-kiosk-personalization.md)（预留） |
+| `track/cmd` | ↓ | M01（预留跟脸） |
 
 ## 3. Immich
 
