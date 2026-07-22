@@ -22,6 +22,8 @@
 #include "http-server/http_server_config.h"
 // 人脸检测配置（便于复用 face_ai/）
 #include "face_ai/face_ai_config.h"
+// 视觉 Hub / RTSP 推流（便于复用 vision/）
+#include "vision/vision_config.h"
 // 网络配置（便于复用 net/）
 #include "net/net_config.h"
 // 触摸按键行为配置（便于复用 touch_btn/）

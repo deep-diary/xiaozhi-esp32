@@ -30,8 +30,17 @@
 
 #include "esp_video.h"
 
+#include "vision/vision_config.h"
+#include "face_ai_config.h"
+
 #if DEEP_DOG_HTTP_SERVER_ENABLE
 #include "http-server/deep_dog_http_server.h"
+#endif
+#if DEEP_DOG_VISION_HUB_ENABLE
+#include "vision/vision_frame_hub.h"
+#endif
+#if DEEP_DOG_FACE_AI_ENABLE
+#include "face_ai_bridge.h"
 #endif
 
 #define TAG "deep_dog"
@@ -128,6 +137,9 @@ private:
     DeepDogTouchApp touch_app_{&dog_};  // 触摸按键业务（须在 dog_ 之后构造）
     LegControl* leg_ptrs_[4] = { nullptr };  // 供单腿 MCP 回调使用，指向 dog_ 内 4 腿
     TaskHandle_t can_rx_task_handle_ = nullptr;
+#if DEEP_DOG_VISION_HUB_ENABLE
+    std::unique_ptr<VisionFrameHub> vision_hub_;
+#endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE
     std::unique_ptr<DeepDogHttpServer> http_server_;
 #endif
@@ -339,9 +351,15 @@ private:
         camera_->SetHMirror(camera_flipped);
         camera_->SetVFlip(camera_flipped);
         touch_app_.SetCamera(camera_);
+#if DEEP_DOG_VISION_HUB_ENABLE
+        vision_hub_ = std::make_unique<VisionFrameHub>(camera_);
+#endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE
         // 须在 esp_netif_init / tcpip 就绪之后启动（见 StartNetwork）；勿在构造函数里 httpd_start
         http_server_ = std::make_unique<DeepDogHttpServer>(camera_, &dog_, DEEP_DOG_HTTP_SERVER_PORT);
+#if DEEP_DOG_VISION_HUB_ENABLE
+        http_server_->SetVisionHub(vision_hub_.get());
+#endif
 #endif
     }
 
@@ -404,6 +422,18 @@ public:
         wifi_ap_record_t ap{};
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             DeepDogApplyStaticStaIpv4();
+        }
+#endif
+#if DEEP_DOG_FACE_AI_ENABLE
+        if (!DeepDogFaceAiRuntimeStart()) {
+            ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");
+        }
+#endif
+#if DEEP_DOG_VISION_HUB_ENABLE
+        if (vision_hub_ && !vision_hub_->IsRunning()) {
+            if (!vision_hub_->Start()) {
+                ESP_LOGW(TAG, "VisionFrameHub 启动失败");
+            }
         }
 #endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE

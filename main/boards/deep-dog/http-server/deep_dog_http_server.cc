@@ -8,7 +8,9 @@
 #include "face_ai_bridge.h"
 #include "face_ai_config.h"
 #include "immich_client.h"
-#include "image_to_jpeg.h"
+#include "vision/vision_config.h"
+#include "vision/vision_frame_hub.h"
+#include "vision/vision_types.h"
 
 #include <wifi_manager.h>
 
@@ -17,6 +19,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <strings.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/idf_additions.h>
@@ -24,8 +27,6 @@
 #include <freertos/task.h>
 
 #if DEEP_DOG_HTTP_SERVER_ENABLE
-
-#include <linux/videodev2.h>
 
 #define TAG "dog_http"
 
@@ -53,49 +54,6 @@ enum class DogWebCmd : uint8_t {
     Disable = 8,
 };
 
-static v4l2_pix_fmt_t V4lFromCameraFrame(const CameraFrame& cf) {
-    switch (cf.format) {
-        case 1:
-            return V4L2_PIX_FMT_RGB565;
-        case 2:
-            return V4L2_PIX_FMT_RGB24;
-        case 3:
-            return V4L2_PIX_FMT_YUYV;
-        default:
-            return static_cast<v4l2_pix_fmt_t>(cf.format);
-    }
-}
-
-/** 将带行 stride 的 RGB565 压成紧密 w*h*2，供 JPEG 编码与 width/height 一致 */
-static bool PackedRgb565FromFrame(const CameraFrame& cf, std::vector<uint8_t>* packed) {
-    const uint32_t w = cf.width;
-    const uint32_t h = cf.height;
-    if (w == 0 || h == 0) {
-        return false;
-    }
-    const size_t row_b = (size_t)w * 2u;
-    if (cf.len >= row_b * (size_t)h) {
-        if (cf.len % (size_t)h == 0u) {
-            const size_t src_stride = cf.len / (size_t)h;
-            if (src_stride < row_b) {
-                return false;
-            }
-            if (src_stride == row_b) {
-                packed->assign(cf.data, cf.data + row_b * (size_t)h);
-                return true;
-            }
-            packed->resize(row_b * (size_t)h);
-            for (uint32_t row = 0; row < h; row++) {
-                memcpy(packed->data() + row * row_b, cf.data + row * src_stride, row_b);
-            }
-            return true;
-        }
-        packed->assign(cf.data, cf.data + row_b * (size_t)h);
-        return true;
-    }
-    return false;
-}
-
 static const char* ModeToStr(DeepDogCaptureMode m) {
     switch (m) {
         case DeepDogCaptureMode::Off:
@@ -104,6 +62,8 @@ static const char* ModeToStr(DeepDogCaptureMode m) {
             return "periodic";
         case DeepDogCaptureMode::Streaming:
             return "stream";
+        case DeepDogCaptureMode::RtspPush:
+            return "rtsp_push";
         default:
             return "unknown";
     }
@@ -144,8 +104,12 @@ static bool StrToMode(const char* s, DeepDogCaptureMode* out) {
         *out = DeepDogCaptureMode::PeriodicSample;
         return true;
     }
-    if (strcmp(s, "stream") == 0 || strcmp(s, "streaming") == 0) {
+    if (strcmp(s, "stream") == 0 || strcmp(s, "streaming") == 0 || strcmp(s, "mjpeg") == 0) {
         *out = DeepDogCaptureMode::Streaming;
+        return true;
+    }
+    if (strcmp(s, "rtsp_push") == 0 || strcmp(s, "rtsp") == 0 || strcmp(s, "push") == 0) {
+        *out = DeepDogCaptureMode::RtspPush;
         return true;
     }
     return false;
@@ -201,14 +165,15 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "</style></head><body>"
         "<h2>DeepDog 遥控</h2>"
         "<p style='color:#888;font-size:13px;margin:0 0 10px 0'>"
-        "页面内预览与 <code>/stream</code> 需先点「视频流」；「关闭」不采图故无 MJPEG。「定时」仅占位不推流。</p>"
-        "<div class='row'><span>采集模式:</span>"
-        "<button class='secondary' onclick=\"setMode('off')\">关闭</button>"
-        "<button class='secondary' onclick=\"setMode('periodic')\">定时(1Hz)</button>"
-        "<button onclick=\"setMode('stream')\">视频流</button></div>"
+        "人脸检测默认同开（静默发现人）。视频发布二选一：局域网 MJPEG 或推 MediaMTX；关推流不影响人脸。"
+        "</p>"
+        "<div class='row'><span>视频发布:</span>"
+        "<button class='secondary' onclick=\"setMode('off')\">关闭推流</button>"
+        "<button onclick=\"setMode('stream')\">局域网 MJPEG</button>"
+        "<button onclick=\"setMode('rtsp_push')\">推 MediaMTX</button></div>"
         "<p id='st'></p>"
         "<div class='row' style='margin-top:8px'><label style='color:#ccc;font-size:14px'>"
-        "<input type='checkbox' id='faceEn' onchange='toggleFace(this.checked)'/> 网页人脸框（需视频流，轮询 /api/face）</label></div>"
+        "<input type='checkbox' id='faceEn' checked onchange='toggleFace(this.checked)'/> 人脸检测/识别（静默可开，不必开视频）</label></div>"
         "<p id='faceMeta' style='font-size:12px;color:#9cf;margin:4px 0'></p>"
         "<div style='position:relative;display:none;max-width:100%;width:640px;aspect-ratio:4/3' id='vidWrap'>"
         "<img id='m' width='640' height='480' alt='mjpeg' style='display:block;width:100%;height:100%;object-fit:contain'/>"
@@ -271,16 +236,18 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "}"
         "function refresh(){if(statusInFlight)return Promise.resolve();statusInFlight=true;return fetch('/api/status?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json()).then(j=>{"
         "lastStatus=j;"
-        "st.textContent='模式:'+j.mode+' 拉流:'+j.stream_clients+' JPEG:'+(j.has_jpeg?'有':'无')"
+        "st.textContent='发布:'+j.mode+' 拉流:'+j.stream_clients+' JPEG:'+(j.has_jpeg?'有':'无')"
+        "+(j.push_status?(' 推流:'+j.push_status):'')"
         "+(j.face_ai_compiled?' 人脸模块:有':' 人脸模块:无')"
         "+' 狗初始化:'+((j.dog_initialized)?'已完成':'未完成');"
         "applyDogInitState(j);"
         "if(j.mode==='stream'){wrap.style.display='block';if(!img.src||img.src.indexOf('/stream')<0)img.src='/stream';}"
-        "else{wrap.style.display='none';img.removeAttribute('src');if(facePoll){clearInterval(facePoll);facePoll=null;}"
-        "document.getElementById('faceEn').checked=false;drawFaces(null);faceMeta.textContent='';}}).catch(()=>{st.textContent='状态获取失败';}).finally(()=>{statusInFlight=false;});}"
-        "function setMode(m){fetch('/api/capture_mode?mode='+encodeURIComponent(m),{method:'POST'})"
+        "else{wrap.style.display='none';img.removeAttribute('src');}"
+        "if(document.getElementById('faceEn').checked){if(!facePoll){facePoll=setInterval(pollFace,500);pollFace();}}"
+        "}).catch(()=>{st.textContent='状态获取失败';}).finally(()=>{statusInFlight=false;});}"
+        "function setMode(m){fetch('/api/vision_publish?mode='+encodeURIComponent(m),{method:'POST'})"
         ".then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return refresh();})"
-        ".catch(e=>{st.textContent='切换模式失败: '+e.message;});}"
+        ".catch(e=>{st.textContent='切换发布失败: '+e.message;});}"
         "function fmtNum(v,d){return (v==null||Number.isNaN(v))?'?':Number(v).toFixed(d);}"
         "function updateDogStatus(){if(dogInFlight)return Promise.resolve();dogInFlight=true;const t0=Date.now();return fetch('/api/dog_status?ts='+t0,{cache:'no-store'}).then(r=>r.json()).then(j=>{"
         "if(!j.motors){dogMeta.textContent='电机状态: 无';dogTblBody.innerHTML='';return;}"
@@ -318,6 +285,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         ".finally(()=>{setTimeout(()=>{cmdInFlight=false;refresh();},220);});}"
         "function scheduleRefresh(){refresh().finally(()=>setTimeout(scheduleRefresh,1000));}"
         "function scheduleDogStatus(){updateDogStatus().finally(()=>setTimeout(scheduleDogStatus,700));}"
+        "if(document.getElementById('faceEn').checked){facePoll=setInterval(pollFace,500);pollFace();}"
         "refresh();updateDogStatus();setTimeout(scheduleRefresh,1000);setTimeout(scheduleDogStatus,700);"
         "</script></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -375,8 +343,14 @@ static esp_err_t RunMjpegStream(httpd_req_t* req) {
 
 static esp_err_t StreamHandler(httpd_req_t* req) {
     auto* srv = static_cast<DeepDogHttpServer*>(req->user_ctx);
-    if (!srv || !srv->camera()) {
+    if (!srv) {
         return ESP_FAIL;
+    }
+    if (srv->GetCaptureMode() != DeepDogCaptureMode::Streaming) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "text/plain; charset=utf-8");
+        httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+        return httpd_resp_send(req, "MJPEG disabled (publish mode is not stream)", HTTPD_RESP_USE_STRLEN);
     }
     httpd_req_t* async_req = nullptr;
     if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
@@ -404,12 +378,20 @@ static esp_err_t ApiStatusHandler(httpd_req_t* req) {
     if (dog) {
         dog_initialized = (dog->getPoseState() != DogPoseState::Uninitialized);
     }
-    char buf[256];
+    const char* push_status = "idle";
+    char push_url[128] = "";
+    if (srv->vision_hub()) {
+        push_status = VisionPushStatusStr(srv->vision_hub()->GetPushStatus());
+        const std::string u = srv->vision_hub()->RtspUrl();
+        snprintf(push_url, sizeof(push_url), "%s", u.c_str());
+    }
+    char buf[512];
     snprintf(buf, sizeof(buf),
-             "{\"mode\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u,"
+             "{\"mode\":\"%s\",\"publish\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u,"
+             "\"push_status\":\"%s\",\"push_url\":\"%s\","
              "\"face_ai_compiled\":%s,\"dog_initialized\":%s}",
-             ModeToStr(srv->GetCaptureMode()), srv->StreamClientCount(), srv->HasJpegFrame() ? "true" : "false",
-             (unsigned)srv->Port(),
+             ModeToStr(srv->GetCaptureMode()), ModeToStr(srv->GetCaptureMode()), srv->StreamClientCount(),
+             srv->HasJpegFrame() ? "true" : "false", (unsigned)srv->Port(), push_status, push_url,
 #if DEEP_DOG_FACE_AI_ENABLE
              "true",
 #else
@@ -440,7 +422,7 @@ static esp_err_t ApiModeHandler(httpd_req_t* req) {
     char val[24];
     if (httpd_query_key_value(query, "mode", val, sizeof(val)) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_send(req, R"({"error":"need mode=off|periodic|stream"})", HTTPD_RESP_USE_STRLEN);
+        return httpd_resp_send(req, R"({"error":"need mode=off|periodic|stream|rtsp_push"})", HTTPD_RESP_USE_STRLEN);
     }
     DeepDogCaptureMode m = DeepDogCaptureMode::Off;
     if (!StrToMode(val, &m)) {
@@ -449,8 +431,14 @@ static esp_err_t ApiModeHandler(httpd_req_t* req) {
         return httpd_resp_send(req, R"({"error":"bad mode"})", HTTPD_RESP_USE_STRLEN);
     }
     srv->SetCaptureMode(m);
-    ESP_LOGI(TAG, "网页 采集模式 -> %s", ModeToStr(m));
-    return SendCorsJson(req, R"({"ok":true})");
+    char buf[80];
+    snprintf(buf, sizeof(buf), "{\"ok\":true,\"mode\":\"%s\"}", ModeToStr(m));
+    return SendCorsJson(req, buf);
+}
+
+static esp_err_t ApiVisionPublishHandler(httpd_req_t* req) {
+    // 与 /api/capture_mode 同源；C03 MQTT 也将映射到同一状态机
+    return ApiModeHandler(req);
 }
 
 static esp_err_t ApiCmdHandler(httpd_req_t* req) {
@@ -779,25 +767,78 @@ void DeepDogHttpServer::LogHttpAccessUrls() {
         ESP_LOGW(TAG, "HTTP 服务已启动，WiFi IP 尚未就绪；联网后本日志会再次出现完整地址");
         return;
     }
-    ESP_LOGI(TAG, "HTTP 控制页 http://%s:%u/  MJPEG http://%s:%u/stream  (默认采集 off)", ip.c_str(),
-             (unsigned)port_, ip.c_str(), (unsigned)port_);
+    ESP_LOGI(TAG, "HTTP 控制页 http://%s:%u/  MJPEG http://%s:%u/stream  (默认关推流；人脸由 VisionHub 静默采帧)",
+             ip.c_str(), (unsigned)port_, ip.c_str(), (unsigned)port_);
 }
 
 void DeepDogHttpServer::SetCaptureMode(DeepDogCaptureMode m) {
     capture_mode_.store(static_cast<uint8_t>(m), std::memory_order_release);
+#if DEEP_DOG_VISION_HUB_ENABLE
+    if (vision_hub_) {
+        VisionPublishMode pm = VisionPublishMode::Off;
+        switch (m) {
+            case DeepDogCaptureMode::Streaming:
+                pm = VisionPublishMode::HttpMjpeg;
+                break;
+            case DeepDogCaptureMode::RtspPush:
+                pm = VisionPublishMode::RtspPush;
+                break;
+            case DeepDogCaptureMode::PeriodicSample:
+            case DeepDogCaptureMode::Off:
+            default:
+                pm = VisionPublishMode::Off;
+                break;
+        }
+        vision_hub_->SetPublishMode(pm);
+    }
+#endif
+    ESP_LOGI(TAG, "capture/publish mode -> %s", ModeToStr(m));
+}
+
+DeepDogCaptureMode DeepDogHttpServer::GetCaptureMode() const {
+#if DEEP_DOG_VISION_HUB_ENABLE
+    if (vision_hub_) {
+        switch (vision_hub_->GetPublishMode()) {
+            case VisionPublishMode::HttpMjpeg:
+                return DeepDogCaptureMode::Streaming;
+            case VisionPublishMode::RtspPush:
+                return DeepDogCaptureMode::RtspPush;
+            case VisionPublishMode::Off:
+            default:
+                return DeepDogCaptureMode::Off;
+        }
+    }
+#endif
+    return static_cast<DeepDogCaptureMode>(capture_mode_.load(std::memory_order_acquire));
 }
 
 bool DeepDogHttpServer::HasJpegFrame() const {
+#if DEEP_DOG_VISION_HUB_ENABLE
+    if (vision_hub_) {
+        return vision_hub_->HasJpegFrame();
+    }
+#endif
     std::lock_guard<std::mutex> lock(jpeg_mutex_);
     return !jpeg_latest_.empty();
 }
 
 void DeepDogHttpServer::PublishJpeg(std::vector<uint8_t>&& jpeg) {
+#if DEEP_DOG_VISION_HUB_ENABLE
+    if (vision_hub_) {
+        vision_hub_->PublishJpeg(std::move(jpeg));
+        return;
+    }
+#endif
     std::lock_guard<std::mutex> lock(jpeg_mutex_);
     jpeg_latest_ = std::move(jpeg);
 }
 
 bool DeepDogHttpServer::CopyLatestJpeg(std::vector<uint8_t>* out) const {
+#if DEEP_DOG_VISION_HUB_ENABLE
+    if (vision_hub_) {
+        return vision_hub_->CopyLatestJpeg(out);
+    }
+#endif
     std::lock_guard<std::mutex> lock(jpeg_mutex_);
     if (jpeg_latest_.empty()) {
         return false;
@@ -850,88 +891,6 @@ void DeepDogHttpServer::MjpegStreamWorkerLoop() {
             ESP_LOGW(TAG, "MJPEG async_handler_complete 失败");
         }
     }
-}
-
-bool DeepDogHttpServer::EncodePackedJpegFromCamera(std::vector<uint8_t>* out, bool submit_face_for_ai) {
-    if (!camera_ || !out) {
-        return false;
-    }
-    if (!camera_->CaptureOnly()) {
-        return false;
-    }
-    CameraFrame cf{};
-    if (!camera_->GetLastFrame(&cf)) {
-        return false;
-    }
-
-    v4l2_pix_fmt_t vf = V4lFromCameraFrame(cf);
-    std::vector<uint8_t> packed;
-    uint8_t* src = cf.data;
-    size_t src_len = cf.len;
-    if (vf == V4L2_PIX_FMT_RGB565) {
-        if (!PackedRgb565FromFrame(cf, &packed)) {
-            return false;
-        }
-        src = packed.data();
-        src_len = packed.size();
-#if DEEP_DOG_FACE_AI_ENABLE
-        if (submit_face_for_ai && !packed.empty()) {
-            DeepDogFaceAiSubmitFrameIfDue(packed.data(), packed.size(), static_cast<uint16_t>(cf.width),
-                                         static_cast<uint16_t>(cf.height));
-        }
-#endif
-    }
-
-    uint8_t* jpeg_ptr = nullptr;
-    size_t jpeg_len = 0;
-    if (!image_to_jpeg(src, src_len, cf.width, cf.height, vf, (uint8_t)jpeg_quality_, &jpeg_ptr, &jpeg_len)) {
-        return false;
-    }
-    out->assign(jpeg_ptr, jpeg_ptr + jpeg_len);
-    free(jpeg_ptr);
-    return true;
-}
-
-bool DeepDogHttpServer::EncodeCurrentFrameToJpeg(std::vector<uint8_t>* out) {
-    return EncodePackedJpegFromCamera(out, false);
-}
-
-void DeepDogHttpServer::CameraWorkerEntry(void* arg) {
-    static_cast<DeepDogHttpServer*>(arg)->CameraWorkerLoop();
-}
-
-void DeepDogHttpServer::CameraWorkerLoop() {
-    const TickType_t periodic = pdMS_TO_TICKS(1000);
-    while (!WorkerStopRequested()) {
-        const auto mode = GetCaptureMode();
-        switch (mode) {
-            case DeepDogCaptureMode::Off:
-                vTaskDelay(pdMS_TO_TICKS(200));
-                break;
-            case DeepDogCaptureMode::PeriodicSample:
-                if (camera_ && camera_->CaptureOnly()) {
-                    ESP_LOGD(TAG, "periodic capture tick (人脸/检测可挂接此处)");
-                }
-                vTaskDelay(periodic);
-                break;
-            case DeepDogCaptureMode::Streaming: {
-                std::vector<uint8_t> jpeg;
-                if (EncodePackedJpegFromCamera(&jpeg, true) && !jpeg.empty()) {
-                    PublishJpeg(std::move(jpeg));
-                }
-                {
-                    int fps = stream_target_fps_ > 0 ? stream_target_fps_ : 8;
-                    vTaskDelay(pdMS_TO_TICKS(1000 / fps));
-                }
-                break;
-            }
-            default:
-                vTaskDelay(pdMS_TO_TICKS(200));
-                break;
-        }
-    }
-    camera_worker_ = nullptr;
-    vTaskDeleteWithCaps(nullptr);
 }
 
 void DeepDogHttpServer::DogCmdTaskEntry(void* arg) {
@@ -1020,13 +979,6 @@ bool DeepDogHttpServer::Start() {
         return false;
     }
 
-    if (xTaskCreateWithCaps(CameraWorkerEntry, "dog_cam_http", 10240, this, 4, &camera_worker_,
-                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
-        // task created dog_cmd - leave it; rare failure
-        ESP_LOGE(TAG, "camera worker task failed");
-        return false;
-    }
-
     mjpeg_stream_queue_ = xQueueCreate(MJPEG_STREAM_QUEUE_DEPTH, sizeof(httpd_req_t*));
     if (!mjpeg_stream_queue_) {
         ESP_LOGE(TAG, "mjpeg stream queue failed");
@@ -1045,12 +997,6 @@ bool DeepDogHttpServer::Start() {
         mjpeg_stream_tasks_[1] = nullptr;
     }
 
-#if DEEP_DOG_FACE_AI_ENABLE
-    if (!DeepDogFaceAiRuntimeStart()) {
-        ESP_LOGW(TAG, "人脸检测 runtime 未启动（可继续用网页/MJPEG，仅无检测）");
-    }
-#endif
-
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port_;
     config.ctrl_port = (uint16_t)(port_ + 1);
@@ -1060,10 +1006,9 @@ bool DeepDogHttpServer::Start() {
     /* 死掉的 /stream 客户端若无发送超时会永久占住 dog_mjpeg worker */
     config.send_wait_timeout = 2;
     config.recv_wait_timeout = 2;
-    /* 默认 8：S05 增加 immich_config/status/face_refresh_name 后需更多槽位 */
-    config.max_uri_handlers = 16;
+    /* S05 + vision_publish */
+    config.max_uri_handlers = 18;
 #if DEEP_DOG_FACE_AI_ENABLE
-    /* 人脸相关 API + 解析/日志链略深，略高于默认 4096，避免边缘场景栈溢出 */
     if (config.stack_size < 8192) {
         config.stack_size = 8192;
     }
@@ -1079,9 +1024,6 @@ bool DeepDogHttpServer::Start() {
         }
         vQueueDelete(mjpeg_stream_queue_);
         mjpeg_stream_queue_ = nullptr;
-#if DEEP_DOG_FACE_AI_ENABLE
-        DeepDogFaceAiRuntimeStop();
-#endif
         return false;
     }
 
@@ -1089,6 +1031,8 @@ bool DeepDogHttpServer::Start() {
     httpd_uri_t uri_stream = {.uri = "/stream", .method = HTTP_GET, .handler = StreamHandler, .user_ctx = this};
     httpd_uri_t uri_status = {.uri = "/api/status", .method = HTTP_GET, .handler = ApiStatusHandler, .user_ctx = this};
     httpd_uri_t uri_mode = {.uri = "/api/capture_mode", .method = HTTP_POST, .handler = ApiModeHandler, .user_ctx = this};
+    httpd_uri_t uri_vision =
+        {.uri = "/api/vision_publish", .method = HTTP_POST, .handler = ApiVisionPublishHandler, .user_ctx = this};
     httpd_uri_t uri_cmd = {.uri = "/api/cmd", .method = HTTP_POST, .handler = ApiCmdHandler, .user_ctx = this};
     httpd_uri_t uri_dog_status =
         {.uri = "/api/dog_status", .method = HTTP_GET, .handler = ApiDogStatusHandler, .user_ctx = this};
@@ -1104,16 +1048,14 @@ bool DeepDogHttpServer::Start() {
 
     if (httpd_register_uri_handler(server_, &uri_root) != ESP_OK || httpd_register_uri_handler(server_, &uri_stream) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_status) != ESP_OK || httpd_register_uri_handler(server_, &uri_mode) != ESP_OK ||
-        httpd_register_uri_handler(server_, &uri_cmd) != ESP_OK || httpd_register_uri_handler(server_, &uri_dog_status) != ESP_OK ||
-        httpd_register_uri_handler(server_, &uri_face) != ESP_OK || httpd_register_uri_handler(server_, &uri_face_en) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_vision) != ESP_OK || httpd_register_uri_handler(server_, &uri_cmd) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_dog_status) != ESP_OK || httpd_register_uri_handler(server_, &uri_face) != ESP_OK ||
+        httpd_register_uri_handler(server_, &uri_face_en) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_immich_cfg) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_immich_st) != ESP_OK ||
         httpd_register_uri_handler(server_, &uri_face_refresh) != ESP_OK) {
         httpd_stop(server_);
         server_ = nullptr;
-#if DEEP_DOG_FACE_AI_ENABLE
-        DeepDogFaceAiRuntimeStop();
-#endif
         ESP_LOGE(TAG, "register uri failed");
         return false;
     }
@@ -1130,9 +1072,6 @@ bool DeepDogHttpServer::Start() {
 
 void DeepDogHttpServer::Stop() {
     worker_stop_.store(true, std::memory_order_release);
-#if DEEP_DOG_FACE_AI_ENABLE
-    DeepDogFaceAiRuntimeStop();
-#endif
     if (ip_event_registered_) {
         esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &DeepDogHttpServer::IpGotHandler);
         ip_event_registered_ = false;
@@ -1142,7 +1081,6 @@ void DeepDogHttpServer::Stop() {
         server_ = nullptr;
     }
     vTaskDelay(pdMS_TO_TICKS(150));
-    // dog_cmd_queue_ / tasks：板级通常不反复 Stop；析构时简单丢弃
 }
 
 #else  // !DEEP_DOG_HTTP_SERVER_ENABLE
@@ -1153,6 +1091,10 @@ DeepDogHttpServer::DeepDogHttpServer(EspVideo* camera, DogControl* dog, uint16_t
 DeepDogHttpServer::~DeepDogHttpServer() = default;
 
 void DeepDogHttpServer::SetCaptureMode(DeepDogCaptureMode) {}
+
+DeepDogCaptureMode DeepDogHttpServer::GetCaptureMode() const {
+    return DeepDogCaptureMode::Off;
+}
 
 bool DeepDogHttpServer::HasJpegFrame() const {
     return false;
@@ -1182,24 +1124,10 @@ bool DeepDogHttpServer::Start() {
 
 void DeepDogHttpServer::Stop() {}
 
-void DeepDogHttpServer::CameraWorkerEntry(void* arg) {
-    static_cast<DeepDogHttpServer*>(arg)->CameraWorkerLoop();
-}
-
-void DeepDogHttpServer::CameraWorkerLoop() {}
-
 void DeepDogHttpServer::DogCmdTaskEntry(void* arg) {
     static_cast<DeepDogHttpServer*>(arg)->DogCmdTaskLoop();
 }
 
 void DeepDogHttpServer::DogCmdTaskLoop() {}
-
-bool DeepDogHttpServer::EncodeCurrentFrameToJpeg(std::vector<uint8_t>*) {
-    return false;
-}
-
-bool DeepDogHttpServer::EncodePackedJpegFromCamera(std::vector<uint8_t>*, bool) {
-    return false;
-}
 
 #endif  // DEEP_DOG_HTTP_SERVER_ENABLE

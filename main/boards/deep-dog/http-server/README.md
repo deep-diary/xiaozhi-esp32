@@ -1,39 +1,42 @@
-# DeepDog HTTP 服务（控制页 + MJPEG）
+# DeepDog HTTP 服务（控制页 + 可选 MJPEG）
 
-本目录提供 **局域网 HTTP 服务**：内嵌网页遥控 `DogControl`，以及 **MJPEG 实时画面**（`multipart/x-mixed-replace`）。相机走板级 **`EspVideo`**（OV3660 DVP），JPEG 使用工程内 **`image_to_jpeg`**。
+本目录提供 **局域网 HTTP 服务**：内嵌网页遥控 `DogControl`，以及可选 **MJPEG**（`multipart/x-mixed-replace`）。  
+**采帧 / 人脸 / MediaMTX 推流** 由 [`../vision/`](../vision/) 的 `VisionFrameHub` 统一调度；本模块不再拥有相机 worker，也不启动/停止 `face_ai`。
 
 ## 文件
 
 | 文件 | 说明 |
 |------|------|
 | `deep_dog_http_server.h` | `DeepDogHttpServer`、`DeepDogCaptureMode` 声明 |
-| `deep_dog_http_server.cc` | `esp_http_server`、采集 worker、`dog_web_cmd` 任务 |
+| `deep_dog_http_server.cc` | `esp_http_server`、MJPEG 发送、`dog_web_cmd` 任务 |
 
-板级在 `esp_sparkbot_board.cc` 的 `InitializeCamera()` 末尾创建并 `Start()`。构建由顶层 `CMakeLists.txt` 递归收集本目录 `.cc`，无需单独 CMake。
+板级在 `StartNetwork()`：先 `DeepDogFaceAiRuntimeStart` + `VisionFrameHub::Start`，再 `http_server_->Start()`。
 
 ## 配置（`boards/deep-dog/config.h`）
 
 - **`DEEP_DOG_HTTP_SERVER_ENABLE`**：置 `0` 关闭整个模块（桩实现，`Start()` 恒为 false）。
 - **`DEEP_DOG_HTTP_SERVER_PORT`**：监听端口，默认 **8080**。
+- 推流相关：见 [`../vision/vision_config.h`](../vision/vision_config.h)。
 
-## 摄像头采集三态
+## 视频发布模式（与 VisionHub 对齐）
 
-| 模式 | 含义 |
+| 模式 API | 含义 |
 |------|------|
-| **Off** | 不采帧，worker 低占空休眠。 |
-| **PeriodicSample** | 约 **1Hz** `CaptureOnly()`，日志占位，便于后续接人脸/检测；不刷 LCD。 |
-| **Streaming** | 约 **5fps**（VGA 默认 `stream_target_fps_`）采帧 → JPEG → 共享缓冲；`/stream` 最多 **2** 路并发（双 `dog_mjpeg` worker）。 |
+| **off** / **periodic** | 不发布视频；人脸仍可由 Hub 静默采帧（默认人脸开） |
+| **stream** / **mjpeg** | 局域网 HTTP MJPEG（`/stream`） |
+| **rtsp_push** | 设备作 RTSP 客户端推 MediaMTX（与 MJPEG **互斥**） |
 
-默认上电为 **Off**，需在网页切到 **视频流** 再观看 MJPEG，以省 CPU/带宽。
+默认上电为 **off**（不推流）。
 
 ## HTTP 接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/` | 控制页（模式 + 动作按钮 + `<img src="/stream">`） |
-| GET | `/stream` | MJPEG |
-| GET | `/api/status` | JSON：`mode`、`stream_clients`、`has_jpeg`、`port` |
-| POST | `/api/capture_mode?mode=off` 或 `periodic` 或 `stream` | 切换采集模式 |
+| GET | `/` | 控制页（发布模式 + 动作按钮；MJPEG 仅 stream 时显示） |
+| GET | `/stream` | MJPEG（仅 `mode=stream`；否则 503） |
+| GET | `/api/status` | JSON：`mode`、`push_status`、`push_url`、`stream_clients`、`has_jpeg`、`port` |
+| POST | `/api/capture_mode?mode=off\|periodic\|stream\|rtsp_push` | 切换发布模式 |
+| POST | `/api/vision_publish?mode=...` | 与 capture_mode 同源（供 C03 MQTT 对齐） |
 | POST | `/api/cmd?cmd=...` | 投递狗指令，见下表 |
 | GET | `/api/face` | 人脸框 + `local_id` / `display_name` |
 | POST | `/api/face_enable?enabled=0\|1` | 开关人脸检测/识别 |

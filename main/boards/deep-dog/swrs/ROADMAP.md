@@ -8,7 +8,7 @@
 2. **设备 = 流媒体客户端**：MediaMTX 推流，**复用**同一套 `face_ai`  
 3. 产品化：Kiosk / 对话个性化  
 
-不并行把 Immich 与推流和本地 ID 绑死；视觉轨当前切片为 **V-S06**（分辨率）。
+不并行把 Immich 与推流和本地 ID 绑死；视觉轨当前切片为 **V-C02**（设备推 MediaMTX，人脸永驻）。
 
 ## 总表
 
@@ -26,8 +26,8 @@
 | **V-S04** | 本地数字 ID | [vision/server/S04](./vision/server/S04-local-face-numeric-id.md) | S03 | ✅ |
 | **V-S05** | Immich 真名 | [vision/server/S05](./vision/server/S05-immich-real-name.md) | S04 | ✅ |
 | **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | ✅（真名待 Immich 队列空闲复验） |
-| V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 待办 |
-| V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | 待办（复用 face） |
+| V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 基建可达；完整推拉待稳定 LAN 复验 |
+| V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | **固件已实现**（人脸永驻 + MJPEG/RTSP 互斥）；实机长稳待勾 |
 | V-C03 | MQTT 推流开关 | [vision/client/C03](./vision/client/C03-mqtt-stream-control.md) | C02 | 待办 |
 | V-C04 | MQTT 云台 | [vision/client/C04](./vision/client/C04-mqtt-gimbal.md) | C03 | 更后 |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |

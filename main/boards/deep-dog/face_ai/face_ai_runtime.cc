@@ -37,7 +37,7 @@ struct FaceFrameJob {
 
 static QueueHandle_t s_queue = nullptr;
 static TaskHandle_t s_task = nullptr;
-static std::atomic<bool> s_user_enabled{false};
+static std::atomic<bool> s_user_enabled{true};
 static std::atomic<bool> s_runtime_started{false};
 static int64_t s_last_submit_us = 0;
 static std::mutex s_snap_mu;
