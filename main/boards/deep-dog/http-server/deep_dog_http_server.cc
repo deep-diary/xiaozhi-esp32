@@ -18,6 +18,10 @@
 #include <cstdio>
 #include <cstring>
 #include <strings.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/idf_additions.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
 #if DEEP_DOG_HTTP_SERVER_ENABLE
 
@@ -256,7 +260,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "+' 帧:'+j.w+'x'+j.h+(names?(' | '+names):'')+(primary&&!names.includes(j.display_name)?(' | 主:'+primary):'');"
         "if(j.feature_on)drawFaces(j);else drawFaces(null);}).catch(()=>{}).finally(()=>{faceInFlight=false;});}"
         "function toggleFace(on){fetch('/api/face_enable?enabled='+(on?'1':'0'),{method:'POST'})"
-        ".then(()=>pollFace()).catch(()=>{});if(on&&!facePoll){facePoll=setInterval(pollFace,200);pollFace();}"
+        ".then(()=>pollFace()).catch(()=>{});if(on&&!facePoll){facePoll=setInterval(pollFace,500);pollFace();}"
         "else if(!on&&facePoll){clearInterval(facePoll);facePoll=null;drawFaces(null);faceMeta.textContent='';}}"
         "function applyDogInitState(j){"
         "const inited=!!j.dog_initialized;"
@@ -927,7 +931,7 @@ void DeepDogHttpServer::CameraWorkerLoop() {
         }
     }
     camera_worker_ = nullptr;
-    vTaskDelete(nullptr);
+    vTaskDeleteWithCaps(nullptr);
 }
 
 void DeepDogHttpServer::DogCmdTaskEntry(void* arg) {
@@ -1008,14 +1012,16 @@ bool DeepDogHttpServer::Start() {
         return false;
     }
 
-    if (xTaskCreate(DogCmdTaskEntry, "dog_web_cmd", 4096, this, 5, &dog_cmd_task_) != pdPASS) {
+    if (xTaskCreateWithCaps(DogCmdTaskEntry, "dog_web_cmd", 4096, this, 5, &dog_cmd_task_,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         vQueueDelete(dog_cmd_queue_);
         dog_cmd_queue_ = nullptr;
         ESP_LOGE(TAG, "dog_web_cmd task failed");
         return false;
     }
 
-    if (xTaskCreate(CameraWorkerEntry, "dog_cam_http", 10240, this, 4, &camera_worker_) != pdPASS) {
+    if (xTaskCreateWithCaps(CameraWorkerEntry, "dog_cam_http", 10240, this, 4, &camera_worker_,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         // task created dog_cmd - leave it; rare failure
         ESP_LOGE(TAG, "camera worker task failed");
         return false;
@@ -1026,15 +1032,15 @@ bool DeepDogHttpServer::Start() {
         ESP_LOGE(TAG, "mjpeg stream queue failed");
         return false;
     }
-    if (xTaskCreate(MjpegStreamWorkerEntry, "dog_mjpeg", MJPEG_STREAM_TASK_STACK, this, MJPEG_STREAM_TASK_PRIO,
-                    &mjpeg_stream_tasks_[0]) != pdPASS) {
+    if (xTaskCreateWithCaps(MjpegStreamWorkerEntry, "dog_mjpeg", MJPEG_STREAM_TASK_STACK, this, MJPEG_STREAM_TASK_PRIO,
+                            &mjpeg_stream_tasks_[0], MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         vQueueDelete(mjpeg_stream_queue_);
         mjpeg_stream_queue_ = nullptr;
         ESP_LOGE(TAG, "dog_mjpeg task failed");
         return false;
     }
-    if (xTaskCreate(MjpegStreamWorkerEntry, "dog_mjpeg2", MJPEG_STREAM_TASK_STACK, this, MJPEG_STREAM_TASK_PRIO,
-                    &mjpeg_stream_tasks_[1]) != pdPASS) {
+    if (xTaskCreateWithCaps(MjpegStreamWorkerEntry, "dog_mjpeg2", MJPEG_STREAM_TASK_STACK, this, MJPEG_STREAM_TASK_PRIO,
+                            &mjpeg_stream_tasks_[1], MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         ESP_LOGW(TAG, "dog_mjpeg2 task failed (single stream only)");
         mjpeg_stream_tasks_[1] = nullptr;
     }
@@ -1067,7 +1073,7 @@ bool DeepDogHttpServer::Start() {
         ESP_LOGE(TAG, "httpd_start failed");
         for (TaskHandle_t& t : mjpeg_stream_tasks_) {
             if (t) {
-                vTaskDelete(t);
+                vTaskDeleteWithCaps(t);
                 t = nullptr;
             }
         }

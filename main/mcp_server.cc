@@ -450,7 +450,8 @@ void McpServer::ReplyError(int id, const std::string& message) {
 }
 
 void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_only_tools) {
-    const int max_payload_size = 8000;
+    // 单包过大时 MQTT TLS（硬件 AES）需连续内部 DRAM；deep-dog 等板面内存紧，压到 ~2.8KB 强制分页
+    const int max_payload_size = 2800;
     std::string json = "{\"tools\":[";
     
     bool found_cursor = cursor.empty();

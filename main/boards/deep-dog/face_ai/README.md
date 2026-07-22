@@ -43,9 +43,12 @@
 
 ## 配置宏（`face_ai_config.h`）
 
+- `DEEP_DOG_FACE_AI_MIN_INTERVAL_MS`（联调默认 **1000**；与 MJPEG fps 独立）
 - `DEEP_DOG_FACE_IMMICH_ENABLE`（默认 1）
-- `DEEP_DOG_FACE_IMMICH_DEFAULT_URL`、`BACKOFF_S`、`POLL_MAX` / `POLL_MS`
+- `DEEP_DOG_FACE_IMMICH_DEFAULT_URL`、`BACKOFF_S`（联调 **15**）、`POLL_MAX` / `POLL_MS`
 - `DEEP_DOG_FACE_IMMICH_DELETE_ASSET`（默认 **0**=保留临时图）
+
+分辨率在 board [`config.json`](../config.json) 切换 `RGB565_240X240_24FPS` / `RGB565_640X480_10FPS`（见 [S06 §8](../swrs/vision/server/S06-higher-resolution.md)）。
 
 ## 验收
 

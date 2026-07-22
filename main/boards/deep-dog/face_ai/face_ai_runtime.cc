@@ -20,6 +20,7 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/idf_additions.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
@@ -323,8 +324,9 @@ bool DeepDogFaceAiRuntimeStart() {
         s_runtime_started = false;
         return false;
     }
-    // 识别 MFN ~250ms，加大栈
-    if (xTaskCreate(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task) != pdPASS) {
+    // 识别 MFN ~250ms，加大栈；栈放 PSRAM，腾出内部 DRAM 给 MQTT/TLS AES DMA
+    if (xTaskCreateWithCaps(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         vQueueDelete(s_queue);
         s_queue = nullptr;
 #if DEEP_DOG_FACE_IMMICH_ENABLE
@@ -347,7 +349,7 @@ void DeepDogFaceAiRuntimeStop() {
         return;
     }
     if (s_task) {
-        vTaskDelete(s_task);
+        vTaskDeleteWithCaps(s_task);
         s_task = nullptr;
     }
     if (s_queue) {

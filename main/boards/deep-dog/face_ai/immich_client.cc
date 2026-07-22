@@ -19,6 +19,7 @@
 #include <esp_random.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/idf_additions.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <nvs.h>
@@ -395,7 +396,8 @@ bool DeepDogImmichInit() {
     if (!s_queue) {
         return false;
     }
-    if (xTaskCreate(ImmichTask, "dog_immich", 12288, nullptr, 2, &s_task) != pdPASS) {
+    if (xTaskCreateWithCaps(ImmichTask, "dog_immich", 12288, nullptr, 2, &s_task,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         vQueueDelete(s_queue);
         s_queue = nullptr;
         return false;
@@ -411,7 +413,7 @@ void DeepDogImmichDeinit() {
         return;
     }
     if (s_task) {
-        vTaskDelete(s_task);
+        vTaskDeleteWithCaps(s_task);
         s_task = nullptr;
     }
     if (s_queue) {

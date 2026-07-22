@@ -3,6 +3,9 @@
 
 /**
  * 网页人脸检测（human_face_detect / ESP-DL）相关配置（从 board `config.h` 拆分）。
+ *
+ * 联调模式（当前默认）：检测约 1s 一次、Immich 失败退避 15s；分辨率见 board config.json
+ *（240×240 降内存 / 640×480 提 Immich 成功率，二选一）。
  */
 
 /** 1=编译进固件；0=桩实现，零推理开销 */
@@ -10,9 +13,9 @@
 #define DEEP_DOG_FACE_AI_ENABLE 1
 #endif
 
-/** 向人脸任务送帧的最小间隔（ms），用于降载（VGA 下 250 易触发 task_wdt） */
+/** 向人脸任务送帧的最小间隔（ms）；与 MJPEG fps 独立，可远低于视频帧率 */
 #ifndef DEEP_DOG_FACE_AI_MIN_INTERVAL_MS
-#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 500
+#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 1000
 #endif
 
 /** 1=检测前对 RGB565 每像素做高/低字节对调（仅在 INPUT_RGB888=0 时有意义） */
@@ -58,10 +61,10 @@
 #define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_LOG 1
 #endif
 #ifndef DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_W
-#define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_W 640
+#define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_W 240
 #endif
 #ifndef DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_H
-#define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_H 480
+#define DEEP_DOG_FACE_DETECT_BLACK_SELFTEST_H 240
 #endif
 
 /** 1=在跑模型前对 RGB565 做稀疏采样，过暗且起伏小则跳过推理 */
@@ -128,9 +131,9 @@
 #define DEEP_DOG_FACE_IMMICH_DEFAULT_URL "http://192.168.31.25:2283/api"
 #endif
 
-/** 失败后同一 local_id 的退避（秒） */
+/** 失败后同一 local_id 的退避（秒）。联调 15；量产可改 60 */
 #ifndef DEEP_DOG_FACE_IMMICH_BACKOFF_S
-#define DEEP_DOG_FACE_IMMICH_BACKOFF_S 60
+#define DEEP_DOG_FACE_IMMICH_BACKOFF_S 15
 #endif
 
 /** 轮询 GET /assets/{id} 次数与间隔 */

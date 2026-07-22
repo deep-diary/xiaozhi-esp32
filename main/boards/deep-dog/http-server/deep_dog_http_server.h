@@ -102,8 +102,8 @@ private:
     std::atomic<uint8_t> capture_mode_{static_cast<uint8_t>(DeepDogCaptureMode::Off)};
     std::atomic<int> stream_clients_{0};
 
-    int stream_target_fps_ = 5;  // VGA 传感器约 10fps；略降以免 JPEG/人脸抢内存
-    int jpeg_quality_ = 60;
+    int stream_target_fps_ = 4;  // 联调：与人脸检测解耦，略降以免 JPEG/httpd 抢 CPU
+    int jpeg_quality_ = 55;
 
     mutable std::mutex jpeg_mutex_;
     std::vector<uint8_t> jpeg_latest_;

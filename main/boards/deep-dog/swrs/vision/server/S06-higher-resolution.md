@@ -7,7 +7,7 @@
 | 依赖 | [S02](./S02-http-mjpeg.md)、[S03](./S03-http-face-overlay.md)、[S05](./S05-immich-real-name.md) |
 | 下一切片 | [C02 设备推流](../client/C02-device-push-stream.md)（或并行） |
 | 代码落点 | OV3660 / `EspVideo` 出图尺寸；`http-server` 预览与 Canvas；`face_ai` 送帧与 Immich 上传 |
-| 基线状态 | **已实现**（实选 **640×480**；设备已烧录验收） |
+| 基线状态 | **已实现**（VGA 路径可用）；**联调默认回切 240×240** 降内存，见 §8 |
 
 ## 1. 背景与动机
 
@@ -75,3 +75,24 @@
 - Immich 契约：[S05](./S05-immich-real-name.md)
 - 现状 MJPEG：[S02](./S02-http-mjpeg.md)
 - 联调图：[fixtures/README](../fixtures/README.md)
+
+## 8. 分辨率切换与联调模式
+
+传感器出图尺寸由 board **`config.json` → `sdkconfig_append`** 二选一（改完需 `idf.py build` / 烧录；也可同步改仓库根 `sdkconfig`）：
+
+| 模式 | Kconfig（`=y`，另一项 `=n`） | 用途 |
+|------|------------------------------|------|
+| **联调（当前默认）** | `CONFIG_CAMERA_OV3660_DVP_RGB565_240X240_24FPS` | 降内存 / 降 WDT；Immich 真名成功率偏低 |
+| Immich / 高像素复验 | `CONFIG_CAMERA_OV3660_DVP_RGB565_640X480_10FPS` | 约 ×5.3 像素；需配合更长检测间隔 |
+
+**流帧率与人脸检测本就异步**：MJPEG 由 `stream_target_fps_` 节流；检测由 `DEEP_DOG_FACE_AI_MIN_INTERVAL_MS` 节流；网页框由 `setInterval(pollFace, …)` 轮询 `/api/face`。三者可不同步。
+
+当前联调默认（`face_ai_config.h` + `http-server`）：
+
+| 项 | 值 |
+|----|-----|
+| 分辨率 | 240×240 |
+| 检测间隔 | `MIN_INTERVAL_MS=1000` |
+| Immich 失败退避 | `BACKOFF_S=15` |
+| 页面 `/api/face` | 500ms |
+| MJPEG | ~4fps / q55 |

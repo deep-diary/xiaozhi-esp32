@@ -961,29 +961,30 @@ bool DogControl::danceWithMode(const std::string& mode, int seed, int rounds, fl
 void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
     if (!dog) return;
 
-    mcp_server.AddTool("self.dog.init", "机器狗整机初始化（使能 12 个电机）。用户说：初始化、整机初始化、机器狗初始化 时调用", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
+    // 描述尽量短：tools/list 经 MQTT TLS 发送，过长易触发 esp-aes 内部 RAM OOM
+    mcp_server.AddTool("self.dog.init", "整机初始化（使能12电机）", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
         if (dog->init()) return std::string("机器狗初始化成功");
         return std::string("机器狗初始化失败");
     });
 
-    mcp_server.AddTool("self.dog.stand", "机器狗整机站立，四条腿回站立位。用户说：站起来、站立、站起、机器狗站立 时调用", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
+    mcp_server.AddTool("self.dog.stand", "整机站立", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
         if (dog->stand()) return std::string("机器狗已站立");
         return std::string("机器狗站立失败");
     });
 
-    mcp_server.AddTool("self.dog.lie_down", "机器狗整机卧倒，四条腿回零位。用户说：卧倒、趴下、回零位、机器狗卧倒 时调用", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
+    mcp_server.AddTool("self.dog.lie_down", "整机卧倒/回零", PropertyList(), [dog](const PropertyList&) -> ReturnValue {
         if (dog->lieDown()) return std::string("机器狗已卧倒");
         return std::string("机器狗卧倒失败");
     });
 
-    mcp_server.AddTool("self.dog.disable", "机器狗整机失能（12 电机 reset/停扭）。用户说：整体断电、整体失能、电机下电 时调用",
+    mcp_server.AddTool("self.dog.disable", "整机失能（停扭）",
                         PropertyList(), [dog](const PropertyList&) -> ReturnValue {
         if (dog->disable()) return std::string("机器狗已整体失能（电机停扭）");
         return std::string("机器狗整体失能失败");
     });
 
     mcp_server.AddTool("self.chassis.forward_big",
-                         "机器狗向前「一大步」：沿相位连续迈半个正弦周期（若干小步+可选延时），非持续行走。参数 step_delay_ms：小步之间延时 0~300ms",
+                         "向前一大步；step_delay_ms=小步间隔0~300",
                          PropertyList(std::vector<Property>{Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
                          [dog](const PropertyList& props) -> ReturnValue {
                              const int d = props["step_delay_ms"].value<int>();
@@ -994,7 +995,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.backward_big",
-                         "机器狗向后「一大步」：半个正弦周期的小步串联。参数 step_delay_ms 同 forward_big",
+                         "向后一大步；step_delay_ms 同 forward_big",
                          PropertyList(std::vector<Property>{Property("step_delay_ms", kPropertyTypeInteger, 40, 0, 300)}),
                          [dog](const PropertyList& props) -> ReturnValue {
                              const int d = props["step_delay_ms"].value<int>();
@@ -1005,7 +1006,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.start_forward",
-                         "机器狗持续向前行走，直到 stop。参数 step_period_ms：小步间隔越小步频越快",
+                         "持续前进直到 stop；step_period_ms 越小越快",
                          PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger,
                                                                      DEEP_DOG_STEP_PERIOD_MS_DEFAULT,
                                                                      DEEP_DOG_STEP_PERIOD_MS_MIN,
@@ -1019,7 +1020,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.start_backward",
-                         "机器狗持续向后退，直到 stop。参数 step_period_ms 同 start_forward",
+                         "持续后退直到 stop；step_period_ms 同 start_forward",
                          PropertyList(std::vector<Property>{Property("step_period_ms", kPropertyTypeInteger,
                                                                      DEEP_DOG_STEP_PERIOD_MS_DEFAULT,
                                                                      DEEP_DOG_STEP_PERIOD_MS_MIN,
@@ -1033,7 +1034,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.stop",
-                         "停止持续前进/后退，关节保持当前姿态。用户说：停下、停止、别走了 时调用",
+                         "停止持续行走",
                          PropertyList(),
                          [dog](const PropertyList&) -> ReturnValue {
                              dog->stopContinuousLocomotion();
@@ -1041,14 +1042,14 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.status",
-                         "查询机器狗当前姿态与行走状态（中文）",
+                         "查询姿态与行走状态",
                          PropertyList(),
                          [dog](const PropertyList&) -> ReturnValue {
                              return dog->getChassisStatusString();
                          });
 
     mcp_server.AddTool("self.chassis.set_gait_steps",
-                         "设置一个正弦周期采样点数（越大步态越细腻，范围 8~120）",
+                         "正弦周期采样点数 8~120",
                          PropertyList(std::vector<Property>{Property("steps", kPropertyTypeInteger, (int)LEG_DEFAULT_TOTAL_STEPS, 8, 120)}),
                          [dog](const PropertyList& props) -> ReturnValue {
                              const int steps = props["steps"].value<int>();
@@ -1057,7 +1058,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.set_speed",
-                         "设置完整步态周期（ms），采样点数不变时：周期越小跑得越快。示例：cycle_period_ms=2000 表示步态周期 2s",
+                         "步态周期 ms（越小越快）",
                          PropertyList(std::vector<Property>{
                              Property("cycle_period_ms", kPropertyTypeInteger, DEEP_DOG_CYCLE_PERIOD_MS_DEFAULT,
                                       DEEP_DOG_CYCLE_PERIOD_MS_MIN, DEEP_DOG_CYCLE_PERIOD_MS_MAX)}),
@@ -1071,7 +1072,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.set_mit_gains",
-                         "设置 MIT 全局增益（后续所有关节运控帧默认使用）。kp 范围 0~500；kd 范围 0~5",
+                         "MIT 增益：kp_x10=kp*10，kd_x100=kd*100",
                          PropertyList(std::vector<Property>{
                              Property("kp_x10", kPropertyTypeInteger, 100, 0, 5000),
                              Property("kd_x100", kPropertyTypeInteger, 150, 0, 500)}),
@@ -1086,7 +1087,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.get_mit_gains",
-                         "查询当前 MIT 全局增益（kp/kd）",
+                         "查询 MIT kp/kd",
                          PropertyList(),
                          [dog](const PropertyList&) -> ReturnValue {
                              return std::string("当前 MIT 增益：kp=") + std::to_string(dog->getMitKp()) +
@@ -1094,7 +1095,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                          });
 
     mcp_server.AddTool("self.chassis.pose",
-                       "切换到静态姿态点（插值到目标点）。pose: lie_down_zero/stand/tilt_left/tilt_right/front_down_back_up/front_up_back_down",
+                       "静态姿态：lie_down_zero/stand/tilt_left/tilt_right/front_down_back_up/front_up_back_down",
                        PropertyList(std::vector<Property>{
                            Property("pose", kPropertyTypeString, std::string("stand")),
                        }),
@@ -1123,7 +1124,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
                        });
 
     mcp_server.AddTool("self.chassis.dance",
-                       "机器狗跳舞（支持可编排/可随机）。mode=default/random，rounds=左右倾重复次数，seed=随机种子(0表示自动)",
+                       "跳舞：mode=default/random，rounds，seed(0=自动)",
                        PropertyList(std::vector<Property>{
                            Property("mode", kPropertyTypeString, std::string("default")),
                            Property("rounds", kPropertyTypeInteger, 3, 1, 12),
