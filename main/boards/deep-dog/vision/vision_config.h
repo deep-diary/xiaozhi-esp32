@@ -24,9 +24,21 @@
 #define DEEP_DOG_VISION_STREAM_PATH "deep-dog/dev"
 #endif
 
-/** 推流目标帧率（Hub 在 RtspPush / HttpMjpeg 时共用上限） */
+/**
+ * RTSP 推流编码：1=esp_h264 软编（默认，网页 HLS 前置）；0=回退 RTP/JPEG。
+ * JPEG 路径仍保留编译，改此宏即可切回。
+ */
+#ifndef DEEP_DOG_VISION_CODEC_H264
+#define DEEP_DOG_VISION_CODEC_H264 1
+#endif
+
+/** 推流目标帧率（Hub 在 RtspPush / HttpMjpeg 时共用上限；H.264 建议 3～5） */
 #ifndef DEEP_DOG_VISION_PUSH_FPS
+#if DEEP_DOG_VISION_CODEC_H264
+#define DEEP_DOG_VISION_PUSH_FPS 3
+#else
 #define DEEP_DOG_VISION_PUSH_FPS 5
+#endif
 #endif
 
 /** JPEG 质量（与历史 HTTP MJPEG 接近） */

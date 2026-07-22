@@ -1,7 +1,12 @@
 #include "vision/vision_frame_hub.h"
 
-#include "vision/rtsp_jpeg_pusher.h"
 #include "vision/vision_config.h"
+#if DEEP_DOG_VISION_CODEC_H264
+#include "vision/h264_sw_encoder.h"
+#include "vision/rtsp_h264_pusher.h"
+#else
+#include "vision/rtsp_jpeg_pusher.h"
+#endif
 
 #include "esp_video.h"
 #include "camera.h"
@@ -65,7 +70,12 @@ static bool PackedRgb565FromFrame(const CameraFrame& cf, std::vector<uint8_t>* p
 }  // namespace
 
 VisionFrameHub::VisionFrameHub(EspVideo* camera) : camera_(camera) {
+#if DEEP_DOG_VISION_CODEC_H264
+    pusher_ = std::make_unique<RtspH264Pusher>();
+    h264_enc_ = std::make_unique<H264SwEncoder>();
+#else
     pusher_ = std::make_unique<RtspJpegPusher>();
+#endif
     char url[160];
     snprintf(url, sizeof(url), "rtsp://%s:%u/%s", DEEP_DOG_VISION_RTSP_HOST,
              static_cast<unsigned>(DEEP_DOG_VISION_RTSP_PORT), DEEP_DOG_VISION_STREAM_PATH);
@@ -143,7 +153,13 @@ bool VisionFrameHub::Start() {
     SetPublishMode(VisionPublishMode::RtspPush);
 #endif
 
-    if (xTaskCreateWithCaps(TaskEntry, "vision_hub", 12288, this, 4, &task_,
+#if DEEP_DOG_VISION_CODEC_H264
+    // openh264 SW encode needs a deep stack (SPIRAM task stack)
+    constexpr uint32_t kStack = 49152;
+#else
+    constexpr uint32_t kStack = 12288;
+#endif
+    if (xTaskCreateWithCaps(TaskEntry, "vision_hub", kStack, this, 4, &task_,
                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         task_ = nullptr;
         ESP_LOGE(TAG, "task create failed");
@@ -264,20 +280,42 @@ void VisionFrameHub::TaskLoop() {
 #endif
 
         if (need_publish) {
-            std::vector<uint8_t> jpeg;
-            if (EncodeJpeg(packed.data(), packed.size(), w, h, v4l, &jpeg) && !jpeg.empty()) {
-                if (mode == VisionPublishMode::HttpMjpeg) {
+            if (mode == VisionPublishMode::HttpMjpeg) {
+                std::vector<uint8_t> jpeg;
+                if (EncodeJpeg(packed.data(), packed.size(), w, h, v4l, &jpeg) && !jpeg.empty()) {
                     PublishJpeg(std::move(jpeg));
-                } else if (mode == VisionPublishMode::RtspPush) {
+                }
+            } else if (mode == VisionPublishMode::RtspPush) {
+#if DEEP_DOG_VISION_CODEC_H264
+                EnsurePusherConnected();
+                if (pusher_ && pusher_->IsConnected() && h264_enc_) {
+                    std::vector<uint8_t> annexb;
+                    if (h264_enc_->EncodeRgb565(packed.data(), packed.size(), w, h, &annexb) &&
+                        !annexb.empty()) {
+                        if (!pusher_->PushAnnexB(annexb.data(), annexb.size())) {
+                            EnsurePusherConnected();
+                        } else {
+                            static int s_ok = 0;
+                            if (s_ok < 3) {
+                                ESP_LOGI(TAG, "H264 push ok bytes=%u %ux%u",
+                                         static_cast<unsigned>(annexb.size()), w, h);
+                                ++s_ok;
+                            }
+                        }
+                    }
+                }
+#else
+                std::vector<uint8_t> jpeg;
+                if (EncodeJpeg(packed.data(), packed.size(), w, h, v4l, &jpeg) && !jpeg.empty()) {
                     EnsurePusherConnected();
                     if (pusher_ && pusher_->IsConnected()) {
                         if (!pusher_->PushJpeg(jpeg.data(), jpeg.size(), w, h)) {
                             EnsurePusherConnected();
                         }
                     }
-                    // 也缓存一帧，便于 status has_jpeg 调试
                     PublishJpeg(std::move(jpeg));
                 }
+#endif
             }
             int fps = target_fps_ > 0 ? target_fps_ : 5;
             vTaskDelay(pdMS_TO_TICKS(1000 / fps));

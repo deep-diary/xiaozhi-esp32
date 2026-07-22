@@ -1,4 +1,4 @@
-#include "vision/rtsp_jpeg_pusher.h"
+#include "vision/rtsp_h264_pusher.h"
 
 #include "vision/vision_config.h"
 
@@ -15,21 +15,16 @@
 #include <unistd.h>
 #include <vector>
 
-#define TAG "rtsp_push"
+#define TAG "rtsp_h264"
 
 namespace {
 
-constexpr size_t kMaxJpegRtp = 60000;
+constexpr size_t kMaxRtpPayload = 1200;
+constexpr uint8_t kPayloadType = 96;
 
 static void WriteBe16(uint8_t* p, uint16_t v) {
     p[0] = static_cast<uint8_t>((v >> 8) & 0xff);
     p[1] = static_cast<uint8_t>(v & 0xff);
-}
-
-static void WriteBe24(uint8_t* p, uint32_t v) {
-    p[0] = static_cast<uint8_t>((v >> 16) & 0xff);
-    p[1] = static_cast<uint8_t>((v >> 8) & 0xff);
-    p[2] = static_cast<uint8_t>(v & 0xff);
 }
 
 static void WriteBe32(uint8_t* p, uint32_t v) {
@@ -53,7 +48,6 @@ static std::string ExtractHeaderValue(const std::string& headers, const char* ke
         end = p + strlen(p);
     }
     std::string v(p, end);
-    // Session 可能带 ;timeout=
     const size_t semi = v.find(';');
     if (semi != std::string::npos) {
         v = v.substr(0, semi);
@@ -64,23 +58,57 @@ static std::string ExtractHeaderValue(const std::string& headers, const char* ke
     return v;
 }
 
+/** Find next Annex-B NAL; returns pointer to NAL header (type byte), sets nal_len. */
+static const uint8_t* NextNal(const uint8_t* data, size_t len, size_t* offset, size_t* nal_len) {
+    size_t i = *offset;
+    while (i + 3 < len) {
+        size_t sc = 0;
+        if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1) {
+            sc = 3;
+        } else if (i + 4 <= len && data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 0 && data[i + 3] == 1) {
+            sc = 4;
+        } else {
+            ++i;
+            continue;
+        }
+        const size_t start = i + sc;
+        size_t j = start;
+        while (j + 3 < len) {
+            if (data[j] == 0 && data[j + 1] == 0 &&
+                (data[j + 2] == 1 || (j + 4 <= len && data[j + 2] == 0 && data[j + 3] == 1))) {
+                break;
+            }
+            ++j;
+        }
+        if (j + 3 >= len) {
+            j = len;
+        }
+        *offset = j;
+        *nal_len = (start < j) ? (j - start) : 0;
+        return data + start;
+    }
+    *offset = len;
+    *nal_len = 0;
+    return nullptr;
+}
+
 }  // namespace
 
-RtspJpegPusher::~RtspJpegPusher() {
+RtspH264Pusher::~RtspH264Pusher() {
     Disconnect();
 }
 
-void RtspJpegPusher::SetUrl(const std::string& url) {
+void RtspH264Pusher::SetUrl(const std::string& url) {
     std::lock_guard<std::mutex> lock(mu_);
     url_ = url;
 }
 
-std::string RtspJpegPusher::Url() const {
+std::string RtspH264Pusher::Url() const {
     std::lock_guard<std::mutex> lock(mu_);
     return url_;
 }
 
-bool RtspJpegPusher::ParseUrl(const std::string& url, std::string* host, uint16_t* port, std::string* path) const {
+bool RtspH264Pusher::ParseUrl(const std::string& url, std::string* host, uint16_t* port, std::string* path) const {
     if (!host || !port || !path) {
         return false;
     }
@@ -95,7 +123,6 @@ bool RtspJpegPusher::ParseUrl(const std::string& url, std::string* host, uint16_
     if (path->empty() || (*path)[0] != '/') {
         *path = "/" + *path;
     }
-
     const char* colon = strchr(authority.c_str(), ':');
     if (colon) {
         *host = std::string(authority.c_str(), colon);
@@ -110,7 +137,7 @@ bool RtspJpegPusher::ParseUrl(const std::string& url, std::string* host, uint16_
     return !host->empty();
 }
 
-bool RtspJpegPusher::SendAll(const void* data, size_t len) {
+bool RtspH264Pusher::SendAll(const void* data, size_t len) {
     if (sock_ < 0 || !data || len == 0) {
         return false;
     }
@@ -134,7 +161,7 @@ bool RtspJpegPusher::SendAll(const void* data, size_t len) {
     return true;
 }
 
-void RtspJpegPusher::MaybeCaptureSession(const std::string& headers) {
+void RtspH264Pusher::MaybeCaptureSession(const std::string& headers) {
     const std::string sid = ExtractHeaderValue(headers, "Session");
     if (!sid.empty()) {
         session_ = sid;
@@ -142,7 +169,7 @@ void RtspJpegPusher::MaybeCaptureSession(const std::string& headers) {
     }
 }
 
-bool RtspJpegPusher::RecvResponse(int* status_code, std::string* headers_out, std::string* body) {
+bool RtspH264Pusher::RecvResponse(int* status_code, std::string* headers_out, std::string* body) {
     if (sock_ < 0 || !status_code) {
         return false;
     }
@@ -202,7 +229,7 @@ bool RtspJpegPusher::RecvResponse(int* status_code, std::string* headers_out, st
     return true;
 }
 
-bool RtspJpegPusher::SendRtsp(const std::string& method, const std::string& url_full, const std::string& extra_headers,
+bool RtspH264Pusher::SendRtsp(const std::string& method, const std::string& url_full, const std::string& extra_headers,
                               const std::string& body, std::string* headers_out) {
     char session_hdr[96] = "";
     if (!session_.empty()) {
@@ -213,7 +240,7 @@ bool RtspJpegPusher::SendRtsp(const std::string& method, const std::string& url_
     const int n = snprintf(req, sizeof(req),
                            "%s %s RTSP/1.0\r\n"
                            "CSeq: %d\r\n"
-                           "User-Agent: deep-dog/vision\r\n"
+                           "User-Agent: deep-dog/vision-h264\r\n"
                            "%s"
                            "%s"
                            "Content-Length: %u\r\n"
@@ -237,7 +264,6 @@ bool RtspJpegPusher::SendRtsp(const std::string& method, const std::string& url_
         *headers_out = hdrs;
     }
     if (code < 200 || code >= 300) {
-        // 打一行响应首行方便排障
         const size_t nl = hdrs.find("\r\n");
         ESP_LOGW(TAG, "%s -> %.*s", method.c_str(), (int)(nl == std::string::npos ? hdrs.size() : nl), hdrs.c_str());
         return false;
@@ -245,7 +271,7 @@ bool RtspJpegPusher::SendRtsp(const std::string& method, const std::string& url_
     return true;
 }
 
-bool RtspJpegPusher::SendInterleavedRtp(const uint8_t* rtp, size_t rtp_len) {
+bool RtspH264Pusher::SendInterleavedRtp(const uint8_t* rtp, size_t rtp_len) {
     if (rtp_len > 0xffff) {
         return false;
     }
@@ -259,7 +285,54 @@ bool RtspJpegPusher::SendInterleavedRtp(const uint8_t* rtp, size_t rtp_len) {
     return SendAll(rtp, rtp_len);
 }
 
-bool RtspJpegPusher::Connect() {
+bool RtspH264Pusher::SendOneNal(const uint8_t* nal, size_t nal_len, bool marker) {
+    if (!nal || nal_len == 0) {
+        return false;
+    }
+    if (nal_len <= kMaxRtpPayload) {
+        std::vector<uint8_t> pkt(12 + nal_len);
+        uint8_t* rtp = pkt.data();
+        rtp[0] = 0x80;
+        rtp[1] = (marker ? 0x80 : 0x00) | kPayloadType;
+        WriteBe16(rtp + 2, seq_++);
+        WriteBe32(rtp + 4, timestamp_);
+        WriteBe32(rtp + 8, ssrc_);
+        memcpy(rtp + 12, nal, nal_len);
+        return SendInterleavedRtp(pkt.data(), pkt.size());
+    }
+
+    // FU-A
+    const uint8_t nal_hdr = nal[0];
+    const uint8_t nri = nal_hdr & 0x60;
+    const uint8_t type = nal_hdr & 0x1f;
+    size_t off = 1;
+    bool first = true;
+    while (off < nal_len) {
+        size_t chunk = nal_len - off;
+        if (chunk > kMaxRtpPayload - 2) {
+            chunk = kMaxRtpPayload - 2;
+        }
+        const bool last = (off + chunk >= nal_len);
+        std::vector<uint8_t> pkt(12 + 2 + chunk);
+        uint8_t* rtp = pkt.data();
+        rtp[0] = 0x80;
+        rtp[1] = ((marker && last) ? 0x80 : 0x00) | kPayloadType;
+        WriteBe16(rtp + 2, seq_++);
+        WriteBe32(rtp + 4, timestamp_);
+        WriteBe32(rtp + 8, ssrc_);
+        rtp[12] = nri | 28;  // FU-A
+        rtp[13] = (first ? 0x80 : 0x00) | (last ? 0x40 : 0x00) | type;
+        memcpy(rtp + 14, nal + off, chunk);
+        if (!SendInterleavedRtp(pkt.data(), pkt.size())) {
+            return false;
+        }
+        first = false;
+        off += chunk;
+    }
+    return true;
+}
+
+bool RtspH264Pusher::Connect() {
     Disconnect();
     status_.store(static_cast<uint8_t>(VisionPushStatus::Starting), std::memory_order_release);
     session_.clear();
@@ -325,10 +398,9 @@ bool RtspJpegPusher::Connect() {
     cseq_ = 1;
     seq_ = static_cast<uint16_t>(esp_random() & 0xffff);
     timestamp_ = esp_random();
-    ssrc_ = 0x444F4756;
+    ssrc_ = 0x48323634;
 
     const std::string full = url_copy;
-    // control 用相对 track，SETUP 拼到 base URL
     char sdp[384];
     snprintf(sdp, sizeof(sdp),
              "v=0\r\n"
@@ -336,8 +408,9 @@ bool RtspJpegPusher::Connect() {
              "s=deep-dog\r\n"
              "c=IN IP4 0.0.0.0\r\n"
              "t=0 0\r\n"
-             "m=video 0 RTP/AVP 26\r\n"
-             "a=rtpmap:26 JPEG/90000\r\n"
+             "m=video 0 RTP/AVP 96\r\n"
+             "a=rtpmap:96 H264/90000\r\n"
+             "a=fmtp:96 packetization-mode=1\r\n"
              "a=control:trackID=0\r\n");
 
     if (!SendRtsp("OPTIONS", full, "", "", nullptr)) {
@@ -356,16 +429,12 @@ bool RtspJpegPusher::Connect() {
     const std::string setup_url = full + (full.back() == '/' ? "" : "/") + "trackID=0";
     const char* transport = "Transport: RTP/AVP/TCP;unicast;interleaved=0-1;mode=RECORD\r\n";
     if (!SendRtsp("SETUP", setup_url, transport, "", nullptr)) {
-        // 回退：部分实现对 control URL 拼法不同
         if (!SendRtsp("SETUP", full, transport, "", nullptr)) {
             ::close(sock_);
             sock_ = -1;
             status_.store(static_cast<uint8_t>(VisionPushStatus::Error), std::memory_order_release);
             return false;
         }
-    }
-    if (session_.empty()) {
-        ESP_LOGW(TAG, "SETUP ok but Session missing");
     }
     if (!SendRtsp("RECORD", full, "Range: npt=0.000-\r\n", "", nullptr)) {
         ::close(sock_);
@@ -374,12 +443,12 @@ bool RtspJpegPusher::Connect() {
         return false;
     }
 
-    ESP_LOGI(TAG, "RTSP publish ok -> %s session=%s", full.c_str(), session_.c_str());
+    ESP_LOGI(TAG, "RTSP H264 publish ok -> %s session=%s", full.c_str(), session_.c_str());
     status_.store(static_cast<uint8_t>(VisionPushStatus::Streaming), std::memory_order_release);
     return true;
 }
 
-void RtspJpegPusher::Disconnect() {
+void RtspH264Pusher::Disconnect() {
     if (sock_ >= 0) {
         ::close(sock_);
         sock_ = -1;
@@ -388,46 +457,46 @@ void RtspJpegPusher::Disconnect() {
     status_.store(static_cast<uint8_t>(VisionPushStatus::Idle), std::memory_order_release);
 }
 
-bool RtspJpegPusher::PushJpeg(const uint8_t* jpeg, size_t len, uint16_t width, uint16_t height) {
-    if (!jpeg || len == 0 || sock_ < 0) {
-        return false;
-    }
-    if (len + 20 > kMaxJpegRtp) {
-        ESP_LOGW(TAG, "jpeg too large %u", static_cast<unsigned>(len));
+bool RtspH264Pusher::PushAnnexB(const uint8_t* data, size_t len) {
+    if (!data || len == 0 || sock_ < 0) {
         return false;
     }
 
-    std::vector<uint8_t> pkt(12 + 8 + len);
-    uint8_t* rtp = pkt.data();
-    rtp[0] = 0x80;
-    rtp[1] = 0x80 | 26;
-    WriteBe16(rtp + 2, seq_++);
-    WriteBe32(rtp + 4, timestamp_);
-    WriteBe32(rtp + 8, ssrc_);
-
-    uint8_t* jh = rtp + 12;
-    jh[0] = 0;
-    WriteBe24(jh + 1, 0);
-    jh[4] = 1;   // JPEG type 1
-    // Q must be 1..99 for RFC2435 formula tables. Q=255 requires an extra
-    // quantization-table header; MediaMTX drops those packets (reader gets 0 RTP).
-    jh[5] = 60;
-    jh[6] = static_cast<uint8_t>((width + 7) / 8);
-    jh[7] = static_cast<uint8_t>((height + 7) / 8);
-    memcpy(jh + 8, jpeg, len);
-
-    const uint32_t fps = DEEP_DOG_VISION_PUSH_FPS > 0 ? DEEP_DOG_VISION_PUSH_FPS : 5;
-    timestamp_ += 90000 / fps;
-
-    if (!SendInterleavedRtp(pkt.data(), pkt.size())) {
-        status_.store(static_cast<uint8_t>(VisionPushStatus::Error), std::memory_order_release);
-        if (sock_ >= 0) {
-            ::close(sock_);
-            sock_ = -1;
+    // Collect NAL pointers first to mark the last one
+    struct NalRef {
+        const uint8_t* p;
+        size_t n;
+    };
+    std::vector<NalRef> nals;
+    size_t off = 0;
+    while (off < len) {
+        size_t nal_len = 0;
+        const uint8_t* nal = NextNal(data, len, &off, &nal_len);
+        if (!nal || nal_len == 0) {
+            break;
         }
-        session_.clear();
-        return false;
+        nals.push_back({nal, nal_len});
     }
+    if (nals.empty()) {
+        // Maybe raw single NAL without start code
+        nals.push_back({data, len});
+    }
+
+    for (size_t i = 0; i < nals.size(); ++i) {
+        const bool marker = (i + 1 == nals.size());
+        if (!SendOneNal(nals[i].p, nals[i].n, marker)) {
+            status_.store(static_cast<uint8_t>(VisionPushStatus::Error), std::memory_order_release);
+            if (sock_ >= 0) {
+                ::close(sock_);
+                sock_ = -1;
+            }
+            session_.clear();
+            return false;
+        }
+    }
+
+    const uint32_t fps = DEEP_DOG_VISION_PUSH_FPS > 0 ? DEEP_DOG_VISION_PUSH_FPS : 3;
+    timestamp_ += 90000 / fps;
     status_.store(static_cast<uint8_t>(VisionPushStatus::Streaming), std::memory_order_release);
     return true;
 }

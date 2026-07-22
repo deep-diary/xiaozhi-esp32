@@ -1116,6 +1116,7 @@ if(BOARD_TYPE STREQUAL "deep-dog")
         wear_levelling
         esp_http_client
         json
+        espressif__esp_h264
     )
 endif()
 

@@ -14,7 +14,12 @@
 #include "vision_types.h"
 
 class EspVideo;
+#if DEEP_DOG_VISION_CODEC_H264
+class RtspH264Pusher;
+class H264SwEncoder;
+#else
 class RtspJpegPusher;
+#endif
 
 /**
  * 统一采帧调度：人脸管线永驻送帧；MJPEG / RTSP Push 作为互斥消费者。
@@ -65,7 +70,12 @@ private:
     mutable std::mutex jpeg_mu_;
     std::vector<uint8_t> jpeg_latest_;
 
+#if DEEP_DOG_VISION_CODEC_H264
+    std::unique_ptr<RtspH264Pusher> pusher_;
+    std::unique_ptr<H264SwEncoder> h264_enc_;
+#else
     std::unique_ptr<RtspJpegPusher> pusher_;
+#endif
     uint32_t reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MIN_MS;
     int64_t next_reconnect_ms_ = 0;
 };
