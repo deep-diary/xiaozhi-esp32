@@ -4,6 +4,7 @@
 #include "mqtt/modules/device_mqtt.h"
 #include "mqtt/modules/stream_mqtt.h"
 #include "mqtt/modules/imu_mqtt.h"
+#include "mqtt/modules/face_mqtt.h"
 
 #include "face_ai_config.h"
 #include "http-server/http_server_config.h"
@@ -24,6 +25,7 @@ struct DeepDogMqtt::Impl {
     DeepDogDeviceMqtt device{&client};
     DeepDogStreamMqtt stream{&client};
     DeepDogImuMqtt imu{&client};
+    DeepDogFaceMqtt face{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
 #if DEEP_DOG_IMU_ENABLE
@@ -41,15 +43,18 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         device.OnConnected();
         stream.OnConnected();
         imu.OnConnected();
+        face.OnConnected();
     } else {
         device.OnDisconnected();
         stream.OnDisconnected();
         imu.OnDisconnected();
+        face.OnDisconnected();
     }
 }
 
 void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& payload) {
     stream.OnMessage(topic, payload);
+    face.OnMessage(topic, payload);
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
@@ -132,6 +137,7 @@ bool DeepDogMqtt::Start() {
 #if DEEP_DOG_IMU_ENABLE
     impl_->imu.SetSensor(impl_->imu_sensor);
 #endif
+    impl_->face.SetEnabled(caps.face);
 
     impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
     impl_->client.SetMessageCallback(
@@ -140,8 +146,8 @@ bool DeepDogMqtt::Start() {
     const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
     const bool ok = impl_->client.Start(settings);
     impl_->started = true;
-    ESP_LOGI(TAG, "board MQTT started (connected=%d) stream_cap=%d imu_cap=%d", ok ? 1 : 0,
-             caps.stream ? 1 : 0, caps.imu ? 1 : 0);
+    ESP_LOGI(TAG, "board MQTT started (connected=%d) stream=%d face=%d imu=%d", ok ? 1 : 0, caps.stream ? 1 : 0,
+             caps.face ? 1 : 0, caps.imu ? 1 : 0);
     return ok;
 }
 
@@ -149,6 +155,7 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
+    impl_->face.Stop();
     impl_->imu.Stop();
     impl_->stream.Stop();
     impl_->device.Stop();

@@ -501,6 +501,14 @@ int DeepDogFaceAiPrimaryLocalId() {
     return s_snapshot.primary_local_id;
 }
 
+void DeepDogFaceAiCopySnapshot(DeepDogFaceSnapshot* out) {
+    if (!out) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(s_snap_mu);
+    *out = s_snapshot;
+}
+
 #else  // stub
 
 bool DeepDogFaceAiRuntimeStart() {
@@ -531,6 +539,12 @@ size_t DeepDogFaceAiFormatJson(char* buf, size_t buf_size) {
 void DeepDogFaceAiOnImmichName(int, const char*) {}
 int DeepDogFaceAiPrimaryLocalId() {
     return 0;
+}
+
+void DeepDogFaceAiCopySnapshot(DeepDogFaceSnapshot* out) {
+    if (out) {
+        *out = DeepDogFaceSnapshot{};
+    }
 }
 
 #endif

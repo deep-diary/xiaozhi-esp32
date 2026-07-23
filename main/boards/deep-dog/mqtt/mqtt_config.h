@@ -34,6 +34,11 @@
 #define DEEP_DOG_MQTT_STREAM_POLL_INTERVAL_US (1000 * 1000)
 #endif
 
+/** face/status 轮询周期（µs），on_change_or_poll ≈ 2 Hz */
+#ifndef DEEP_DOG_MQTT_FACE_POLL_INTERVAL_US
+#define DEEP_DOG_MQTT_FACE_POLL_INTERVAL_US (500 * 1000)
+#endif
+
 /** imu/status 发布周期见 sensor/imu_config.h（DEEP_DOG_MQTT_IMU_INTERVAL_US） */
 
 struct DeepDogMqttSettings {
