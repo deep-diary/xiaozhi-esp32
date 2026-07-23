@@ -3,9 +3,14 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/modules/device_mqtt.h"
 #include "mqtt/modules/stream_mqtt.h"
+#include "mqtt/modules/imu_mqtt.h"
 
 #include "face_ai_config.h"
 #include "http-server/http_server_config.h"
+#include "sensor/imu_config.h"
+#if DEEP_DOG_IMU_ENABLE
+#include "sensor/imu_sensor.h"
+#endif
 #include "vision/vision_config.h"
 
 #include <esp_log.h>
@@ -18,8 +23,12 @@ struct DeepDogMqtt::Impl {
     DeepDogMqttClient client;
     DeepDogDeviceMqtt device{&client};
     DeepDogStreamMqtt stream{&client};
+    DeepDogImuMqtt imu{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
+#if DEEP_DOG_IMU_ENABLE
+    DeepDogImuSensor* imu_sensor = nullptr;
+#endif
     int http_port = DEEP_DOG_HTTP_SERVER_PORT;
     bool started = false;
 
@@ -31,9 +40,11 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
     if (connected) {
         device.OnConnected();
         stream.OnConnected();
+        imu.OnConnected();
     } else {
         device.OnDisconnected();
         stream.OnDisconnected();
+        imu.OnDisconnected();
     }
 }
 
@@ -68,6 +79,17 @@ void DeepDogMqtt::SetHttpPort(int port) {
     }
 }
 
+void DeepDogMqtt::SetImuSensor(DeepDogImuSensor* sensor) {
+#if DEEP_DOG_IMU_ENABLE
+    if (impl_) {
+        impl_->imu_sensor = sensor;
+        impl_->imu.SetSensor(sensor);
+    }
+#else
+    (void)sensor;
+#endif
+}
+
 bool DeepDogMqtt::IsRunning() const {
     return impl_ && impl_->started;
 }
@@ -91,7 +113,11 @@ bool DeepDogMqtt::Start() {
 #else
     caps.face = false;
 #endif
+#if DEEP_DOG_IMU_ENABLE
+    caps.imu = true;
+#else
     caps.imu = false;
+#endif
     caps.led = false;
     caps.servo = false;
     caps.gimbal = false;
@@ -102,6 +128,10 @@ bool DeepDogMqtt::Start() {
     impl_->stream.SetEnabled(caps.stream);
     impl_->stream.SetVisionHub(impl_->hub);
     impl_->stream.SetHttpServer(impl_->http);
+    impl_->imu.SetEnabled(caps.imu);
+#if DEEP_DOG_IMU_ENABLE
+    impl_->imu.SetSensor(impl_->imu_sensor);
+#endif
 
     impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
     impl_->client.SetMessageCallback(
@@ -109,8 +139,9 @@ bool DeepDogMqtt::Start() {
 
     const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
     const bool ok = impl_->client.Start(settings);
-    impl_->started = true;  // 即使首连失败也会后台重连
-    ESP_LOGI(TAG, "board MQTT started (connected=%d) stream_cap=%d", ok ? 1 : 0, caps.stream ? 1 : 0);
+    impl_->started = true;
+    ESP_LOGI(TAG, "board MQTT started (connected=%d) stream_cap=%d imu_cap=%d", ok ? 1 : 0,
+             caps.stream ? 1 : 0, caps.imu ? 1 : 0);
     return ok;
 }
 
@@ -118,6 +149,7 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
+    impl_->imu.Stop();
     impl_->stream.Stop();
     impl_->device.Stop();
     impl_->client.Stop();
@@ -131,6 +163,7 @@ DeepDogMqtt::~DeepDogMqtt() = default;
 void DeepDogMqtt::SetVisionHub(VisionFrameHub*) {}
 void DeepDogMqtt::SetHttpServer(DeepDogHttpServer*) {}
 void DeepDogMqtt::SetHttpPort(int) {}
+void DeepDogMqtt::SetImuSensor(DeepDogImuSensor*) {}
 bool DeepDogMqtt::Start() { return false; }
 void DeepDogMqtt::Stop() {}
 bool DeepDogMqtt::IsRunning() const { return false; }

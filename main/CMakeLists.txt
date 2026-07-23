@@ -1118,6 +1118,8 @@ if(BOARD_TYPE STREQUAL "deep-dog")
         json
         espressif__esp_h264
         mqtt
+        espressif__bmi270_sensor
+        espressif__i2c_bus
     )
 endif()
 

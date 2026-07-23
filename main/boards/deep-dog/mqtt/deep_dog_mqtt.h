@@ -6,9 +6,10 @@
 
 class VisionFrameHub;
 class DeepDogHttpServer;
+class DeepDogImuSensor;
 
 /**
- * deep-dog 板级 MQTT 门面：device + stream（V-C03）。
+ * deep-dog 板级 MQTT 门面：device + stream + imu。
  * StartNetwork 之后调用 Start()。
  */
 class DeepDogMqtt {
@@ -19,6 +20,7 @@ public:
     void SetVisionHub(VisionFrameHub* hub);
     void SetHttpServer(DeepDogHttpServer* http);
     void SetHttpPort(int port);
+    void SetImuSensor(DeepDogImuSensor* sensor);
 
     bool Start();
     void Stop();

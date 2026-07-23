@@ -16,6 +16,7 @@
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
+#include <esp_idf_version.h>
 #if DEEP_DOG_WIFI_USE_STATIC_IP
 #include <esp_event.h>
 #include <esp_netif.h>
@@ -28,10 +29,15 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include "i2c_bus.h"
 #include "esp_video.h"
 
 #include "vision/vision_config.h"
 #include "face_ai_config.h"
+#include "sensor/imu_config.h"
+#if DEEP_DOG_IMU_ENABLE
+#include "sensor/imu_sensor.h"
+#endif
 
 #include <wifi_manager.h>
 
@@ -133,7 +139,8 @@ public:
 
 class DeepDog : public WifiBoard {
 private:
-    i2c_master_bus_handle_t i2c_bus_;
+    i2c_bus_handle_t shared_i2c_bus_handle_ = nullptr;
+    i2c_master_bus_handle_t i2c_bus_ = nullptr;
     Button boot_button_;
     TouchButtonController touch_buttons_;
     Display* display_;
@@ -143,6 +150,9 @@ private:
     DeepDogTouchApp touch_app_{&dog_};  // 触摸按键业务（须在 dog_ 之后构造）
     LegControl* leg_ptrs_[4] = { nullptr };  // 供单腿 MCP 回调使用，指向 dog_ 内 4 腿
     TaskHandle_t can_rx_task_handle_ = nullptr;
+#if DEEP_DOG_IMU_ENABLE
+    std::unique_ptr<DeepDogImuSensor> imu_sensor_;
+#endif
 #if DEEP_DOG_VISION_HUB_ENABLE
     std::unique_ptr<VisionFrameHub> vision_hub_;
 #endif
@@ -220,20 +230,33 @@ private:
     }
 
     void InitializeI2c() {
-        // Initialize I2C peripheral
-        i2c_master_bus_config_t i2c_bus_cfg = {
-            .i2c_port = I2C_NUM_0,
+        // 与 thumble/esp-spot 一致：i2c_bus 组件供 BMI270；内部 master handle 供 codec/摄像头 SCCB
+        i2c_config_t i2c_cfg = {
+            .mode = I2C_MODE_MASTER,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
             .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
-            .clk_source = I2C_CLK_SRC_DEFAULT,
-            .glitch_ignore_cnt = 7,
-            .intr_priority = 0,
-            .trans_queue_depth = 0,
-            .flags = {
-                .enable_internal_pullup = 1,
-            },
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master =
+                {
+                    .clk_speed = I2C_MASTER_FREQ_HZ,
+                },
+            .clk_flags = 0,
         };
-        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+        shared_i2c_bus_handle_ = i2c_bus_create(I2C_NUM_0, &i2c_cfg);
+        if (!shared_i2c_bus_handle_) {
+            ESP_LOGE(TAG, "Failed to create shared I2C bus");
+            ESP_ERROR_CHECK(ESP_FAIL);
+        }
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0) && !CONFIG_I2C_BUS_BACKWARD_CONFIG
+        i2c_bus_ = i2c_bus_get_internal_bus_handle(shared_i2c_bus_handle_);
+#else
+#error "deep-dog requires i2c_bus_get_internal_bus_handle()"
+#endif
+        if (!i2c_bus_) {
+            ESP_LOGE(TAG, "Failed to obtain master bus handle from i2c_bus");
+            ESP_ERROR_CHECK(ESP_FAIL);
+        }
     }
 
     void InitializeSpi() {
@@ -383,6 +406,26 @@ private:
 #endif
     }
 
+    void InitializeImu() {
+#if DEEP_DOG_IMU_ENABLE
+        if (!shared_i2c_bus_handle_) {
+            ESP_LOGW(TAG, "IMU skipped: no I2C bus");
+            return;
+        }
+        imu_sensor_ = std::make_unique<DeepDogImuSensor>(shared_i2c_bus_handle_);
+        if (!imu_sensor_->Initialize()) {
+            ESP_LOGW(TAG, "BMI270 init failed — MQTT imu/status will publish ok=false");
+        } else {
+            ESP_LOGI(TAG, "BMI270 ready");
+        }
+#if DEEP_DOG_MQTT_ENABLE
+        if (board_mqtt_) {
+            board_mqtt_->SetImuSensor(imu_sensor_.get());
+        }
+#endif
+#endif
+    }
+
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
         dog_.setDeepMotor(deep_motor_);
@@ -458,9 +501,12 @@ public:
             if (ip.empty() || ip == "0.0.0.0") {
                 ESP_LOGW(TAG, "WiFi IP 超时未就绪，仍继续启动视觉/MQTT");
             } else {
-                ESP_LOGI(TAG, "WiFi IP=%s，启动 face/hub/http/mqtt", ip.c_str());
+                ESP_LOGI(TAG, "WiFi IP=%s，启动 face/hub/http/mqtt/imu", ip.c_str());
             }
         }
+#if DEEP_DOG_IMU_ENABLE
+        InitializeImu();
+#endif
 #if DEEP_DOG_FACE_AI_ENABLE
         if (!DeepDogFaceAiRuntimeStart()) {
             ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");

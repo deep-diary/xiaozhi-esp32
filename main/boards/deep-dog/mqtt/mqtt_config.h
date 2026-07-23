@@ -34,6 +34,8 @@
 #define DEEP_DOG_MQTT_STREAM_POLL_INTERVAL_US (1000 * 1000)
 #endif
 
+/** imu/status 发布周期见 sensor/imu_config.h（DEEP_DOG_MQTT_IMU_INTERVAL_US） */
+
 struct DeepDogMqttSettings {
     std::string broker_host = DEEP_DOG_MQTT_DEFAULT_BROKER_HOST;
     int broker_port = DEEP_DOG_MQTT_DEFAULT_BROKER_PORT;
