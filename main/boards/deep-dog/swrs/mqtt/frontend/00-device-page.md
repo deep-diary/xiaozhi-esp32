@@ -1,0 +1,55 @@
+# 设备页 · 入口卡网格（前端）
+
+| 项 | 内容 |
+|----|------|
+| 读者 | **前端** |
+| 路由建议 | `/device/:deviceId` |
+| 依赖 | [M01](../M01-board-mqtt-protocol.md)、[infra](../../vision/infra.md)、[YAML](../protocol/deep-dog-mqtt.yml) |
+
+## 信息架构
+
+| 层级 | 职责 |
+|------|------|
+| **本页** | Device Basic + **模块入口卡片**；**不展示 detail、不做模块控制** |
+| **模块详情页** | 点卡进入；见 [`../modules/`](../modules/) |
+
+**默认**：本页除 `device/info`、`device/status` 外，**不订阅**各模块业务 Topic。
+
+## Topic（本页）
+
+| Topic | 方向 | QoS | retain | 用途 |
+|-------|------|-----|--------|------|
+| `device/info` | ↑ | 0 | true | capabilities、固件、IP |
+| `device/status` | ↑ | 0 | false | 心跳（可选） |
+
+前缀：`deepdiary/deep-dog/{device_id}/`。  
+Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
+
+## 入口卡顺序
+
+1. Device Basic（页头，非卡）  
+2. Stream → IMU → Face → Track → Touch → Dog → LED → Gimbal → Servo → Handle → CAN → Person  
+
+仅当 `capabilities.<module_id> === true` 时渲染对应入口卡。
+
+## Steps（前端）
+
+- **Step 1** 使用 `device_id` 连接 EMQX（MQTT over WebSocket）。
+- **Step 2** 订阅 `…/device/info`（retain）与可选 `…/device/status`。
+- **Step 3** 渲染 Device Basic：`device_id` / `firmware` / `ip` / `http_port`；可链到 [01-device](../modules/01-device.md) 完整页。
+- **Step 4** 读 `capabilities`，过滤模块列表，渲染入口卡（标题、图标、`module_id`、路由）。卡文案见各 `modules/NN-*.md`「入口卡文案」。
+- **Step 5** 点击入口卡 → `navigate(/device/:deviceId/modules/:moduleId)`（或等价路由）。
+- **Step 6** 离开本页时取消本页订阅；**不要**在此页管理模块 Topic（由详情页负责）。
+
+## 入口卡禁止 / 允许
+
+| 禁止 | 允许 |
+|------|------|
+| 完整字段表、控制按钮组、高频图表 | 模块标题、图标、一句话说明 |
+| 订阅 `stream/*`、`face/*` 等业务 Topic | 仅用本页已有的 `device/*` |
+
+## 验收
+
+- [ ] 无 capability 的模块不出卡
+- [ ] 点卡进入对应详情页
+- [ ] 本页无模块 cmd 按钮、无模块 detail 面板

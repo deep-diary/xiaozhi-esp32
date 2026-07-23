@@ -41,6 +41,8 @@ public:
     void SetRtspUrl(const std::string& url);
     std::string RtspUrl() const;
     VisionPushStatus GetPushStatus() const;
+    /** 最近一次成功推送 RTP 的时间戳（ms，esp_timer）；0=尚未推过 */
+    int64_t LastRtpOkMs() const { return last_rtp_ok_ms_.load(std::memory_order_acquire); }
 
     void PublishJpeg(std::vector<uint8_t>&& jpeg);
     bool CopyLatestJpeg(std::vector<uint8_t>* out) const;
@@ -78,4 +80,6 @@ private:
 #endif
     uint32_t reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MIN_MS;
     int64_t next_reconnect_ms_ = 0;
+    std::atomic<int64_t> last_rtp_ok_ms_{0};
+    uint32_t capture_fail_streak_ = 0;
 };

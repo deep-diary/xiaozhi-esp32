@@ -33,6 +33,8 @@
 #include "vision/vision_config.h"
 #include "face_ai_config.h"
 
+#include <wifi_manager.h>
+
 #if DEEP_DOG_HTTP_SERVER_ENABLE
 #include "http-server/deep_dog_http_server.h"
 #endif
@@ -41,6 +43,10 @@
 #endif
 #if DEEP_DOG_FACE_AI_ENABLE
 #include "face_ai_bridge.h"
+#endif
+#include "mqtt/mqtt_config.h"
+#if DEEP_DOG_MQTT_ENABLE
+#include "mqtt/deep_dog_mqtt.h"
 #endif
 
 #define TAG "deep_dog"
@@ -142,6 +148,9 @@ private:
 #endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE
     std::unique_ptr<DeepDogHttpServer> http_server_;
+#endif
+#if DEEP_DOG_MQTT_ENABLE
+    std::unique_ptr<DeepDogMqtt> board_mqtt_;
 #endif
 
     static void CanRxTask(void* arg) {
@@ -338,8 +347,9 @@ private:
             .dvp = &dvp_config,
         };
 
-        // 触摸/显示等初始化后给 SCCB 总线与传感器上电稳定一点时间，避免首读 PID=0
-        vTaskDelay(pdMS_TO_TICKS(80));
+        // 触摸/显示等初始化后给 SCCB 总线与传感器上电稳定一点时间，避免首读 PID=0。
+        // 软重启后 OV3660 偶发未就绪：加长等待（无 PWDN 脚时仍可能需断电）。
+        vTaskDelay(pdMS_TO_TICKS(300));
 
         camera_ = new EspVideo(video_config);
 
@@ -359,6 +369,16 @@ private:
         http_server_ = std::make_unique<DeepDogHttpServer>(camera_, &dog_, DEEP_DOG_HTTP_SERVER_PORT);
 #if DEEP_DOG_VISION_HUB_ENABLE
         http_server_->SetVisionHub(vision_hub_.get());
+#endif
+#endif
+#if DEEP_DOG_MQTT_ENABLE
+        board_mqtt_ = std::make_unique<DeepDogMqtt>();
+#if DEEP_DOG_VISION_HUB_ENABLE
+        board_mqtt_->SetVisionHub(vision_hub_.get());
+#endif
+#if DEEP_DOG_HTTP_SERVER_ENABLE
+        board_mqtt_->SetHttpServer(http_server_.get());
+        board_mqtt_->SetHttpPort(DEEP_DOG_HTTP_SERVER_PORT);
 #endif
 #endif
     }
@@ -424,6 +444,23 @@ public:
             DeepDogApplyStaticStaIpv4();
         }
 #endif
+        // 等 IP 再启 face/hub/http/mqtt：避免 WiFi/NVS 与 facedb(FAT) 并发踩 flash 断言崩溃，
+        // 进而导致摄像头/采帧异常、RTSP 只握手不推帧、MediaMTX 超时掉流。
+        {
+            std::string ip;
+            for (int i = 0; i < 60; ++i) {
+                ip = WifiManager::GetInstance().GetIpAddress();
+                if (!ip.empty() && ip != "0.0.0.0") {
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+            if (ip.empty() || ip == "0.0.0.0") {
+                ESP_LOGW(TAG, "WiFi IP 超时未就绪，仍继续启动视觉/MQTT");
+            } else {
+                ESP_LOGI(TAG, "WiFi IP=%s，启动 face/hub/http/mqtt", ip.c_str());
+            }
+        }
 #if DEEP_DOG_FACE_AI_ENABLE
         if (!DeepDogFaceAiRuntimeStart()) {
             ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");
@@ -440,6 +477,13 @@ public:
         if (http_server_ && !http_server_->IsRunning()) {
             if (!http_server_->Start()) {
                 ESP_LOGW(TAG, "HTTP 控制/MJPEG 服务启动失败（可检查端口占用）");
+            }
+        }
+#endif
+#if DEEP_DOG_MQTT_ENABLE
+        if (board_mqtt_ && !board_mqtt_->IsRunning()) {
+            if (!board_mqtt_->Start()) {
+                ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
             }
         }
 #endif

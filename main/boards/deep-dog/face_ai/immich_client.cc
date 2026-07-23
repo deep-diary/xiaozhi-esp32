@@ -396,8 +396,9 @@ bool DeepDogImmichInit() {
     if (!s_queue) {
         return false;
     }
-    if (xTaskCreateWithCaps(ImmichTask, "dog_immich", 12288, nullptr, 2, &s_task,
-                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+    // 必须用内部 DRAM 栈：ProcessJob → BindImmichName → SaveMetaToNvs 会写 Flash。
+    // PSRAM 任务栈会触发 esp_task_stack_is_sane_cache_disabled 断言，连带搞挂摄像头。
+    if (xTaskCreate(ImmichTask, "dog_immich", 12288, nullptr, 2, &s_task) != pdPASS) {
         vQueueDelete(s_queue);
         s_queue = nullptr;
         return false;
@@ -413,7 +414,7 @@ void DeepDogImmichDeinit() {
         return;
     }
     if (s_task) {
-        vTaskDeleteWithCaps(s_task);
+        vTaskDelete(s_task);
         s_task = nullptr;
     }
     if (s_queue) {

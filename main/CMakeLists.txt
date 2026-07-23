@@ -1117,6 +1117,7 @@ if(BOARD_TYPE STREQUAL "deep-dog")
         esp_http_client
         json
         espressif__esp_h264
+        mqtt
     )
 endif()
 

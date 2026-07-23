@@ -245,8 +245,8 @@ static void FaceAiTask(void* /*arg*/) {
         if (job.data == nullptr || job.len == 0) {
             continue;
         }
-        // 给 IDLE 喘息，降低 VGA 推理触发 task_wdt 的概率
-        vTaskDelay(pdMS_TO_TICKS(1));
+        // 给 IDLE 喘息：识别卷积会长时间占满 CPU0，曾导致 TWDT → InstrFetchProhibited → 软重启后摄像头挂死
+        vTaskDelay(pdMS_TO_TICKS(5));
 
         std::vector<DeepDogFaceBox> boxes;
         DeepDogFaceSnapshot snap{};
@@ -259,6 +259,7 @@ static void FaceAiTask(void* /*arg*/) {
 #if DEEP_DOG_FACE_RECOG_ENABLE
             std::list<dl::detect::result_t> raw;
             if (DeepDogFaceDetectRun(job.data, job.len, job.w, job.h, &boxes, &raw)) {
+                vTaskDelay(pdMS_TO_TICKS(5));
                 dl::image::img_t img{};
                 uint8_t* owned = nullptr;
                 if (!boxes.empty() && DeepDogFaceDetectMakeImg(job.data, job.len, job.w, job.h, &img, &owned)) {
@@ -266,6 +267,7 @@ static void FaceAiTask(void* /*arg*/) {
                     if (owned) {
                         heap_caps_free(owned);
                     }
+                    vTaskDelay(pdMS_TO_TICKS(5));
                     // Immich 队列深度 1：每帧为尚无真名的脸各尝试投递一次（满则丢弃）
                     for (const auto& b : boxes) {
                         if (b.local_id > 0) {
@@ -291,6 +293,8 @@ static void FaceAiTask(void* /*arg*/) {
             std::lock_guard<std::mutex> lock(s_snap_mu);
             s_snapshot = snap;
         }
+        // 帧间让出 CPU，避免连续推理饿死 IDLE0
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -324,9 +328,9 @@ bool DeepDogFaceAiRuntimeStart() {
         s_runtime_started = false;
         return false;
     }
-    // 识别 MFN ~250ms，加大栈；栈放 PSRAM，腾出内部 DRAM 给 MQTT/TLS AES DMA
-    if (xTaskCreateWithCaps(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task,
-                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+    // facedb/FAT 会关 flash cache；任务栈必须在内部 DRAM（PSRAM 栈会触发
+    // esp_task_stack_is_sane_cache_disabled 断言，导致采帧/推流中断）。
+    if (xTaskCreate(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task) != pdPASS) {
         vQueueDelete(s_queue);
         s_queue = nullptr;
 #if DEEP_DOG_FACE_IMMICH_ENABLE

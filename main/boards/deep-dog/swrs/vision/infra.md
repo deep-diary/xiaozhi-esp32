@@ -38,18 +38,18 @@ Topic 前缀：`deepdiary/deep-dog/<device_id>/...`
 | Topic | 方向 | 关联 |
 |-------|------|------|
 | `device/info` / `device/status` | ↑ | [M01](../mqtt/M01-board-mqtt-protocol.md) |
-| `stream/cmd` / `stream/status` | 双向 | [C03](./client/C03-mqtt-stream-control.md) |
-| `face/cmd` / `face/status` | 双向 | [C03](./client/C03-mqtt-stream-control.md) / M01 |
-| `dog/cmd` / `dog/status` | 双向 | M01（映射 HTTP `/api/cmd`） |
-| `imu/status` | ↑ | M01 / D9 BMI270 |
-| `led/cmd` / `led/status` | 双向 | M01 |
-| `servo/cmd` / `servo/status` | 双向 | M01 |
-| `gimbal/cmd` / `gimbal/status` | 双向 | [C04](./client/C04-mqtt-gimbal.md) |
-| `handle/cmd` / `handle/status` | 双向 | M01 |
-| `touch/status` | ↑ | M01 / `touch_btn` |
-| `can/cmd` / `can/status` / `can/frames` / `can/tx` | 双向 | M01 CAN 透传（GPIO38/48 TWAI；网页 deep-trace `80-can-web-tunnel`） |
-| `person/active` | ↑ | [P01](./product/P01-kiosk-personalization.md)（预留） |
-| `track/cmd` | ↓ | M01（预留跟脸） |
+| `stream/cmd` / `stream/status` | 双向 | [02-stream](../mqtt/modules/02-stream.md)（V-C03） |
+| `face/cmd` / `face/status` | 双向 | [04-face](../mqtt/modules/04-face.md) / M01 |
+| `dog/cmd` / `dog/status` | 双向 | [07-dog](../mqtt/modules/07-dog.md) |
+| `imu/status` | ↑ | [03-imu](../mqtt/modules/03-imu.md) / D9 |
+| `led/cmd` / `led/status` | 双向 | [08-led](../mqtt/modules/08-led.md) |
+| `servo/cmd` / `servo/status` | 双向 | [10-servo](../mqtt/modules/10-servo.md) |
+| `gimbal/cmd` / `gimbal/status` | 双向 | [09-gimbal](../mqtt/modules/09-gimbal.md)（V-C04） |
+| `handle/cmd` / `handle/status` | 双向 | [11-handle](../mqtt/modules/11-handle.md) |
+| `touch/status` | ↑ | [06-touch](../mqtt/modules/06-touch.md) |
+| `can/cmd` / `can/status` / `can/frames` / `can/tx` | 双向 | [12-can](../mqtt/modules/12-can.md) |
+| `person/active` | ↑ | [13-person](../mqtt/modules/13-person.md)（预留） |
+| `track/cmd` | ↓ | [05-track](../mqtt/modules/05-track.md)（预留） |
 
 ## 3. Immich
 

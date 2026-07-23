@@ -1,14 +1,66 @@
-# deep-dog MQTT（板级协议）
+# deep-dog MQTT
 
-deep-dog 定位为 **可裁剪全功能模块板**：MQTT 按功能域拆分 Topic，网页与固件统一认本目录契约。
+**可裁剪全功能模块板** MQTT 契约与前端规格。字段真源：[protocol/deep-dog-mqtt.yml](./protocol/deep-dog-mqtt.yml)。
 
-| 文档 | 说明 |
-|------|------|
-| [M01-board-mqtt-protocol.md](./M01-board-mqtt-protocol.md) | 需求：模块表、裁剪、QoS、HTTP/驱动映射、样例 |
-| [protocol/deep-dog-mqtt.yml](./protocol/deep-dog-mqtt.yml) | **字段真源**（version / modules / topics） |
+## 前端怎么读
 
-Broker / 地址事实源仍见 [vision/infra.md](../vision/infra.md)。实现切片：推流 [V-C03](../vision/client/C03-mqtt-stream-control.md)、云台 [V-C04](../vision/client/C04-mqtt-gimbal.md)。
+1. [frontend/00-device-page.md](./frontend/00-device-page.md) — 设备页：入口卡（无 detail）
+2. [modules/](./modules/) — 各模块**独立详情页**（订阅/控制 Steps）
+3. [M01](./M01-board-mqtt-protocol.md) — 总览、裁剪、Broker
 
-**非狗项目**：关 `capabilities.dog`（及可选对狗依赖的 `track`），保留 `stream` / `face` / `imu` / `led` / `gimbal` / `touch` / `can` 等即可。
+| 顺序 | 模块文档 |
+|------|----------|
+| 01 | [device](./modules/01-device.md) |
+| 02 | [stream](./modules/02-stream.md)（V-C03） |
+| 03 | [imu](./modules/03-imu.md) |
+| 04 | [face](./modules/04-face.md) |
+| 05 | [track](./modules/05-track.md) |
+| 06 | [touch](./modules/06-touch.md) |
+| 07 | [dog](./modules/07-dog.md) |
+| 08 | [led](./modules/08-led.md) |
+| 09 | [gimbal](./modules/09-gimbal.md)（V-C04） |
+| 10 | [servo](./modules/10-servo.md) |
+| 11 | [handle](./modules/11-handle.md) |
+| 12 | [can](./modules/12-can.md) |
+| 13 | [person](./modules/13-person.md) |
 
-CAN 透传：sparkbot 的 GPIO38/48（原 UART）在 deep-dog 上为 TWAI；帧打包发 `can/frames` 供网页显示（对齐 deep-trace `80-can-web-tunnel`）。
+IA：**入口卡 → 详情页**。卡上不做完整控制；模块 Topic 仅在详情页订阅。
+
+## 文档分层
+
+| 层 | 读者 |
+|----|------|
+| `frontend/` + `modules/` | 前端 |
+| modules 内「固件实现」 | 固件 |
+| YAML | 双方字段真源 |
+
+Broker 地址：[vision/infra.md](../vision/infra.md)。推流能力依赖 [C02](../vision/client/C02-device-push-stream.md)。
+
+## 固件（V-C03）
+
+源码：`main/boards/deep-dog/mqtt/`（`DEEP_DOG_MQTT_ENABLE`，默认 1）。
+
+NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password`。  
+默认 broker `192.168.31.25:1883`，`device_id=dev`，Topic 前缀 `deepdiary/deep-dog/dev/`。
+
+### MQTTX / 脚本验收清单
+
+**网页同款路径（推荐）**：`wss://mqtt-ws.deep-diary.com/mqtt`  
+凭证用环境变量，勿写进仓库：`DEEP_DOG_MQTT_USER` / `DEEP_DOG_MQTT_PASS`。
+
+```bash
+# 外网 WSS（默认，对齐前端）
+/usr/bin/python3 scripts/deep_dog_mqtt_verify.py --wait 30 --start-stream
+
+# 仅局域网 TCP（设备同路径）
+/usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via lan --wait 20
+```
+
+1. 连接外网 WSS（或局域网 `192.168.31.25:1883`）。
+2. 订阅 `deepdiary/deep-dog/dev/device/info` → retain 可见 capabilities / ip / firmware。
+3. 订阅 `…/device/status` → 约 5s 心跳。
+4. 订阅 `…/stream/status`；向 `…/stream/cmd` 发 QoS1：
+   - `{"action":"start","ts":1710000000}` → status 进入 starting/streaming，MediaMTX 可拉。
+   - `{"action":"stop","ts":1710000000}` → idle/off。
+5. 发非法 `{"action":"nope"}` → 设备不重启，status.error 非空。
+6. 断网重连后 info/status 重新 retain，stream/cmd 仍可控制。

@@ -8,7 +8,7 @@
 
 /** 开机是否自动 RTSP 推流（默认关；C03 MQTT 再远程开） */
 #ifndef DEEP_DOG_VISION_PUSH_AT_BOOT
-#define DEEP_DOG_VISION_PUSH_AT_BOOT 0
+#define DEEP_DOG_VISION_PUSH_AT_BOOT 1
 #endif
 
 /** MediaMTX RTSP 发布基址（不含 path） */
@@ -24,6 +24,14 @@
 #define DEEP_DOG_VISION_STREAM_PATH "deep-dog/dev"
 #endif
 
+/**
+ * 网页可播地址（外网 HLS）。MQTT stream/status.url 用此值，便于前端直接打开。
+ * 设备仍向局域网 RTSP 推流；外网只拉 HLS（见 vision/infra.md）。
+ */
+#ifndef DEEP_DOG_VISION_PUBLIC_PLAY_URL
+#define DEEP_DOG_VISION_PUBLIC_PLAY_URL \
+    "https://live.deep-diary.com/" DEEP_DOG_VISION_STREAM_PATH "/index.m3u8"
+#endif
 /**
  * RTSP 推流编码：1=esp_h264 软编（默认，网页 HLS 前置）；0=回退 RTP/JPEG。
  * JPEG 路径仍保留编译，改此宏即可切回。

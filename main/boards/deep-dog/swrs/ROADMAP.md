@@ -7,7 +7,7 @@
 
 1. **设备 = HTTP 服务器**：遥控 → MJPEG → 人脸框 → **本地数字 ID** → Immich 真名  
 2. **设备 = 流媒体客户端**：MediaMTX 推流，**复用**同一套 `face_ai`  
-3. **板级 MQTT 契约（M01）** → 客户端实现（C03 起按模块落地）  
+3. **板级 MQTT 契约（M01）** → 模块文档落地（stream=V-C03 等）  
 4. 产品化：Kiosk / 对话个性化  
 
 不并行把 Immich 与推流和本地 ID 绑死；视觉轨当前切片为 **V-C02**（设备推 MediaMTX，人脸永驻）。
@@ -30,21 +30,21 @@
 | **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | ✅（真名待 Immich 队列空闲复验） |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 基建可达；完整推拉待稳定 LAN 复验 |
 | V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | **固件已实现**（人脸永驻 + MJPEG/RTSP 互斥）；实机长稳待勾 |
-| **M01** | 板级 MQTT 契约 | [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md) / [YAML](./mqtt/protocol/deep-dog-mqtt.yml) | infra | **文档 ✅** |
-| V-C03 | MQTT 推流开关 | [vision/client/C03](./vision/client/C03-mqtt-stream-control.md) | C02、**M01** | 待办（协议见 M01/YAML） |
-| V-C04 | MQTT 云台 | [vision/client/C04](./vision/client/C04-mqtt-gimbal.md) | C03、**M01** | 更后（协议已细化） |
+| **M01** | 板级 MQTT 总览 | [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md) / [YAML](./mqtt/protocol/deep-dog-mqtt.yml) / [modules](./mqtt/modules/) | infra | **文档 ✅**（入口卡+详情页规格） |
+| V-C03 | MQTT 推流开关 | [mqtt/modules/02-stream](./mqtt/modules/02-stream.md) | C02、**M01** | **固件已实现**（device+stream）；实机 MQTTX 待勾 |
+| V-C04 | MQTT 云台 | [mqtt/modules/09-gimbal](./mqtt/modules/09-gimbal.md) | stream 客户端、**M01** | 更后（协议已细化） |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |
 
 ## 依赖关系
 
 ```text
-S01 → S02 → S03 → S04 → S05 → S06 → C02 → C03 → C04
+S01 → S02 → S03 → S04 → S05 → S06 → C02 → stream(V-C03) → gimbal(V-C04)
                     │                      ↑
                     └── face_ai ───────────┘
 C01 ─────────────────────────────────────→ C02
-M01 ─────────────────────────────────────→ C03 / C04 / 其它模块 MQTT
+M01 + modules/ ──────────────────────────→ 各模块 MQTT（含 V-C03/C04）
 S05 ─────────────────────────────────────→ P01
-D9 (BMI270) ─────────────────────────────→ imu/status (M01)
+D9 (BMI270) ─────────────────────────────→ imu/status (modules/03-imu)
 ```
 
 ## 视觉轨验收速查
@@ -62,4 +62,4 @@ D9 (BMI270) ──────────────────────�
 ## 基础设施与 MQTT
 
 - 地址：[vision/infra.md](./vision/infra.md)（MediaMTX / EMQX / Immich，无明文密钥）。
-- 整板 Topic / 字段：[mqtt/](./mqtt/)（可裁剪模块：dog/stream/face/imu/led/servo/gimbal/handle/touch/can…）。
+- 整板 Topic / 字段：[mqtt/](./mqtt/)（[M01](./mqtt/M01-board-mqtt-protocol.md) + [modules](./mqtt/modules/) 前端详情页规格 + YAML）。

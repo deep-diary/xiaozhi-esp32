@@ -122,4 +122,4 @@ uint8_t  data[8];
 - `../motor/README.md` — 协议与 `DeepMotor`。
 - `../config.h` — `CAN_TX_GPIO` / `CAN_RX_GPIO`（GPIO38/48；源自 esp-sparkbot UART 脚，现作 TWAI）。
 - `../dog/README.md` — 整机与 MCP。
-- [`../swrs/mqtt/M01-board-mqtt-protocol.md`](../swrs/mqtt/M01-board-mqtt-protocol.md) — MQTT `can/*` 透传契约（网页帧表；对齐 deep-trace `80-can-web-tunnel`）。
+- [`../swrs/mqtt/modules/12-can.md`](../swrs/mqtt/modules/12-can.md) — MQTT `can/*` 透传（网页帧表）。

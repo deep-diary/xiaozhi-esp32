@@ -1,13 +1,14 @@
 # vision · 视觉与流媒体
 
-交付顺序（权威）：**Server（S01～S05）→ Client（C01～C04）→ Product（P01）**。
+交付顺序（权威）：**Server（S01～S06）→ Client（C01～C02）→ MQTT（M01 + modules / V-C03～C04）→ Product（P01）**。
 
 | 子目录 | 角色 |
 |--------|------|
-| [server/](./server/) | 设备 = HTTP 服务器（遥控、MJPEG、人脸框、本地 ID、Immich） |
-| [client/](./client/) | 设备 = 流媒体客户端（推 MediaMTX、MQTT） |
+| [server/](./server/) | 设备 = HTTP 服务器 |
+| [client/](./client/) | 设备 = 流媒体客户端（推 MediaMTX） |
+| [../mqtt/](../mqtt/) | 板级 MQTT（入口卡 + 模块详情页规格） |
 | [product/](./product/) | Kiosk / 对话个性化 |
-| [infra.md](./infra.md) | MediaMTX / EMQX / Immich 地址与安全约定 |
+| [infra.md](./infra.md) | MediaMTX / EMQX / Immich |
 
 总表与勾选：[../ROADMAP.md](../ROADMAP.md)
 

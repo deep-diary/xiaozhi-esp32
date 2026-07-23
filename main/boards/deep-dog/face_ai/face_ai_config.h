@@ -15,7 +15,12 @@
 
 /** 向人脸任务送帧的最小间隔（ms）；与 MJPEG fps 独立，可远低于视频帧率 */
 #ifndef DEEP_DOG_FACE_AI_MIN_INTERVAL_MS
-#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 1000
+#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 3000
+#endif
+
+/** 1=RTSP 推流时仍做人脸；0=推流时跳过送帧（避免识别占满 CPU0 触发 TWDT/崩溃拖死摄像头） */
+#ifndef DEEP_DOG_FACE_AI_DURING_RTSP
+#define DEEP_DOG_FACE_AI_DURING_RTSP 0
 #endif
 
 /** 1=检测前对 RGB565 每像素做高/低字节对调（仅在 INPUT_RGB888=0 时有意义） */

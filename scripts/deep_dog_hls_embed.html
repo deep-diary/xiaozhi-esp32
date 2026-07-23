@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>deep-dog 外网 HLS</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "SF Pro Text", "PingFang SC", sans-serif;
+      background: #0f1419;
+      color: #e8eef4;
+      display: grid;
+      place-items: center;
+    }
+    main {
+      width: min(960px, 94vw);
+      display: grid;
+      gap: 1rem;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+    .meta { opacity: 0.75; font-size: 0.9rem; word-break: break-all; }
+    video {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: #000;
+      border: 0;
+      outline: none;
+    }
+    #status { font-size: 0.85rem; min-height: 1.2em; }
+    .ok { color: #6dcea0; }
+    .err { color: #ff8f8f; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>deep-dog · 外网 HLS</h1>
+    <div class="meta" id="url"></div>
+    <video id="v" controls autoplay muted playsinline></video>
+    <div id="status">加载中…</div>
+  </main>
+  <script>
+    const SRC = "https://live.deep-diary.com/deep-dog/dev/index.m3u8";
+    const video = document.getElementById("v");
+    const status = document.getElementById("status");
+    document.getElementById("url").textContent = SRC;
+
+    function setStatus(text, ok) {
+      status.textContent = text;
+      status.className = ok === true ? "ok" : ok === false ? "err" : "";
+    }
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = SRC;
+      video.addEventListener("loadedmetadata", () => setStatus("原生 HLS 已就绪", true));
+      video.addEventListener("error", () => setStatus("原生播放失败（流可能未就绪）", false));
+    } else if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+      hls.loadSource(SRC);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => setStatus("HLS.js 清单已解析，播放中", true));
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) setStatus("HLS 致命错误: " + data.type + " / " + data.details, false);
+      });
+    } else {
+      setStatus("当前浏览器不支持 HLS", false);
+    }
+  </script>
+</body>
+</html>

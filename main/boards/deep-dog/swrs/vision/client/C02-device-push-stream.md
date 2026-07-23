@@ -22,7 +22,7 @@
 ## 3. 范围
 
 **包含**：采帧→H.264（默认）/JPEG（编译回退）→推 RTSP；失败退避；与 MJPEG 互斥；HTTP `/api/vision_publish`。  
-**不包含**：MQTT 开关（C03）；公网直推；另写第二套 face 模型；MediaMTX 旁路 ffmpeg 转码。
+**不包含**：MQTT 开关（见 [modules/02-stream](../../mqtt/modules/02-stream.md) / V-C03）；公网直推；另写第二套 face 模型；MediaMTX 旁路 ffmpeg 转码。
 
 ## 4. 与 face_ai 复用
 

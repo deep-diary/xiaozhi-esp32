@@ -33,11 +33,11 @@ modules:
   stream:
     status: defined
     required: false
-    impl: V-C03
+    impl: modules/02-stream
   face:
     status: defined
     required: false
-    impl: V-C03
+    impl: modules/04-face
   imu:
     status: defined
     required: false
@@ -56,7 +56,7 @@ modules:
     status: defined
     required: false
     depends: [servo]
-    impl: V-C04
+    impl: modules/09-gimbal
     ref: main/boards/deep-diary/gimbal/
   handle:
     status: defined
@@ -181,9 +181,12 @@ topics:
     payload:
       state: { type: enum, values: [idle, starting, streaming, error] }
       mode: { type: enum, values: [off, stream, rtsp_push] }
-      url: { type: string }
+      url:
+        type: string
+        note: "Web play URL (public HLS); device still pushes LAN RTSP"
       error: { type: string, optional: true }
       ts: { type: int }
+      ts_iso: { type: string, optional: true, note: "UTC ISO8601 for UI display" }
 
   # ---- face ----
   face/cmd:

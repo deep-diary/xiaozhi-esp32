@@ -103,7 +103,16 @@ VisionPushStatus VisionFrameHub::GetPushStatus() const {
     if (GetPublishMode() != VisionPublishMode::RtspPush) {
         return VisionPushStatus::Idle;
     }
-    return pusher_ ? pusher_->Status() : VisionPushStatus::Idle;
+    VisionPushStatus s = pusher_ ? pusher_->Status() : VisionPushStatus::Idle;
+    // 握手成功但长时间无 RTP → 对外不要谎报 streaming（MediaMTX 会因此超时掉 path）
+    if (s == VisionPushStatus::Streaming) {
+        const int64_t last = last_rtp_ok_ms_.load(std::memory_order_acquire);
+        const int64_t now = esp_timer_get_time() / 1000;
+        if (last == 0 || (now - last) > 5000) {
+            return last == 0 ? VisionPushStatus::Starting : VisionPushStatus::Error;
+        }
+    }
+    return s;
 }
 
 void VisionFrameHub::SetPublishMode(VisionPublishMode mode) {
@@ -111,6 +120,13 @@ void VisionFrameHub::SetPublishMode(VisionPublishMode mode) {
     mode_.store(static_cast<uint8_t>(mode), std::memory_order_release);
     if (mode != VisionPublishMode::RtspPush) {
         TearDownPusher();
+        reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MIN_MS;
+        last_rtp_ok_ms_.store(0, std::memory_order_release);
+    } else if (mode != prev) {
+        // 新开推流：清采帧失败计数与 RTP 时钟，避免沿用旧 streak 立刻拆会话
+        capture_fail_streak_ = 0;
+        last_rtp_ok_ms_.store(0, std::memory_order_release);
+        next_reconnect_ms_ = 0;
         reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MIN_MS;
     }
     if (mode != VisionPublishMode::HttpMjpeg && mode != prev) {
@@ -259,6 +275,11 @@ void VisionFrameHub::TaskLoop() {
 #else
         const bool face_on = false;
 #endif
+        // 推流连接不依赖采帧成功：否则 camera 瞬时失败时 mode=rtsp_push 会永久停在 idle
+        if (mode == VisionPublishMode::RtspPush) {
+            EnsurePusherConnected();
+        }
+
         if (!need_publish && !face_on) {
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
@@ -269,13 +290,34 @@ void VisionFrameHub::TaskLoop() {
         uint16_t h = 0;
         uint32_t v4l = 0;
         if (!CapturePackedRgb565(&packed, &w, &h, &v4l)) {
+            if (++capture_fail_streak_ == 1 || (capture_fail_streak_ % 100) == 0) {
+                ESP_LOGW(TAG, "capture fail streak=%lu mode=%s",
+                         static_cast<unsigned long>(capture_fail_streak_), VisionPublishModeStr(mode));
+            }
+            // 采帧持续失败：拆掉空会话并退避重连，避免「握手→无帧→立刻重连」风暴卡在 starting
+            if (mode == VisionPublishMode::RtspPush && pusher_ && pusher_->IsConnected() &&
+                capture_fail_streak_ >= 100) {
+                ESP_LOGW(TAG, "capture dead, tear down RTSP publisher (backoff)");
+                TearDownPusher();
+                last_rtp_ok_ms_.store(0, std::memory_order_release);
+                const int64_t now_ms = esp_timer_get_time() / 1000;
+                next_reconnect_ms_ = now_ms + 5000;
+                reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MIN_MS;
+                capture_fail_streak_ = 0;
+            }
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
+        capture_fail_streak_ = 0;
 
 #if DEEP_DOG_FACE_AI_ENABLE
         if (face_on && !packed.empty()) {
-            DeepDogFaceAiSubmitFrameIfDue(packed.data(), packed.size(), w, h);
+#if !DEEP_DOG_FACE_AI_DURING_RTSP
+            if (mode != VisionPublishMode::RtspPush)
+#endif
+            {
+                DeepDogFaceAiSubmitFrameIfDue(packed.data(), packed.size(), w, h);
+            }
         }
 #endif
 
@@ -287,7 +329,6 @@ void VisionFrameHub::TaskLoop() {
                 }
             } else if (mode == VisionPublishMode::RtspPush) {
 #if DEEP_DOG_VISION_CODEC_H264
-                EnsurePusherConnected();
                 if (pusher_ && pusher_->IsConnected() && h264_enc_) {
                     std::vector<uint8_t> annexb;
                     if (h264_enc_->EncodeRgb565(packed.data(), packed.size(), w, h, &annexb) &&
@@ -295,22 +336,30 @@ void VisionFrameHub::TaskLoop() {
                         if (!pusher_->PushAnnexB(annexb.data(), annexb.size())) {
                             EnsurePusherConnected();
                         } else {
+                            last_rtp_ok_ms_.store(esp_timer_get_time() / 1000, std::memory_order_release);
                             static int s_ok = 0;
-                            if (s_ok < 3) {
+                            if (s_ok < 5) {
                                 ESP_LOGI(TAG, "H264 push ok bytes=%u %ux%u",
                                          static_cast<unsigned>(annexb.size()), w, h);
                                 ++s_ok;
                             }
+                        }
+                    } else {
+                        static int s_enc_fail = 0;
+                        if (s_enc_fail < 5) {
+                            ESP_LOGW(TAG, "H264 encode fail %ux%u", w, h);
+                            ++s_enc_fail;
                         }
                     }
                 }
 #else
                 std::vector<uint8_t> jpeg;
                 if (EncodeJpeg(packed.data(), packed.size(), w, h, v4l, &jpeg) && !jpeg.empty()) {
-                    EnsurePusherConnected();
                     if (pusher_ && pusher_->IsConnected()) {
                         if (!pusher_->PushJpeg(jpeg.data(), jpeg.size(), w, h)) {
                             EnsurePusherConnected();
+                        } else {
+                            last_rtp_ok_ms_.store(esp_timer_get_time() / 1000, std::memory_order_release);
                         }
                     }
                     PublishJpeg(std::move(jpeg));
