@@ -117,6 +117,7 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     cJSON_AddBoolToObject(caps, "dog", caps_.dog);
     cJSON_AddBoolToObject(caps, "stream", caps_.stream);
     cJSON_AddBoolToObject(caps, "face", caps_.face);
+    cJSON_AddBoolToObject(caps, "track", caps_.track);
     cJSON_AddBoolToObject(caps, "imu", caps_.imu);
     cJSON_AddBoolToObject(caps, "led", caps_.led);
     cJSON_AddBoolToObject(caps, "servo", caps_.servo);

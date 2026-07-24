@@ -13,8 +13,8 @@
 | 01 | [device](./modules/01-device.md) |
 | 02 | [stream](./modules/02-stream.md)（V-C03） |
 | 03 | [imu](./modules/03-imu.md) |
-| 04 | [face](./modules/04-face.md) |
-| 05 | [track](./modules/05-track.md) |
+| 04 | [face](./modules/04-face.md)（检测中心页；含跟踪区） |
+| 05 | [track](./modules/05-track.md)（**同 Face 页**，无独立入口卡） |
 | 06 | [touch](./modules/06-touch.md) |
 | 07 | [dog](./modules/07-dog.md) |
 | 08 | [led](./modules/08-led.md) |
@@ -24,7 +24,8 @@
 | 12 | [can](./modules/12-can.md) |
 | 13 | [person](./modules/13-person.md) |
 
-IA：**入口卡 → 详情页**。卡上不做完整控制；模块 Topic 仅在详情页订阅。
+IA：**入口卡 → 详情页**。卡上不做完整控制；模块 Topic 仅在详情页订阅。  
+**Face + Track 同页**：设备页只出「人脸」卡；`/modules/track` redirect 到 `/modules/face#track`。
 
 ## 文档分层
 
@@ -64,3 +65,13 @@ NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` /
    - `{"action":"stop","ts":1710000000}` → idle/off。
 5. 发非法 `{"action":"nope"}` → 设备不重启，status.error 非空。
 6. 断网重连后 info/status 重新 retain，stream/cmd 仍可控制。
+
+Face / Track（同页联调）：
+
+```bash
+/usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
+/usr/bin/python3 scripts/deep_dog_mqtt_face_verify.py --via both --wait 10
+/usr/bin/python3 scripts/deep_dog_mqtt_track_verify.py --via both --wait 12
+```
+
+`device/info.capabilities.track=true`（`DEEP_DOG_TRACK_MQTT_ENABLE`）；`actuator=none`。详见 [05-track](./modules/05-track.md)。

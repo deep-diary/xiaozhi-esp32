@@ -8,6 +8,7 @@ struct DeepDogCapabilities {
     bool dog = true;
     bool stream = false;
     bool face = false;
+    bool track = false;
     bool imu = false;
     bool led = false;
     bool servo = false;

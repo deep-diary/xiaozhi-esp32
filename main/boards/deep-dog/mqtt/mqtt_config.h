@@ -7,6 +7,11 @@
 #define DEEP_DOG_MQTT_ENABLE 1
 #endif
 
+/** 1=暴露 track MQTT / capabilities.track；0=关闭 */
+#ifndef DEEP_DOG_TRACK_MQTT_ENABLE
+#define DEEP_DOG_TRACK_MQTT_ENABLE 1
+#endif
+
 #ifndef DEEP_DOG_MQTT_DEFAULT_BROKER_HOST
 #define DEEP_DOG_MQTT_DEFAULT_BROKER_HOST "192.168.31.25"
 #endif
@@ -37,6 +42,11 @@
 /** face/status 轮询周期（µs），on_change_or_poll ≈ 2 Hz */
 #ifndef DEEP_DOG_MQTT_FACE_POLL_INTERVAL_US
 #define DEEP_DOG_MQTT_FACE_POLL_INTERVAL_US (500 * 1000)
+#endif
+
+/** track/status 轮询周期（µs），on_change ≈ 2 Hz */
+#ifndef DEEP_DOG_MQTT_TRACK_POLL_INTERVAL_US
+#define DEEP_DOG_MQTT_TRACK_POLL_INTERVAL_US (500 * 1000)
 #endif
 
 /** imu/status 发布周期见 sensor/imu_config.h（DEEP_DOG_MQTT_IMU_INTERVAL_US） */

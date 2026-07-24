@@ -28,9 +28,11 @@ Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 ## 入口卡顺序
 
 1. Device Basic（页头，非卡）  
-2. Stream → IMU → Face → Track → Touch → Dog → LED → Gimbal → Servo → Handle → CAN → Person  
+2. Stream → IMU → **Face** → Touch → Dog → LED → Gimbal → Servo → Handle → CAN → Person  
 
 仅当 `capabilities.<module_id> === true` 时渲染对应入口卡。
+
+**Track 不单独出卡**：跟踪与人脸同详情页（[04-face](../modules/04-face.md) / [05-track](../modules/05-track.md)）。有 `capabilities.track` 时，「人脸」卡说明可写「检测与跟踪」；点卡仍进 `/modules/face`。
 
 ## Steps（前端）
 

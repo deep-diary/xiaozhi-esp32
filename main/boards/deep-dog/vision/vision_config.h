@@ -32,6 +32,12 @@
 #define DEEP_DOG_VISION_PUBLIC_PLAY_URL \
     "https://live.deep-diary.com/" DEEP_DOG_VISION_STREAM_PATH "/index.m3u8"
 #endif
+
+/** 局域网 HLS（同一 MediaMTX）；浏览器需跟 cookie 302 */
+#ifndef DEEP_DOG_VISION_LAN_PLAY_URL
+#define DEEP_DOG_VISION_LAN_PLAY_URL \
+    "http://" DEEP_DOG_VISION_RTSP_HOST ":8888/" DEEP_DOG_VISION_STREAM_PATH "/index.m3u8"
+#endif
 /**
  * RTSP 推流编码：1=esp_h264 软编（默认，网页 HLS 前置）；0=回退 RTP/JPEG。
  * JPEG 路径仍保留编译，改此宏即可切回。

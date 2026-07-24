@@ -165,13 +165,14 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "</style></head><body>"
         "<h2>DeepDog 遥控</h2>"
         "<p style='color:#888;font-size:13px;margin:0 0 10px 0'>"
-        "人脸检测默认同开（静默发现人）。视频发布二选一：局域网 MJPEG 或推 MediaMTX；关推流不影响人脸。"
+        "人脸检测默认同开。视频：局域网 MJPEG，或推 MediaMTX（内外网用 HLS 看）。关推流不影响人脸。"
         "</p>"
         "<div class='row'><span>视频发布:</span>"
         "<button class='secondary' onclick=\"setMode('off')\">关闭推流</button>"
         "<button onclick=\"setMode('stream')\">局域网 MJPEG</button>"
         "<button onclick=\"setMode('rtsp_push')\">推 MediaMTX</button></div>"
         "<p id='st'></p>"
+        "<p id='playLinks' style='font-size:12px;color:#9cf;margin:4px 0;word-break:break-all'></p>"
         "<div class='row' style='margin-top:8px'><label style='color:#ccc;font-size:14px'>"
         "<input type='checkbox' id='faceEn' checked onchange='toggleFace(this.checked)'/> 人脸检测/识别（静默可开，不必开视频）</label></div>"
         "<p id='faceMeta' style='font-size:12px;color:#9cf;margin:4px 0'></p>"
@@ -195,6 +196,7 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "<tbody id='dogTblBody'></tbody></table>"
         "<script>"
         "const st=document.getElementById('st');const wrap=document.getElementById('vidWrap');"
+        "const playLinks=document.getElementById('playLinks');"
         "const img=document.getElementById('m');const cv=document.getElementById('fc');const faceMeta=document.getElementById('faceMeta');"
         "const dogMeta=document.getElementById('dogMeta');const dogTblBody=document.getElementById('dogTblBody');"
         "let facePoll=null;let lastStatus=null;let cmdInFlight=false;let lastCmdTs=0;"
@@ -240,6 +242,12 @@ static esp_err_t RootHandler(httpd_req_t* req) {
         "+(j.push_status?(' 推流:'+j.push_status):'')"
         "+(j.face_ai_compiled?' 人脸模块:有':' 人脸模块:无')"
         "+' 狗初始化:'+((j.dog_initialized)?'已完成':'未完成');"
+        "if(j.mode==='rtsp_push'&&(j.play_url||j.lan_play_url)){"
+        "playLinks.innerHTML='外网 HLS: <a href=\"'+(j.play_url||'')+'\" target=_blank rel=noopener>'+(j.play_url||'')+'</a><br/>'"
+        "+'内网 HLS: <a href=\"'+(j.lan_play_url||'')+'\" target=_blank rel=noopener>'+(j.lan_play_url||'')+'</a><br/>'"
+        "+'设备推流: '+(j.push_url||'');}"
+        "else if(j.mode==='stream'){playLinks.textContent='本页下方 MJPEG 预览（仅局域网）';}"
+        "else{playLinks.textContent='';}"
         "applyDogInitState(j);"
         "if(j.mode==='stream'){wrap.style.display='block';if(!img.src||img.src.indexOf('/stream')<0)img.src='/stream';}"
         "else{wrap.style.display='none';img.removeAttribute('src');}"
@@ -385,13 +393,15 @@ static esp_err_t ApiStatusHandler(httpd_req_t* req) {
         const std::string u = srv->vision_hub()->RtspUrl();
         snprintf(push_url, sizeof(push_url), "%s", u.c_str());
     }
-    char buf[512];
+    char buf[768];
     snprintf(buf, sizeof(buf),
              "{\"mode\":\"%s\",\"publish\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u,"
              "\"push_status\":\"%s\",\"push_url\":\"%s\","
+             "\"play_url\":\"%s\",\"lan_play_url\":\"%s\","
              "\"face_ai_compiled\":%s,\"dog_initialized\":%s}",
              ModeToStr(srv->GetCaptureMode()), ModeToStr(srv->GetCaptureMode()), srv->StreamClientCount(),
              srv->HasJpegFrame() ? "true" : "false", (unsigned)srv->Port(), push_status, push_url,
+             DEEP_DOG_VISION_PUBLIC_PLAY_URL, DEEP_DOG_VISION_LAN_PLAY_URL,
 #if DEEP_DOG_FACE_AI_ENABLE
              "true",
 #else
@@ -767,7 +777,7 @@ void DeepDogHttpServer::LogHttpAccessUrls() {
         ESP_LOGW(TAG, "HTTP 服务已启动，WiFi IP 尚未就绪；联网后本日志会再次出现完整地址");
         return;
     }
-    ESP_LOGI(TAG, "HTTP 控制页 http://%s:%u/  MJPEG http://%s:%u/stream  (默认关推流；人脸由 VisionHub 静默采帧)",
+    ESP_LOGI(TAG, "HTTP 控制页 http://%s:%u/  MJPEG http://%s:%u/stream  (推流/人脸见 VisionHub；HLS 内外网见 /api/status)",
              ip.c_str(), (unsigned)port_, ip.c_str(), (unsigned)port_);
 }
 

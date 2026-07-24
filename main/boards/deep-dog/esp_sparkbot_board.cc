@@ -230,7 +230,22 @@ private:
     }
 
     void InitializeI2c() {
-        // 与 thumble/esp-spot 一致：i2c_bus 组件供 BMI270；内部 master handle 供 codec/摄像头 SCCB
+        // 先建 master bus，再交给 i2c_bus 包装：避免 i2c_bus_v2 探测空端口时刷 ERROR
+        i2c_master_bus_config_t bus_cfg = {
+            .i2c_port = I2C_NUM_0,
+            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
+            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags =
+                {
+                    .enable_internal_pullup = true,
+                },
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus_));
+
         i2c_config_t i2c_cfg = {
             .mode = I2C_MODE_MASTER,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
@@ -249,7 +264,10 @@ private:
             ESP_ERROR_CHECK(ESP_FAIL);
         }
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0) && !CONFIG_I2C_BUS_BACKWARD_CONFIG
-        i2c_bus_ = i2c_bus_get_internal_bus_handle(shared_i2c_bus_handle_);
+        i2c_master_bus_handle_t wrapped = i2c_bus_get_internal_bus_handle(shared_i2c_bus_handle_);
+        if (wrapped) {
+            i2c_bus_ = wrapped;
+        }
 #else
 #error "deep-dog requires i2c_bus_get_internal_bus_handle()"
 #endif

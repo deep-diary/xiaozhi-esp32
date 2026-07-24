@@ -49,7 +49,7 @@ Topic 前缀：`deepdiary/deep-dog/<device_id>/...`
 | `touch/status` | ↑ | [06-touch](../mqtt/modules/06-touch.md) |
 | `can/cmd` / `can/status` / `can/frames` / `can/tx` | 双向 | [12-can](../mqtt/modules/12-can.md) |
 | `person/active` | ↑ | [13-person](../mqtt/modules/13-person.md)（预留） |
-| `track/cmd` | ↓ | [05-track](../mqtt/modules/05-track.md)（预留） |
+| `track/cmd` / `track/status` | 双向 | [05-track](../mqtt/modules/05-track.md)（MQTT ready / actuator=none） |
 
 ## 3. Immich
 

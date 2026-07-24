@@ -38,6 +38,7 @@ modules:
     status: defined
     required: false
     impl: modules/04-face
+    note: "UI shares detail page with track (modules/04-face); topics stay face/*"
   imu:
     status: defined
     required: false
@@ -84,9 +85,16 @@ modules:
     required: false
     impl: V-P01
   track:
-    status: reserved
+    status: ready
     required: false
-    depends_optional: [face, gimbal, dog]
+    depends: [face]
+    depends_optional: [gimbal, dog]
+    impl: modules/05-track
+    ui: modules/04-face
+    note: >
+      MQTT ready with actuator=none (no real pan). No separate device-page entry card.
+      Frontend: /modules/face#track; /modules/track redirects there. Device reads face
+      snapshot in-process; optional gimbal/dog actuators later.
 
 topics:
   # ---- device ----
@@ -108,6 +116,7 @@ topics:
           dog: { type: bool }
           stream: { type: bool }
           face: { type: bool }
+          track: { type: bool }
           imu: { type: bool }
           led: { type: bool }
           servo: { type: bool }
@@ -523,8 +532,37 @@ topics:
     dir: downlink
     qos: 1
     retain: false
-    status: reserved
-    note: "Face tracking control; consume face/status primary cx/cy"
+    status: ready
+    note: >
+      enable/disable tracking. If face detect off or no primary, accept enable
+      but track/status.following stays false.
     payload:
       action: { type: enum, values: [enable, disable], optional: true }
+      ts: { type: int }
+
+  track/status:
+    module: track
+    dir: uplink
+    qos: 0
+    retain: false
+    status: ready
+    when: on_change
+    note: >
+      UI on face detail page; target mirrors face primary (pixels).
+      v0.1 actuator always none; error may be face_off / no_target.
+    payload:
+      enabled: { type: bool }
+      following: { type: bool }
+      target:
+        type: object
+        optional: true
+        fields:
+          cx: { type: number }
+          cy: { type: number }
+          local_id: { type: int, optional: true }
+      actuator:
+        type: enum
+        optional: true
+        values: [none, gimbal, dog]
+      error: { type: string, optional: true }
       ts: { type: int }

@@ -46,21 +46,21 @@
 | 页头 | device | [01-device](./modules/01-device.md) | ready |
 | 1 | stream | [02-stream](./modules/02-stream.md)（V-C03） | ready |
 | 2 | imu | [03-imu](./modules/03-imu.md) | ready / D9 |
-| 3 | face | [04-face](./modules/04-face.md) | ready |
-| 4 | track | [05-track](./modules/05-track.md) | planned |
-| 5 | touch | [06-touch](./modules/06-touch.md) | ready |
-| 6 | dog | [07-dog](./modules/07-dog.md) | ready |
-| 7 | led | [08-led](./modules/08-led.md) | planned |
-| 8 | gimbal | [09-gimbal](./modules/09-gimbal.md)（V-C04） | ready / 更后 |
-| 9 | servo | [10-servo](./modules/10-servo.md) | planned |
-| 10 | handle | [11-handle](./modules/11-handle.md) | 骨架 |
-| 11 | can | [12-can](./modules/12-can.md) | planned |
-| 12 | person | [13-person](./modules/13-person.md) | planned |
+| 3 | face | [04-face](./modules/04-face.md) | ready（含 track 同页 UI） |
+| — | track | [05-track](./modules/05-track.md) | ready（MQTT / actuator=none）；**无独立入口卡** |
+| 4 | touch | [06-touch](./modules/06-touch.md) | ready |
+| 5 | dog | [07-dog](./modules/07-dog.md) | ready |
+| 6 | led | [08-led](./modules/08-led.md) | planned |
+| 7 | gimbal | [09-gimbal](./modules/09-gimbal.md)（V-C04） | ready / 更后 |
+| 8 | servo | [10-servo](./modules/10-servo.md) | planned |
+| 9 | handle | [11-handle](./modules/11-handle.md) | 骨架 |
+| 10 | can | [12-can](./modules/12-can.md) | planned |
+| 11 | person | [13-person](./modules/13-person.md) | planned |
 
 ### 裁剪规则
 
 1. `capabilities.<id>=false` → 设备不出入口卡；固件不订不发该域。
-2. `gimbal` 依赖 `servo` 驱动；`track` 可选依赖 `face` + `gimbal`/`dog`。
+2. `gimbal` 依赖 `servo` 驱动；`track` **依赖** `face`，可选 `gimbal`/`dog`；Track **不单独出入口卡**。
 3. `touch` 与 `dog` 协议解耦。
 4. `can` 可独立于 `dog`；`allow_tx` 默认关。
 
@@ -72,9 +72,8 @@ deepdiary/deep-dog/{device_id}/
 ├── stream|face|dog|led|servo|gimbal|handle  …/cmd|status
 ├── imu/status · touch/status
 ├── can/cmd|status|frames|tx
-├── person/active · track/cmd   (reserved)
+├── person/active (reserved) · track/cmd|status (MQTT ready / actuator=none)
 ```
-
 完整字段 → YAML；HTTP/驱动映射与样例 → 各 modules 文档。
 
 ## 7. 与 diary / thumble

@@ -34,7 +34,7 @@
   "ip": "192.168.31.211",
   "http_port": 8080,
   "capabilities": {
-    "dog": true, "stream": true, "face": true, "imu": true,
+    "dog": true, "stream": true, "face": true, "track": true, "imu": true,
     "led": false, "servo": false, "gimbal": false,
     "handle": false, "touch": true, "can": true
   },
