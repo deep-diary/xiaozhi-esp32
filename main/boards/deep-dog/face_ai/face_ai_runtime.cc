@@ -239,6 +239,89 @@ static void MaybeRequestImmichName(const uint8_t* rgb565, uint16_t w, uint16_t h
 #endif
 }
 
+/** 检测框 IoU（像素坐标），用于 live 跳过识别时沿用上次 ID/人名。 */
+static float BoxIou(const DeepDogFaceBox& a, const DeepDogFaceBox& b) {
+    const float ix0 = std::max(a.x0, b.x0);
+    const float iy0 = std::max(a.y0, b.y0);
+    const float ix1 = std::min(a.x1, b.x1);
+    const float iy1 = std::min(a.y1, b.y1);
+    const float iw = ix1 - ix0;
+    const float ih = iy1 - iy0;
+    if (iw <= 0.f || ih <= 0.f) {
+        return 0.f;
+    }
+    const float inter = iw * ih;
+    const float area_a = std::max(0.f, a.x1 - a.x0) * std::max(0.f, a.y1 - a.y0);
+    const float area_b = std::max(0.f, b.x1 - b.x0) * std::max(0.f, b.y1 - b.y0);
+    const float uni = area_a + area_b - inter;
+    return uni > 0.f ? (inter / uni) : 0.f;
+}
+
+/**
+ * live 模式下识别降频时：按 IoU 把上一帧已识别的 local_id/display_name 挂到本帧检测框，
+ * 避免中间帧冲掉人名导致前端大多显示「未识别」。TTL 对齐 RECOG_SESSION_MS。
+ */
+static void StickyApplyPrevIds(std::vector<DeepDogFaceBox>* boxes, DeepDogFaceSnapshot* snap) {
+    if (!boxes || boxes->empty() || !snap) {
+        return;
+    }
+    DeepDogFaceSnapshot prev{};
+    {
+        std::lock_guard<std::mutex> lock(s_snap_mu);
+        prev = s_snapshot;
+    }
+    if (prev.count <= 0) {
+        return;
+    }
+    const int64_t age_ms = static_cast<int64_t>(snap->ts_ms) - static_cast<int64_t>(prev.ts_ms);
+    if (age_ms < 0 || age_ms > static_cast<int64_t>(DEEP_DOG_FACE_RECOG_SESSION_MS)) {
+        return;
+    }
+
+    constexpr float kMinIou = 0.3f;
+    const int prev_n = prev.count > 8 ? 8 : prev.count;
+    uint8_t used[8] = {};
+    for (auto& box : *boxes) {
+        int best = -1;
+        float best_iou = kMinIou;
+        for (int i = 0; i < prev_n; i++) {
+            if (used[i] || prev.faces[i].local_id <= 0) {
+                continue;
+            }
+            const float iou = BoxIou(box, prev.faces[i]);
+            if (iou > best_iou) {
+                best_iou = iou;
+                best = i;
+            }
+        }
+        if (best < 0) {
+            continue;
+        }
+        used[best] = 1;
+        const DeepDogFaceBox& p = prev.faces[best];
+        box.local_id = p.local_id;
+        box.recognize_source = p.recognize_source;
+        strncpy(box.display_name, p.display_name, sizeof(box.display_name) - 1);
+        box.display_name[sizeof(box.display_name) - 1] = '\0';
+    }
+
+    const DeepDogFaceBox* primary = nullptr;
+    for (const auto& box : *boxes) {
+        if (box.local_id <= 0) {
+            continue;
+        }
+        if (!primary || box.score > primary->score) {
+            primary = &box;
+        }
+    }
+    if (primary) {
+        snap->primary_local_id = primary->local_id;
+        strncpy(snap->primary_display_name, primary->display_name, sizeof(snap->primary_display_name) - 1);
+        snap->primary_display_name[sizeof(snap->primary_display_name) - 1] = '\0';
+        snap->primary_source = primary->recognize_source;
+    }
+}
+
 static void FaceAiTask(void* /*arg*/) {
     FaceFrameJob job{};
     for (;;) {
@@ -261,7 +344,10 @@ static void FaceAiTask(void* /*arg*/) {
         if (s_user_enabled.load(std::memory_order_relaxed)) {
 #if DEEP_DOG_FACE_RECOG_ENABLE
             std::list<dl::detect::result_t> raw;
-            if (DeepDogFaceDetectRun(job.data, job.len, job.w, job.h, &boxes, &raw)) {
+            const int64_t t_detect0 = esp_timer_get_time();
+            const bool detected = DeepDogFaceDetectRun(job.data, job.len, job.w, job.h, &boxes, &raw);
+            const int detect_ms = static_cast<int>((esp_timer_get_time() - t_detect0) / 1000);
+            if (detected) {
                 vTaskDelay(pdMS_TO_TICKS(5));
                 const DeepDogFacePipeline pipe =
                     static_cast<DeepDogFacePipeline>(s_pipeline.load(std::memory_order_relaxed));
@@ -269,11 +355,14 @@ static void FaceAiTask(void* /*arg*/) {
                 const bool run_recog =
                     (pipe == DeepDogFacePipeline::Identity) ||
                     ((now_us - s_last_recog_us) >= (int64_t)DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS * 1000);
+                int recog_ms = -1;
                 if (run_recog && !boxes.empty()) {
                     dl::image::img_t img{};
                     uint8_t* owned = nullptr;
                     if (DeepDogFaceDetectMakeImg(job.data, job.len, job.w, job.h, &img, &owned)) {
+                        const int64_t t_recog0 = esp_timer_get_time();
                         DeepDogFaceRecognizeProcess(img, raw, &boxes, &snap);
+                        recog_ms = static_cast<int>((esp_timer_get_time() - t_recog0) / 1000);
                         s_last_recog_us = now_us;
                         if (owned) {
                             heap_caps_free(owned);
@@ -285,6 +374,15 @@ static void FaceAiTask(void* /*arg*/) {
                             }
                         }
                     }
+                } else if (!boxes.empty()) {
+                    StickyApplyPrevIds(&boxes, &snap);
+                }
+                static int s_timing_logs = 0;
+                if (s_timing_logs < 16) {
+                    ESP_LOGI(TAG, "timing detect_ms=%d recog_ms=%d boxes=%u sticky=%d", detect_ms, recog_ms,
+                             static_cast<unsigned>(boxes.size()),
+                             (run_recog || boxes.empty()) ? 0 : 1);
+                    ++s_timing_logs;
                 }
             }
 #else

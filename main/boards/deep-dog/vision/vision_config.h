@@ -49,7 +49,7 @@
 /** 推流目标帧率（Hub 在 RtspPush / HttpMjpeg 时共用上限；H.264 建议 3～5） */
 #ifndef DEEP_DOG_VISION_PUSH_FPS
 #if DEEP_DOG_VISION_CODEC_H264
-#define DEEP_DOG_VISION_PUSH_FPS 3
+#define DEEP_DOG_VISION_PUSH_FPS 5
 #else
 #define DEEP_DOG_VISION_PUSH_FPS 5
 #endif

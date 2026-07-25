@@ -355,14 +355,20 @@ topics:
       roll: { type: float, note: "estimated from accel" }
       switches:
         type: object
-        note: "edge-pulse counts since previous imu/status frame; 0 if none; all 0 when ok=false"
+        note: "12 edge-pulse counts since previous imu/status frame (6 rot ± + 6 trans ±); 0 if none; all 0 when ok=false; body frame; no flip_* / no displacement"
         fields:
-          flip_x: { type: int, note: "gravity-axis sign flip on X" }
-          flip_y: { type: int, note: "gravity-axis sign flip on Y" }
-          flip_z: { type: int, note: "gravity-axis sign flip on Z" }
-          trans_x: { type: int, note: "linear impulse on X after gravity removal" }
-          trans_y: { type: int, note: "linear impulse on Y after gravity removal" }
-          trans_z: { type: int, note: "linear impulse on Z after gravity removal" }
+          rot_x_pos: { type: int, note: "gyro integrate +X axis past angle threshold" }
+          rot_x_neg: { type: int, note: "gyro integrate -X axis past angle threshold" }
+          rot_y_pos: { type: int, note: "gyro integrate +Y axis past angle threshold" }
+          rot_y_neg: { type: int, note: "gyro integrate -Y axis past angle threshold" }
+          rot_z_pos: { type: int, note: "gyro integrate +Z axis past angle threshold (typical table left/right yaw)" }
+          rot_z_neg: { type: int, note: "gyro integrate -Z axis past angle threshold" }
+          trans_x_pos: { type: int, note: "linear impulse +X after gravity removal" }
+          trans_x_neg: { type: int, note: "linear impulse -X after gravity removal" }
+          trans_y_pos: { type: int, note: "linear impulse +Y after gravity removal" }
+          trans_y_neg: { type: int, note: "linear impulse -Y after gravity removal" }
+          trans_z_pos: { type: int, note: "linear impulse +Z after gravity removal" }
+          trans_z_neg: { type: int, note: "linear impulse -Z after gravity removal" }
       ts: { type: int }
 
   # ---- led ----

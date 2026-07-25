@@ -300,6 +300,9 @@ void VisionFrameHub::TaskLoop() {
             continue;
         }
 
+        // 目标周期含采帧+编码；事后只 sleep 剩余时间，避免 work+delay 叠成约半速
+        const int64_t frame_start_us = esp_timer_get_time();
+
         std::vector<uint8_t> packed;
         uint16_t w = 0;
         uint16_t h = 0;
@@ -389,7 +392,18 @@ void VisionFrameHub::TaskLoop() {
 #endif
             }
             int fps = target_fps_ > 0 ? target_fps_ : 5;
-            vTaskDelay(pdMS_TO_TICKS(1000 / fps));
+            if (fps < 1) {
+                fps = 1;
+            }
+            const int period_ms = 1000 / fps;
+            const int elapsed_ms =
+                static_cast<int>((esp_timer_get_time() - frame_start_us) / 1000);
+            const int remain_ms = period_ms - elapsed_ms;
+            if (remain_ms > 0) {
+                vTaskDelay(pdMS_TO_TICKS(remain_ms));
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
         } else {
             // 静默人脸：按 face 最小间隔节奏采帧
             int wait_ms = DEEP_DOG_FACE_AI_MIN_INTERVAL_MS;
