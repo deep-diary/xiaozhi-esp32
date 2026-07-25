@@ -5,7 +5,7 @@
 | module_id | `imu` |
 | capabilities | `imu` |
 | 路由建议 | `/device/:deviceId/modules/imu` |
-| 契约 | ready（六轴字段）；开关字段 planned（文档已定，固件待落地） |
+| 契约 | ready（六轴 + 12 路 switches） |
 | YAML | `imu/status` |
 | 芯片 | BMI270（对齐 thumble） |
 
@@ -49,7 +49,7 @@
 
 与「翻面」（重力符号翻转）**不是同一类事件**；本模块不做独立 `flip_*`。
 
-- **去抖 / 冷却**：实现须带 cooldown，避免一次动作连打。建议默认：rot 300–500 ms，trans 150–300 ms（实现参数，v0.1 **不**经 MQTT 调）。
+- **去抖 / 冷却**：实现须带 cooldown，避免一次动作连打。建议默认：rot 300–500 ms，trans 150–300 ms；旋转触发后另抑制平移约 300 ms。阈值默认 rot 75°、trans 6.5 m/s²（实现参数，v0.1 **不**经 MQTT 调）。
 - **主轴 / 互斥**：一次手势常多轴耦合；实现应选主轴（或「谁先过阈」）并避免同窗 rot/trans 互相误触发。
 - **旋转积分**：短时手势窗口内对陀螺积分，过阈触发后清零/进入冷却；不追求长期航向。
 - **`ok=false`**：`switches` 全 0，且**不**调用调度入口。
@@ -136,15 +136,20 @@
 ### 已落地
 
 - BMI270：[`sensor/imu_sensor`](../../../sensor/imu_sensor.h)（I2C 与 codec 共用 `i2c_bus`）；芯片 ODR 200 Hz。
-- MQTT：[`mqtt/modules/imu_mqtt`](../../../mqtt/modules/imu_mqtt.h)，约 10 Hz 发六轴 + pitch/roll；无芯片时仍发 `ok=false`。
+- 本地开关：[`sensor/imu_switch`](../../../sensor/imu_switch.h)，**100 Hz** 采集；陀螺短时积分 → `rot_*`；去重力冲击 → `trans_*`；12 路调度默认 `ESP_LOGI`。
+- MQTT：[`mqtt/modules/imu_mqtt`](../../../mqtt/modules/imu_mqtt.h)，约 10 Hz；读开关快照 + 本周期 `switches.*` 边沿计数；无芯片时仍发 `ok=false`、`switches` 全 0。
 - `capabilities.imu=true`（`DEEP_DOG_IMU_ENABLE=1`）。
 
-### 待落地（开关）
+### 参数（`imu_config.h`）
 
-- 独立 **100 Hz** 本地采集任务（勿仅跟 MQTT 10 Hz 读数）。
-- 陀螺短时积分 → `rot_*_pos/neg`；去重力冲击 → `trans_*_pos/neg`；cooldown + 主轴/互斥。
-- **12** 路调度入口（默认 log）。
-- `imu/status` 附带本周期 `switches.*` 边沿计数后清零/累加窗口重置。
+| 宏 | 默认 |
+|----|------|
+| `DEEP_DOG_IMU_SAMPLE_INTERVAL_US` | 10 ms（100 Hz） |
+| `DEEP_DOG_IMU_ROT_THRESHOLD_DEG` | 75° |
+| `DEEP_DOG_IMU_ROT_COOLDOWN_MS` | 400 |
+| `DEEP_DOG_IMU_TRANS_THRESHOLD_MPS2` | 6.5 |
+| `DEEP_DOG_IMU_TRANS_COOLDOWN_MS` | 200 |
+| `DEEP_DOG_IMU_TRANS_SUPPRESS_AFTER_ROT_MS` | 300（旋转触发后抑制平移） |
 
 ## 验证脚本
 
@@ -154,15 +159,15 @@
 /usr/bin/python3 scripts/deep_dog_mqtt_imu_verify.py --via both --min-msgs 5
 ```
 
-（开关字段落地后，脚本可增检 `switches` 键存在；动作触发验收以手动绕轴旋转约 90° / 沿轴甩动为主。）
+（脚本校验 `switches` 12 键存在且为非负整数；动作触发验收以手动绕轴旋转约 90° / 沿轴甩动为主。）
 
 ## 验收
 
 - [x] 固件发布 `imu/status`（有/无芯片均可）
 - [x] `device/info` 含 `capabilities.imu=true`
 - [ ] 详情页可见三轴与姿态（前端）
-- [ ] 详情页可见 12 路开关脉冲（前端；固件 `switches` 落地后）
+- [ ] 详情页可见 12 路开关脉冲（前端；固件 `switches` 已落地）
 - [ ] 无 capability 隐藏入口卡（前端）
-- [ ] 本地 100 Hz 采集 + 边沿识别（固件）
-- [ ] 12 路调度入口默认仅打 log（固件）
-- [ ] `imu/status` 含 12 路 `switches.*` 边沿计数（固件）
+- [x] 本地 100 Hz 采集 + 边沿识别（固件）
+- [x] 12 路调度入口默认仅打 log（固件）
+- [x] `imu/status` 含 12 路 `switches.*` 边沿计数（固件）

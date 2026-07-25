@@ -13,6 +13,7 @@
 #include "sensor/imu_config.h"
 #if DEEP_DOG_IMU_ENABLE
 #include "sensor/imu_sensor.h"
+#include "sensor/imu_switch.h"
 #endif
 #include "vision/vision_config.h"
 
@@ -33,6 +34,7 @@ struct DeepDogMqtt::Impl {
     DeepDogHttpServer* http = nullptr;
 #if DEEP_DOG_IMU_ENABLE
     DeepDogImuSensor* imu_sensor = nullptr;
+    DeepDogImuSwitch* imu_switch = nullptr;
 #endif
     int http_port = DEEP_DOG_HTTP_SERVER_PORT;
     bool started = false;
@@ -101,6 +103,17 @@ void DeepDogMqtt::SetImuSensor(DeepDogImuSensor* sensor) {
 #endif
 }
 
+void DeepDogMqtt::SetImuSwitch(DeepDogImuSwitch* hub) {
+#if DEEP_DOG_IMU_ENABLE
+    if (impl_) {
+        impl_->imu_switch = hub;
+        impl_->imu.SetSwitchHub(hub);
+    }
+#else
+    (void)hub;
+#endif
+}
+
 bool DeepDogMqtt::IsRunning() const {
     return impl_ && impl_->started;
 }
@@ -147,6 +160,7 @@ bool DeepDogMqtt::Start() {
     impl_->imu.SetEnabled(caps.imu);
 #if DEEP_DOG_IMU_ENABLE
     impl_->imu.SetSensor(impl_->imu_sensor);
+    impl_->imu.SetSwitchHub(impl_->imu_switch);
 #endif
     impl_->face.SetEnabled(caps.face);
     impl_->track.SetModuleEnabled(caps.track);
@@ -184,6 +198,7 @@ void DeepDogMqtt::SetVisionHub(VisionFrameHub*) {}
 void DeepDogMqtt::SetHttpServer(DeepDogHttpServer*) {}
 void DeepDogMqtt::SetHttpPort(int) {}
 void DeepDogMqtt::SetImuSensor(DeepDogImuSensor*) {}
+void DeepDogMqtt::SetImuSwitch(DeepDogImuSwitch*) {}
 bool DeepDogMqtt::Start() { return false; }
 void DeepDogMqtt::Stop() {}
 bool DeepDogMqtt::IsRunning() const { return false; }

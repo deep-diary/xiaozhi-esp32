@@ -37,6 +37,7 @@
 #include "sensor/imu_config.h"
 #if DEEP_DOG_IMU_ENABLE
 #include "sensor/imu_sensor.h"
+#include "sensor/imu_switch.h"
 #endif
 
 #include <wifi_manager.h>
@@ -152,6 +153,7 @@ private:
     TaskHandle_t can_rx_task_handle_ = nullptr;
 #if DEEP_DOG_IMU_ENABLE
     std::unique_ptr<DeepDogImuSensor> imu_sensor_;
+    std::unique_ptr<DeepDogImuSwitch> imu_switch_;
 #endif
 #if DEEP_DOG_VISION_HUB_ENABLE
     std::unique_ptr<VisionFrameHub> vision_hub_;
@@ -436,9 +438,14 @@ private:
         } else {
             ESP_LOGI(TAG, "BMI270 ready");
         }
+        imu_switch_ = std::make_unique<DeepDogImuSwitch>(imu_sensor_.get());
+        if (!imu_switch_->Start()) {
+            ESP_LOGW(TAG, "IMU switch sampler failed to start");
+        }
 #if DEEP_DOG_MQTT_ENABLE
         if (board_mqtt_) {
             board_mqtt_->SetImuSensor(imu_sensor_.get());
+            board_mqtt_->SetImuSwitch(imu_switch_.get());
         }
 #endif
 #endif

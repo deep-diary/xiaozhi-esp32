@@ -43,6 +43,21 @@ REQUIRED_FIELDS = (
     "ts",
 )
 
+SWITCH_KEYS = (
+    "rot_x_pos",
+    "rot_x_neg",
+    "rot_y_pos",
+    "rot_y_neg",
+    "rot_z_pos",
+    "rot_z_neg",
+    "trans_x_pos",
+    "trans_x_neg",
+    "trans_y_pos",
+    "trans_y_neg",
+    "trans_z_pos",
+    "trans_z_neg",
+)
+
 
 def ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
@@ -71,6 +86,17 @@ def validate_payload(obj: dict) -> list[str]:
             continue
         if not isinstance(obj[k], (int, float)):
             errs.append(f"not_number:{k}")
+    switches = obj.get("switches")
+    if not isinstance(switches, dict):
+        errs.append("missing:switches")
+    else:
+        for sk in SWITCH_KEYS:
+            if sk not in switches:
+                errs.append(f"missing:switches.{sk}")
+                continue
+            v = switches[sk]
+            if not isinstance(v, (int, float)) or int(v) != v or int(v) < 0:
+                errs.append(f"bad_switch:{sk}")
     if obj.get("ok") is True:
         ag = obj.get("accel_g")
         if isinstance(ag, (int, float)) and not (0.5 <= float(ag) <= 30.0):
