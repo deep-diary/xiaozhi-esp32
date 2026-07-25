@@ -28,20 +28,23 @@ Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 ## 入口卡顺序
 
 1. Device Basic（页头，非卡）  
-2. Stream → IMU → **Face** → Touch → Dog → LED → Gimbal → Servo → Handle → CAN → Person  
+2. Stream → IMU → **Face** → Touch → Dog → LED → Gimbal → Servo → Handle → CAN  
 
 仅当 `capabilities.<module_id> === true` 时渲染对应入口卡。
 
-**Track 不单独出卡**：跟踪与人脸同详情页（[04-face](../modules/04-face.md) / [05-track](../modules/05-track.md)）。有 `capabilities.track` 时，「人脸」卡说明可写「检测与跟踪」；点卡仍进 `/modules/face`。
+**Track 不单独出卡**：跟踪 UI 在 [02-stream](../modules/02-stream.md)（`#track`）。  
+**Person 不单独出卡**：并入 [04-face](../modules/04-face.md)；`/modules/person` redirect 到 face。
+
+Stream 卡说明可写「推流与人脸叠加」；Face 卡「检测 / 识别 / Immich」。
 
 ## Steps（前端）
 
 - **Step 1** 使用 `device_id` 连接 EMQX（MQTT over WebSocket）。
 - **Step 2** 订阅 `…/device/info`（retain）与可选 `…/device/status`。
-- **Step 3** 渲染 Device Basic（页头）：`device_id` / `firmware` / `ip` / `http_port`；有 status 时附加 `rssi`、内存摘要（如 `mem.internal.free` / `mem.psram.free`）、`health.ok`（`warn` 非空时可轻提示）。电量：仅当 `power.supported===true` 显示电量，否则可不展示或标「无电量」。可链到 [01-device](../modules/01-device.md) 完整页。
-- **Step 4** 读 `capabilities`，过滤模块列表，渲染入口卡（标题、图标、`module_id`、路由）。卡文案见各 `modules/NN-*.md`「入口卡文案」。
-- **Step 5** 点击入口卡 → `navigate(/device/:deviceId/modules/:moduleId)`（或等价路由）。
-- **Step 6** 离开本页时取消本页订阅；**不要**在此页管理模块 Topic（由详情页负责）。
+- **Step 3** 渲染 Device Basic：`device_id` / `firmware` / `ip` / `http_port`；有 status 时附加 `rssi`、内存摘要、`health.ok`。电量仅当 `power.supported===true`。可链 [01-device](../modules/01-device.md)。
+- **Step 4** 读 `capabilities`，过滤模块列表（**忽略独立 person 卡**），渲染入口卡。
+- **Step 5** 点击 → `navigate(/device/:deviceId/modules/:moduleId)`。
+- **Step 6** 离页退订；不在此页管理业务 Topic。
 
 ## 入口卡禁止 / 允许
 
@@ -53,5 +56,6 @@ Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 ## 验收
 
 - [ ] 无 capability 的模块不出卡
+- [ ] 无独立 Track / Person 卡
 - [ ] 点卡进入对应详情页
 - [ ] 本页无模块 cmd 按钮、无模块 detail 面板

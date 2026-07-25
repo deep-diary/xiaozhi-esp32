@@ -44,10 +44,10 @@
 | 顺序 | module_id | 文档 | 契约 |
 |------|-----------|------|------|
 | 页头 | device | [01-device](./modules/01-device.md) | ready |
-| 1 | stream | [02-stream](./modules/02-stream.md)（V-C03） | ready |
+| 1 | stream | [02-stream](./modules/02-stream.md)（V-C03；含 face/track overlay UI） | ready |
 | 2 | imu | [03-imu](./modules/03-imu.md) | ready / D9 |
-| 3 | face | [04-face](./modules/04-face.md) | ready（含 track 同页 UI） |
-| — | track | [05-track](./modules/05-track.md) | ready（MQTT / actuator=none）；**无独立入口卡** |
+| 3 | face | [04-face](./modules/04-face.md)（含原 person：Immich/打招呼） | ready |
+| — | track | [05-track](./modules/05-track.md) | ready；**无入口卡**；UI 在 stream |
 | 4 | touch | [06-touch](./modules/06-touch.md) | ready |
 | 5 | dog | [07-dog](./modules/07-dog.md) | ready |
 | 6 | led | [08-led](./modules/08-led.md) | planned |
@@ -55,7 +55,7 @@
 | 8 | servo | [10-servo](./modules/10-servo.md) | planned |
 | 9 | handle | [11-handle](./modules/11-handle.md) | 骨架 |
 | 10 | can | [12-can](./modules/12-can.md) | planned |
-| 11 | person | [13-person](./modules/13-person.md) | planned |
+| — | person | [13-person](./modules/13-person.md) | 并入 face；**无入口卡** |
 
 ### 裁剪规则
 

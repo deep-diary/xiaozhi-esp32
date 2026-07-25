@@ -477,6 +477,31 @@ void DeepDogFaceRecognizeDeinit() {
     s_ready = false;
 }
 
+bool DeepDogFaceRecognizeClearAll() {
+    ClearSession();
+    if (!s_recog) {
+        s_meta_count = 0;
+        memset(s_meta, 0, sizeof(s_meta));
+        s_next_id = 1;
+        (void)SaveMetaToNvs();
+        ESP_LOGW(TAG, "clear_db: recognizer not ready, meta reset only");
+        return true;
+    }
+    esp_err_t err = s_recog->clear_all_feats();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "clear_all_feats failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    s_meta_count = 0;
+    memset(s_meta, 0, sizeof(s_meta));
+    s_next_id = 1;
+    if (SaveMetaToNvs() != ESP_OK) {
+        ESP_LOGW(TAG, "clear_db: feats cleared but NVS meta save failed");
+    }
+    ESP_LOGI(TAG, "clear_db ok (feats=%d)", s_recog->get_num_feats());
+    return true;
+}
+
 bool DeepDogFaceRecognizeReady() {
     return s_ready && s_recog != nullptr;
 }
@@ -516,6 +541,9 @@ bool DeepDogFaceRecognizeInit() {
     return true;
 }
 void DeepDogFaceRecognizeDeinit() {}
+bool DeepDogFaceRecognizeClearAll() {
+    return true;
+}
 bool DeepDogFaceRecognizeReady() {
     return false;
 }

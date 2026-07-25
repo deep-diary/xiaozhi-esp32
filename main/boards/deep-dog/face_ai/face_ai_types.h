@@ -11,6 +11,22 @@ enum class DeepDogFaceRecognizeSource : uint8_t {
     Enrolled = 3,
 };
 
+/** 人脸管线模式：live=检测可高频、识别低频；identity=检测与识别同间隔 */
+enum class DeepDogFacePipeline : uint8_t {
+    Live = 0,
+    Identity = 1,
+};
+
+inline const char* DeepDogFacePipelineStr(DeepDogFacePipeline p) {
+    switch (p) {
+        case DeepDogFacePipeline::Identity:
+            return "identity";
+        case DeepDogFacePipeline::Live:
+        default:
+            return "live";
+    }
+}
+
 /** 单张人脸（像素坐标，与输入 RGB565 帧同宽高） */
 struct DeepDogFaceBox {
     float x0 = 0;

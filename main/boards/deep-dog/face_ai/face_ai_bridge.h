@@ -10,6 +10,13 @@ bool DeepDogFaceAiRuntimeStart();
 void DeepDogFaceAiRuntimeStop();
 void DeepDogFaceAiSetEnabled(bool on);
 bool DeepDogFaceAiIsEnabled();
+void DeepDogFaceAiSetPipeline(DeepDogFacePipeline pipeline);
+DeepDogFacePipeline DeepDogFaceAiGetPipeline();
+/** 夹紧到 [INTERVAL_MIN, INTERVAL_MAX] 后生效。 */
+void DeepDogFaceAiSetDetectIntervalMs(int ms);
+int DeepDogFaceAiGetDetectIntervalMs();
+/** 清空本地已注册人脸（facedb+NVS+session+快照）。 */
+bool DeepDogFaceAiClearDb();
 void DeepDogFaceAiSubmitFrameIfDue(const uint8_t* rgb565, size_t len, uint16_t width, uint16_t height);
 size_t DeepDogFaceAiFormatJson(char* buf, size_t buf_size);
 /** Immich 回写后刷新快照中的 display_name（若 primary 匹配）。 */

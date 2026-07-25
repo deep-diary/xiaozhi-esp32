@@ -259,10 +259,24 @@ topics:
     dir: downlink
     qos: 1
     retain: false
-    http: "POST /api/face_enable"
+    http: "POST /api/face_enable (+ clear_db / pipeline / interval via MQTT)"
     payload:
-      enabled: { type: bool }
-      ts: { type: int }
+      enabled: { type: bool, optional: true, note: "master switch; off stops detect+recog" }
+      action:
+        type: enum
+        values: [clear_db]
+        optional: true
+        note: "clear facedb feats + NVS meta + session"
+      pipeline:
+        type: enum
+        values: [live, identity]
+        optional: true
+        note: "live=detect at interval, recog slower; identity=detect+recog same interval"
+      detect_interval_ms:
+        type: int
+        optional: true
+        note: "clamped 200-5000; echoed in face/status"
+      ts: { type: int, optional: true }
 
   face/status:
     module: face
@@ -273,6 +287,8 @@ topics:
     http: "GET /api/face"
     payload:
       enabled: { type: bool }
+      pipeline: { type: enum, values: [live, identity], optional: true }
+      detect_interval_ms: { type: int, optional: true }
       has_person: { type: bool, alias: has_face }
       n: { type: int }
       w: { type: int }
@@ -298,6 +314,21 @@ topics:
           display_name: { type: string, optional: true }
       ts: { type: int }
 
+  face/thumb:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: false
+    status: planned
+    note: "optional JPEG base64 crop; default off; event-triggered only — not implemented yet"
+    payload:
+      local_id: { type: int, optional: true }
+      mime: { type: string }
+      w: { type: int }
+      h: { type: int }
+      b64: { type: string }
+      ts: { type: int }
+
   # ---- imu ----
   imu/status:
     module: imu
@@ -306,6 +337,7 @@ topics:
     retain: false
     chip: BMI270
     publish_hz: 10
+    note: "MQTT telemetry ~10 Hz; local switch detect target 100 Hz (chip ODR 200 Hz); switches.* = edge counts since previous publish"
     units:
       accel: m_s2
       gyro: dps
@@ -321,6 +353,16 @@ topics:
       gyro_z: { type: float }
       pitch: { type: float, note: "estimated from accel" }
       roll: { type: float, note: "estimated from accel" }
+      switches:
+        type: object
+        note: "edge-pulse counts since previous imu/status frame; 0 if none; all 0 when ok=false"
+        fields:
+          flip_x: { type: int, note: "gravity-axis sign flip on X" }
+          flip_y: { type: int, note: "gravity-axis sign flip on Y" }
+          flip_z: { type: int, note: "gravity-axis sign flip on Z" }
+          trans_x: { type: int, note: "linear impulse on X after gravity removal" }
+          trans_y: { type: int, note: "linear impulse on Y after gravity removal" }
+          trans_z: { type: int, note: "linear impulse on Z after gravity removal" }
       ts: { type: int }
 
   # ---- led ----
@@ -577,10 +619,12 @@ topics:
     dir: uplink
     qos: 0
     retain: true
-    status: reserved
+    status: draft
+    note: "Identity event for Face page / Kiosk; no separate Person entry card"
     payload:
       local_id: { type: int, optional: true }
       display_name: { type: string, optional: true }
+      immich_person_id: { type: string, optional: true }
       ts: { type: int }
 
   track/cmd:

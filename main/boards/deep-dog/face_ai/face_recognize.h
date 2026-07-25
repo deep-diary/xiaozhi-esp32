@@ -14,6 +14,8 @@
 bool DeepDogFaceRecognizeInit();
 void DeepDogFaceRecognizeDeinit();
 bool DeepDogFaceRecognizeReady();
+/** 清空 facedb 特征 + NVS meta + session（MQTT clear_db）。 */
+bool DeepDogFaceRecognizeClearAll();
 
 /** S05：该 local_id 是否仍需 Immich 真名（无 person_id 或 display 仍为 #n）。 */
 bool DeepDogFaceRecognizeNeedsImmichName(int local_id);

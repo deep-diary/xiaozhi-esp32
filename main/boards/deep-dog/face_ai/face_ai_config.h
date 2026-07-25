@@ -13,14 +13,29 @@
 #define DEEP_DOG_FACE_AI_ENABLE 1
 #endif
 
-/** 向人脸任务送帧的最小间隔（ms）；与 MJPEG fps 独立，可远低于视频帧率 */
+/**
+ * 默认送帧最小间隔（ms）；运行时可由 MQTT face/cmd.detect_interval_ms 覆盖。
+ * 对齐推流约 3fps 可用 333；默认 500 降低与 H264 叠加时 esp_timer/CPU 压力。
+ */
 #ifndef DEEP_DOG_FACE_AI_MIN_INTERVAL_MS
-#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 3000
+#define DEEP_DOG_FACE_AI_MIN_INTERVAL_MS 500
 #endif
 
-/** 1=RTSP 推流时仍做人脸；0=推流时跳过送帧（避免识别占满 CPU0 触发 TWDT/崩溃拖死摄像头） */
+#ifndef DEEP_DOG_FACE_AI_INTERVAL_MIN_MS
+#define DEEP_DOG_FACE_AI_INTERVAL_MIN_MS 200
+#endif
+#ifndef DEEP_DOG_FACE_AI_INTERVAL_MAX_MS
+#define DEEP_DOG_FACE_AI_INTERVAL_MAX_MS 5000
+#endif
+
+/** live 模式下识别最小间隔（ms）；identity 模式与检测同间隔 */
+#ifndef DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS
+#define DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS 2000
+#endif
+
+/** 1=RTSP 推流时仍做人脸；0=推流时跳过送帧 */
 #ifndef DEEP_DOG_FACE_AI_DURING_RTSP
-#define DEEP_DOG_FACE_AI_DURING_RTSP 0
+#define DEEP_DOG_FACE_AI_DURING_RTSP 1
 #endif
 
 /** 1=检测前对 RGB565 每像素做高/低字节对调（仅在 INPUT_RGB888=0 时有意义） */

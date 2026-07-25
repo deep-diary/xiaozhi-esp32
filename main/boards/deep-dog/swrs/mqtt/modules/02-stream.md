@@ -13,19 +13,24 @@
 ## 入口卡文案
 
 - 标题：流媒体  
-- 说明：远程开关 RTSP 推流  
+- 说明：推流与人脸框叠加  
 
 ## 详情页目标
 
-显示 `state` / `mode` / `url`（外网 HLS）/ `lan_url` / `push_url` / `error`；提供 start / stop 控制；可嵌 HLS 播放器或外链打开 `url`。
+1. 显示 `state` / `mode` / `url`（外网 HLS）/ `lan_url` / `push_url` / `error`；start / stop；嵌 HLS 或外链 `url`。  
+2. **人脸叠加（推荐）**：若 `capabilities.face`，同页订 `face/status`；UI 开关「显示人脸框 / 显示人名」。  
+3. **跟踪（推荐）**：若 `capabilities.track`，同页订 `track/status`，开关发 `track/cmd`；可 `#track` 锚点。  
+4. 人脸总开关 / 间隔 / 清库可链到 [04-face](./04-face.md)，或本页简化发 `face/cmd`。
 
 ## 边界
 
 | 归属 | Topic / API | 内容 |
 |------|-------------|------|
 | 远程开关 + 推流态 | `stream/cmd`、`stream/status` | 本模块 |
-| 局域网 MJPEG 预览 | HTTP `/stream` + `/api/status` | `mode=stream` 时本机页用；MQTT 仍报 `mode=stream`，网页优先用 `url` HLS |
-| 人脸检测框 | [`face/status`](./04-face.md) | 推流开启时宜同客户端订阅 |
+| 局域网 MJPEG 预览 | HTTP `/stream` + `/api/status` | `mode=stream` 时本机页用；网页优先 `url` HLS |
+| 人脸框 / 人名 | [`face/status`](./04-face.md) | 推流时可并存；坐标像素相对 `w`×`h` |
+| 跟踪目标 | [`track/status`](./05-track.md) | UI 宿主为本页，非 Face 页 |
+| Immich 轮播 / 打招呼 | [`04-face`](./04-face.md) | 不在本页做 Kiosk |
 
 设备推 **局域网 RTSP**；网页播 **外网 HLS**（`url`）。勿把 `push_url` 当浏览器播放地址。
 
@@ -190,12 +195,13 @@
 ## Steps（前端）
 
 - **Step 1** 若 `capabilities.stream !== true`：不渲染入口卡；直链本页则提示不可用。
-- **Step 2** mount：订阅 `stream/status`（retain，晚订阅也能拿到）。
-- **Step 3** 渲染 `state`/`mode`/`error`；播放器用 **`url`（外网 HLS）**；同局域网可附链 `lan_url`；`push_url` 仅作调试信息。
-- **Step 4** `state===idle|error` 可发 start；`streaming|starting` 可发 stop；`starting` 按钮 loading。
-- **Step 5** 发布 `stream/cmd`：`{ "action":"start"|"stop", "ts": <unix> }`（QoS 1）。
-- **Step 6** 时间展示优先 `ts_iso`；`error` 非空时 toast/横幅。
-- **Step 7** unmount：取消订阅；超时无 status 显示离线。
+- **Step 2** mount：订阅 `stream/status`（retain）；若有 `face` → 订 `face/status`；若有 `track` → 订 `track/status`。
+- **Step 3** 渲染 `state`/`mode`/`error`；播放器用 **`url`（外网 HLS）**；可附链 `lan_url`；`push_url` 仅调试。
+- **Step 4** 叠加层开关：显示人脸框 / 人名 / 跟踪十字（用 `faces[]` 与 `track/status.target`，像素/`w`/`h` 归一化到播放器）。
+- **Step 5** `state===idle|error` 可发 start；`streaming|starting` 可发 stop；`starting` loading。
+- **Step 6** 发布 `stream/cmd`；跟踪用 `track/cmd`；人脸总开关可链 Face 页或本页发 `face/cmd`。
+- **Step 7** 时间优先 `ts_iso`；`error` 非空 toast。
+- **Step 8** unmount：退订本页所订 Topic。
 
 ## 固件实现
 
@@ -204,19 +210,19 @@
 - `start` → `POST /api/vision_publish?mode=rtsp_push`（或 cmd 指定 `stream`）
 - `stop` → `mode=off`
 
-对齐 `VisionPushStatus` / `GET /api/status` 的 `push_status`、`push_url`、`play_url`、`lan_play_url`、`mode`。状态变更即时发 `stream/status`（retain）；轮询去重。非法 action 不崩溃，写入 `error`。
-
-同客户端宜一并发布 [04-face](./04-face.md)。
+对齐 `VisionPushStatus` / `GET /api/status`。推流时可同时做人脸（`DURING_RTSP=1`）。非法 action 不崩溃，写入 `error`。
 
 ### 固件验收
 
 - [ ] MQTTX 可开关推流
 - [ ] status 与真实 push 一致（含 `lan_url`/`push_url`）
+- [ ] 推流中 `face/status` 可有框（人脸已开时）
 - [ ] 错误 action 不崩溃，`error` 有码
 
 ## 验收（前端）
 
 - [ ] 详情页可看状态、可发 start/stop
 - [ ] 可用 `url` 打开/嵌入 HLS
+- [ ] 可选叠人脸框 / 跟踪 / 人名
 - [ ] `starting` / `error` / `no_rtp` 有明确反馈
 - [ ] 无 capability 时入口卡隐藏

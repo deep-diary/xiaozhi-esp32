@@ -109,17 +109,50 @@ void DeepDogFaceMqtt::OnMessage(const std::string& topic, const std::string& pay
         ESP_LOGW(TAG, "face/cmd invalid_json");
         return;
     }
+
+    bool touched = false;
+    const cJSON* action = cJSON_GetObjectItem(root, "action");
+    if (cJSON_IsString(action) && action->valuestring) {
+        if (strcmp(action->valuestring, "clear_db") == 0) {
+            const bool ok = DeepDogFaceAiClearDb();
+            ESP_LOGI(TAG, "face/cmd clear_db ok=%d", ok ? 1 : 0);
+            touched = true;
+        } else {
+            ESP_LOGW(TAG, "face/cmd unknown action=%s", action->valuestring);
+        }
+    }
+
     const cJSON* en = cJSON_GetObjectItem(root, "enabled");
-    if (!cJSON_IsBool(en)) {
-        ESP_LOGW(TAG, "face/cmd missing enabled bool");
-        cJSON_Delete(root);
+    if (cJSON_IsBool(en)) {
+        DeepDogFaceAiSetEnabled(cJSON_IsTrue(en));
+        ESP_LOGI(TAG, "face/cmd enabled=%d", cJSON_IsTrue(en) ? 1 : 0);
+        touched = true;
+    }
+
+    const cJSON* pipe = cJSON_GetObjectItem(root, "pipeline");
+    if (cJSON_IsString(pipe) && pipe->valuestring) {
+        if (strcmp(pipe->valuestring, "identity") == 0) {
+            DeepDogFaceAiSetPipeline(DeepDogFacePipeline::Identity);
+            touched = true;
+        } else if (strcmp(pipe->valuestring, "live") == 0) {
+            DeepDogFaceAiSetPipeline(DeepDogFacePipeline::Live);
+            touched = true;
+        } else {
+            ESP_LOGW(TAG, "face/cmd bad pipeline=%s", pipe->valuestring);
+        }
+    }
+
+    const cJSON* interval = cJSON_GetObjectItem(root, "detect_interval_ms");
+    if (cJSON_IsNumber(interval)) {
+        DeepDogFaceAiSetDetectIntervalMs(static_cast<int>(interval->valuedouble));
+        touched = true;
+    }
+
+    cJSON_Delete(root);
+    if (!touched) {
+        ESP_LOGW(TAG, "face/cmd empty (need enabled|action|pipeline|detect_interval_ms)");
         return;
     }
-    const bool on = cJSON_IsTrue(en);
-    cJSON_Delete(root);
-
-    DeepDogFaceAiSetEnabled(on);
-    ESP_LOGI(TAG, "face/cmd enabled=%d", on ? 1 : 0);
     last_fingerprint_.clear();
     PublishStatus(true);
 #endif
@@ -133,6 +166,8 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
 #if !DEEP_DOG_FACE_AI_ENABLE
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "enabled", false);
+    cJSON_AddStringToObject(root, "pipeline", "live");
+    cJSON_AddNumberToObject(root, "detect_interval_ms", DEEP_DOG_FACE_AI_MIN_INTERVAL_MS);
     cJSON_AddBoolToObject(root, "has_person", false);
     cJSON_AddNumberToObject(root, "n", 0);
     cJSON_AddNumberToObject(root, "w", 0);
@@ -151,10 +186,12 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
     DeepDogFaceSnapshot snap{};
     DeepDogFaceAiCopySnapshot(&snap);
     const bool user_on = DeepDogFaceAiIsEnabled();
+    const DeepDogFacePipeline pipeline = DeepDogFaceAiGetPipeline();
+    const int interval_ms = DeepDogFaceAiGetDetectIntervalMs();
     const bool has_person = snap.count > 0;
     const int best = BestFaceIndex(snap);
 
-    char fingerprint[384];
+    char fingerprint[448];
     int cx_i = 0, cy_i = 0;
     float score = 0;
     if (best >= 0) {
@@ -163,8 +200,9 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
         cy_i = static_cast<int>((b.y0 + b.y1) * 0.5f + 0.5f);
         score = b.score;
     }
-    snprintf(fingerprint, sizeof(fingerprint), "%d|%d|%d|%u|%u|%d|%d|%.2f|%d", user_on ? 1 : 0, has_person ? 1 : 0,
-             snap.count, (unsigned)snap.frame_w, (unsigned)snap.frame_h, cx_i, cy_i, score,
+    snprintf(fingerprint, sizeof(fingerprint), "%d|%s|%d|%d|%d|%u|%u|%d|%d|%.2f|%d", user_on ? 1 : 0,
+             DeepDogFacePipelineStr(pipeline), interval_ms, has_person ? 1 : 0, snap.count,
+             (unsigned)snap.frame_w, (unsigned)snap.frame_h, cx_i, cy_i, score,
              best >= 0 ? snap.faces[best].local_id : 0);
     for (int i = 0; i < snap.count && i < 8; ++i) {
         char bit[48];
@@ -182,6 +220,8 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "enabled", user_on);
+    cJSON_AddStringToObject(root, "pipeline", DeepDogFacePipelineStr(pipeline));
+    cJSON_AddNumberToObject(root, "detect_interval_ms", interval_ms);
     cJSON_AddBoolToObject(root, "has_person", has_person);
     cJSON_AddNumberToObject(root, "n", snap.count);
     cJSON_AddNumberToObject(root, "w", snap.frame_w);
@@ -226,8 +266,8 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
     const bool ok = client_->Publish("face/status", printed, 0, false);
     static int s_log = 0;
     if (s_log < 5 || force) {
-        ESP_LOGI(TAG, "face/status enabled=%d has_person=%d n=%d pub=%d", user_on ? 1 : 0, has_person ? 1 : 0,
-                 snap.count, ok ? 1 : 0);
+        ESP_LOGI(TAG, "face/status enabled=%d pipeline=%s interval=%d has_person=%d n=%d pub=%d", user_on ? 1 : 0,
+                 DeepDogFacePipelineStr(pipeline), interval_ms, has_person ? 1 : 0, snap.count, ok ? 1 : 0);
     }
     ++s_log;
     cJSON_free(printed);

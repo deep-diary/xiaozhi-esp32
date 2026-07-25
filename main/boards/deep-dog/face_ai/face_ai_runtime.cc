@@ -39,7 +39,10 @@ static QueueHandle_t s_queue = nullptr;
 static TaskHandle_t s_task = nullptr;
 static std::atomic<bool> s_user_enabled{true};
 static std::atomic<bool> s_runtime_started{false};
+static std::atomic<int> s_detect_interval_ms{DEEP_DOG_FACE_AI_MIN_INTERVAL_MS};
+static std::atomic<uint8_t> s_pipeline{static_cast<uint8_t>(DeepDogFacePipeline::Live)};
 static int64_t s_last_submit_us = 0;
+static int64_t s_last_recog_us = 0;
 static std::mutex s_snap_mu;
 static DeepDogFaceSnapshot s_snapshot;
 
@@ -260,18 +263,26 @@ static void FaceAiTask(void* /*arg*/) {
             std::list<dl::detect::result_t> raw;
             if (DeepDogFaceDetectRun(job.data, job.len, job.w, job.h, &boxes, &raw)) {
                 vTaskDelay(pdMS_TO_TICKS(5));
-                dl::image::img_t img{};
-                uint8_t* owned = nullptr;
-                if (!boxes.empty() && DeepDogFaceDetectMakeImg(job.data, job.len, job.w, job.h, &img, &owned)) {
-                    DeepDogFaceRecognizeProcess(img, raw, &boxes, &snap);
-                    if (owned) {
-                        heap_caps_free(owned);
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(5));
-                    // Immich 队列深度 1：每帧为尚无真名的脸各尝试投递一次（满则丢弃）
-                    for (const auto& b : boxes) {
-                        if (b.local_id > 0) {
-                            MaybeRequestImmichName(job.data, job.w, job.h, b);
+                const DeepDogFacePipeline pipe =
+                    static_cast<DeepDogFacePipeline>(s_pipeline.load(std::memory_order_relaxed));
+                const int64_t now_us = esp_timer_get_time();
+                const bool run_recog =
+                    (pipe == DeepDogFacePipeline::Identity) ||
+                    ((now_us - s_last_recog_us) >= (int64_t)DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS * 1000);
+                if (run_recog && !boxes.empty()) {
+                    dl::image::img_t img{};
+                    uint8_t* owned = nullptr;
+                    if (DeepDogFaceDetectMakeImg(job.data, job.len, job.w, job.h, &img, &owned)) {
+                        DeepDogFaceRecognizeProcess(img, raw, &boxes, &snap);
+                        s_last_recog_us = now_us;
+                        if (owned) {
+                            heap_caps_free(owned);
+                        }
+                        vTaskDelay(pdMS_TO_TICKS(5));
+                        for (const auto& b : boxes) {
+                            if (b.local_id > 0) {
+                                MaybeRequestImmichName(job.data, job.w, job.h, b);
+                            }
                         }
                     }
                 }
@@ -343,7 +354,8 @@ bool DeepDogFaceAiRuntimeStart() {
         s_runtime_started = false;
         return false;
     }
-    ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms, recog=%d immich=%d)", DEEP_DOG_FACE_AI_MIN_INTERVAL_MS,
+    ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms, recog_min=%d ms, during_rtsp=%d, recog=%d immich=%d)",
+             DEEP_DOG_FACE_AI_MIN_INTERVAL_MS, DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS, DEEP_DOG_FACE_AI_DURING_RTSP,
              DEEP_DOG_FACE_RECOG_ENABLE, DEEP_DOG_FACE_IMMICH_ENABLE);
     return true;
 }
@@ -395,6 +407,50 @@ bool DeepDogFaceAiIsEnabled() {
     return s_user_enabled.load(std::memory_order_relaxed);
 }
 
+void DeepDogFaceAiSetPipeline(DeepDogFacePipeline pipeline) {
+    s_pipeline.store(static_cast<uint8_t>(pipeline), std::memory_order_relaxed);
+    ESP_LOGI(TAG, "pipeline=%s", DeepDogFacePipelineStr(pipeline));
+}
+
+DeepDogFacePipeline DeepDogFaceAiGetPipeline() {
+    return static_cast<DeepDogFacePipeline>(s_pipeline.load(std::memory_order_relaxed));
+}
+
+void DeepDogFaceAiSetDetectIntervalMs(int ms) {
+    if (ms < DEEP_DOG_FACE_AI_INTERVAL_MIN_MS) {
+        ms = DEEP_DOG_FACE_AI_INTERVAL_MIN_MS;
+    }
+    if (ms > DEEP_DOG_FACE_AI_INTERVAL_MAX_MS) {
+        ms = DEEP_DOG_FACE_AI_INTERVAL_MAX_MS;
+    }
+    s_detect_interval_ms.store(ms, std::memory_order_relaxed);
+    ESP_LOGI(TAG, "detect_interval_ms=%d", ms);
+}
+
+int DeepDogFaceAiGetDetectIntervalMs() {
+    return s_detect_interval_ms.load(std::memory_order_relaxed);
+}
+
+bool DeepDogFaceAiClearDb() {
+#if DEEP_DOG_FACE_RECOG_ENABLE
+    const bool ok = DeepDogFaceRecognizeClearAll();
+#else
+    const bool ok = true;
+#endif
+    {
+        std::lock_guard<std::mutex> lock(s_snap_mu);
+        s_snapshot.count = 0;
+        s_snapshot.primary_local_id = 0;
+        s_snapshot.primary_display_name[0] = '\0';
+        s_snapshot.primary_source = DeepDogFaceRecognizeSource::None;
+        for (auto& f : s_snapshot.faces) {
+            f = DeepDogFaceBox{};
+        }
+    }
+    s_last_recog_us = 0;
+    return ok;
+}
+
 void DeepDogFaceAiSubmitFrameIfDue(const uint8_t* rgb565, size_t len, uint16_t width, uint16_t height) {
     if (!s_runtime_started.load() || !rgb565 || width == 0 || height == 0) {
         return;
@@ -403,7 +459,8 @@ void DeepDogFaceAiSubmitFrameIfDue(const uint8_t* rgb565, size_t len, uint16_t w
         return;
     }
     const int64_t now = esp_timer_get_time();
-    if ((now - s_last_submit_us) < (int64_t)DEEP_DOG_FACE_AI_MIN_INTERVAL_MS * 1000) {
+    const int interval_ms = s_detect_interval_ms.load(std::memory_order_relaxed);
+    if ((now - s_last_submit_us) < (int64_t)interval_ms * 1000) {
         return;
     }
     s_last_submit_us = now;
@@ -518,6 +575,17 @@ void DeepDogFaceAiRuntimeStop() {}
 void DeepDogFaceAiSetEnabled(bool) {}
 bool DeepDogFaceAiIsEnabled() {
     return false;
+}
+void DeepDogFaceAiSetPipeline(DeepDogFacePipeline) {}
+DeepDogFacePipeline DeepDogFaceAiGetPipeline() {
+    return DeepDogFacePipeline::Live;
+}
+void DeepDogFaceAiSetDetectIntervalMs(int) {}
+int DeepDogFaceAiGetDetectIntervalMs() {
+    return DEEP_DOG_FACE_AI_MIN_INTERVAL_MS;
+}
+bool DeepDogFaceAiClearDb() {
+    return true;
 }
 void DeepDogFaceAiSubmitFrameIfDue(const uint8_t*, size_t, uint16_t, uint16_t) {}
 
