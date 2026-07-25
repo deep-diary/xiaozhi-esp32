@@ -9,6 +9,7 @@
 #include <esp_heap_caps.h>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 
 #include "esp_imgfx_color_convert.h"
 #include "esp_video_device.h"
@@ -274,9 +275,9 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
     frame_.height = setformat.fmt.pix.height;
 #endif
 
-    // 申请缓冲并mmap
+    // DVP 原先 count=1：DoCaptureOnly 连 DQBUF 三次时极易无帧可取；至少 2 块更稳
     struct v4l2_requestbuffers req = {};
-    req.count = strcmp(video_device_name, ESP_VIDEO_MIPI_CSI_DEVICE_NAME) == 0 ? 2 : 1;
+    req.count = strcmp(video_device_name, ESP_VIDEO_MIPI_CSI_DEVICE_NAME) == 0 ? 2 : 2;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
     if (ioctl(video_fd_, VIDIOC_REQBUFS, &req) != 0) {
@@ -386,6 +387,11 @@ void EspVideo::SetExplainUrl(const std::string& url, const std::string& token) {
 }
 
 bool EspVideo::GetLastFrame(CameraFrame* out) {
+    std::lock_guard<std::mutex> lock(capture_mu_);
+    return GetLastFrameLocked(out);
+}
+
+bool EspVideo::GetLastFrameLocked(CameraFrame* out) {
     if (out == nullptr || frame_.data == nullptr || frame_.len == 0) {
         return false;
     }
@@ -405,26 +411,32 @@ bool EspVideo::GetLastFrame(CameraFrame* out) {
     return true;
 }
 
-bool EspVideo::DoCaptureOnly() {
+bool EspVideo::DoCaptureOnlyLocked() {
     if (encoder_thread_.joinable()) {
         encoder_thread_.join();
     }
 
     if (!streaming_on_ || video_fd_ < 0) {
+        static int s_not_ready = 0;
+        if (s_not_ready < 8) {
+            ESP_LOGW(TAG, "CaptureOnly not ready streaming_on=%d fd=%d", (int)streaming_on_, video_fd_);
+            ++s_not_ready;
+        }
         return false;
     }
 
-    // 连续 DQBUF 3 次、仅保留第 3 帧：目的是丢弃管道中可能积压的旧帧，取「最新一帧」，
-    // 并非防抖（无时序平滑）。若需提高帧率可改为 1 次 DQBUF，见 docs/face-pipeline-fps.md。
-    for (int i = 0; i < 3; i++) {
+    // buffer 少时不要连 DQBUF 三次（count=1/2 时取最新一帧即可，见 docs/face-pipeline-fps.md）
+    const int dq_rounds = (mmap_buffers_.size() >= 3) ? 3 : 1;
+    for (int i = 0; i < dq_rounds; i++) {
         struct v4l2_buffer buf = {};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
         if (ioctl(video_fd_, VIDIOC_DQBUF, &buf) != 0) {
-            ESP_LOGE(TAG, "VIDIOC_DQBUF failed");
+            ESP_LOGE(TAG, "VIDIOC_DQBUF failed round=%d/%d errno=%d(%s) bufs=%u", i + 1, dq_rounds, errno,
+                     strerror(errno), (unsigned)mmap_buffers_.size());
             return false;
         }
-        if (i == 2) {
+        if (i == dq_rounds - 1) {
             // 保存帧副本到PSRAM
             if (frame_.data) {
                 heap_caps_free(frame_.data);
@@ -906,16 +918,27 @@ bool EspVideo::ShowFrameToDisplay() {
 }
 
 bool EspVideo::Capture() {
-    if (!DoCaptureOnly()) return false;
+    std::lock_guard<std::mutex> lock(capture_mu_);
+    if (!DoCaptureOnlyLocked()) return false;
     return ShowFrameToDisplay();
 }
 
 bool EspVideo::CaptureOnly() {
-    return DoCaptureOnly();
+    std::lock_guard<std::mutex> lock(capture_mu_);
+    return DoCaptureOnlyLocked();
+}
+
+bool EspVideo::CaptureOnlyTo(CameraFrame* out) {
+    std::lock_guard<std::mutex> lock(capture_mu_);
+    if (!DoCaptureOnlyLocked()) {
+        return false;
+    }
+    return GetLastFrameLocked(out);
 }
 
 // 将当前相机内部 frame_（最近一次 CaptureOnly 结果）显示到屏幕；人脸管道显示走 app_ai::TickDisplay → q_ai → ShowQueuedFrameOnDisplay，与本接口数据源不同
 bool EspVideo::ShowLastFrame() {
+    std::lock_guard<std::mutex> lock(capture_mu_);
     return ShowFrameToDisplay();
 }
 
@@ -982,10 +1005,13 @@ std::string EspVideo::Explain(const std::string& question) {
     }
 
     // 确保已经有一帧可用于编码；如果还没有，就同步采一帧
-    if (frame_.data == nullptr || frame_.len == 0 || frame_.format == 0) {
-        if (!DoCaptureOnly()) {
-            ESP_LOGE(TAG, "Failed to capture frame for Explain()");
-            throw std::runtime_error("Failed to capture camera frame");
+    {
+        std::lock_guard<std::mutex> lock(capture_mu_);
+        if (frame_.data == nullptr || frame_.len == 0 || frame_.format == 0) {
+            if (!DoCaptureOnlyLocked()) {
+                ESP_LOGE(TAG, "Failed to capture frame for Explain()");
+                throw std::runtime_error("Failed to capture camera frame");
+            }
         }
     }
 

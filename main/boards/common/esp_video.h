@@ -4,6 +4,7 @@
 #include <lvgl.h>
 #include <thread>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <freertos/FreeRTOS.h>
@@ -39,6 +40,7 @@ private:
     std::string explain_url_;
     std::string explain_token_;
     std::thread encoder_thread_;
+    std::mutex capture_mu_;
 
 public:
     EspVideo(const esp_video_init_config_t& config);
@@ -47,6 +49,8 @@ public:
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
     virtual bool Capture();
     virtual bool CaptureOnly() override;
+    /** 采一帧并填充 out（持同一把锁，避免 CaptureOnly/GetLastFrame 之间被覆盖） */
+    bool CaptureOnlyTo(CameraFrame* out);
     virtual bool ShowLastFrame() override;
     virtual bool GetLastFrame(CameraFrame* out) override;
     // 翻转控制函数
@@ -55,8 +59,9 @@ public:
     virtual std::string Explain(const std::string& question);
 
 private:
-    // 内部：只做 DQBUF + 填 frame_ + 格式/旋转 + QBUF，供 Capture() 与 CaptureOnly() 使用
-    bool DoCaptureOnly();
+    // 内部：只做 DQBUF + 填 frame_ + 格式/旋转 + QBUF；调用方须已持 capture_mu_
+    bool DoCaptureOnlyLocked();
+    bool GetLastFrameLocked(CameraFrame* out);
     // 内部：将当前 frame_ 格式转换并 SetPreviewImage，供 Capture() 与 ShowLastFrame() 使用
     bool ShowFrameToDisplay();
 };

@@ -232,11 +232,14 @@ bool VisionFrameHub::CapturePackedRgb565(std::vector<uint8_t>* packed, uint16_t*
     if (!camera_ || !packed || !w || !h || !v4l_fmt) {
         return false;
     }
-    if (!camera_->CaptureOnly()) {
-        return false;
-    }
     CameraFrame cf{};
-    if (!camera_->GetLastFrame(&cf)) {
+    if (!camera_->CaptureOnlyTo(&cf)) {
+        static int s_cap = 0;
+        if (s_cap < 6 || (capture_fail_streak_ % 50) == 0) {
+            ESP_LOGW(TAG, "capture stage=CaptureOnlyTo fail streak=%lu",
+                     static_cast<unsigned long>(capture_fail_streak_ + 1));
+            ++s_cap;
+        }
         return false;
     }
     const v4l2_pix_fmt_t vf = V4lFromCameraFrame(cf);
@@ -244,10 +247,20 @@ bool VisionFrameHub::CapturePackedRgb565(std::vector<uint8_t>* packed, uint16_t*
     *w = static_cast<uint16_t>(cf.width);
     *h = static_cast<uint16_t>(cf.height);
     if (vf == V4L2_PIX_FMT_RGB565) {
-        return PackedRgb565FromFrame(cf, packed);
+        if (!PackedRgb565FromFrame(cf, packed)) {
+            ESP_LOGW(TAG, "capture stage=pack_rgb565 fail w=%u h=%u len=%u fmt=%d", *w, *h,
+                     (unsigned)cf.len, cf.format);
+            return false;
+        }
+        return true;
     }
     packed->assign(cf.data, cf.data + cf.len);
-    return !packed->empty();
+    if (packed->empty()) {
+        ESP_LOGW(TAG, "capture stage=assign empty w=%u h=%u len=%u fmt=%d", *w, *h, (unsigned)cf.len,
+                 cf.format);
+        return false;
+    }
+    return true;
 }
 
 bool VisionFrameHub::EncodeJpeg(const uint8_t* rgb, size_t len, uint16_t w, uint16_t h, uint32_t v4l_fmt,
@@ -275,8 +288,10 @@ void VisionFrameHub::TaskLoop() {
 #else
         const bool face_on = false;
 #endif
-        // 推流连接不依赖采帧成功：否则 camera 瞬时失败时 mode=rtsp_push 会永久停在 idle
-        if (mode == VisionPublishMode::RtspPush) {
+        // 仅在近期采帧成功后再维持/建立 RTSP，避免「空握手→立刻拆」风暴
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+        const bool capture_alive = (last_capture_ok_ms_ != 0) && (now_ms - last_capture_ok_ms_ < 3000);
+        if (mode == VisionPublishMode::RtspPush && capture_alive) {
             EnsurePusherConnected();
         }
 
@@ -291,17 +306,18 @@ void VisionFrameHub::TaskLoop() {
         uint32_t v4l = 0;
         if (!CapturePackedRgb565(&packed, &w, &h, &v4l)) {
             if (++capture_fail_streak_ == 1 || (capture_fail_streak_ % 100) == 0) {
-                ESP_LOGW(TAG, "capture fail streak=%lu mode=%s",
-                         static_cast<unsigned long>(capture_fail_streak_), VisionPublishModeStr(mode));
+                ESP_LOGW(TAG, "capture fail streak=%lu mode=%s last_ok_ms=%lld",
+                         static_cast<unsigned long>(capture_fail_streak_), VisionPublishModeStr(mode),
+                         (long long)last_capture_ok_ms_);
             }
-            // 采帧持续失败：拆掉空会话并退避重连，避免「握手→无帧→立刻重连」风暴卡在 starting
-            if (mode == VisionPublishMode::RtspPush && pusher_ && pusher_->IsConnected() &&
+            // 采帧持续失败：拆掉空会话并退避；在 backoff 窗口内不再 Connect
+            if (mode == VisionPublishMode::RtspPush && pusher_ &&
+                (pusher_->IsConnected() || pusher_->Status() == VisionPushStatus::Starting) &&
                 capture_fail_streak_ >= 100) {
-                ESP_LOGW(TAG, "capture dead, tear down RTSP publisher (backoff)");
+                ESP_LOGW(TAG, "capture dead, tear down RTSP publisher (backoff 8s)");
                 TearDownPusher();
                 last_rtp_ok_ms_.store(0, std::memory_order_release);
-                const int64_t now_ms = esp_timer_get_time() / 1000;
-                next_reconnect_ms_ = now_ms + 5000;
+                next_reconnect_ms_ = now_ms + 8000;
                 reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MIN_MS;
                 capture_fail_streak_ = 0;
             }
@@ -309,6 +325,12 @@ void VisionFrameHub::TaskLoop() {
             continue;
         }
         capture_fail_streak_ = 0;
+        last_capture_ok_ms_ = now_ms;
+
+        // 首帧成功后再连 RTSP（此前可能因 capture_alive=false 跳过了）
+        if (mode == VisionPublishMode::RtspPush) {
+            EnsurePusherConnected();
+        }
 
 #if DEEP_DOG_FACE_AI_ENABLE
         if (face_on && !packed.empty()) {
@@ -338,7 +360,7 @@ void VisionFrameHub::TaskLoop() {
                         } else {
                             last_rtp_ok_ms_.store(esp_timer_get_time() / 1000, std::memory_order_release);
                             static int s_ok = 0;
-                            if (s_ok < 5) {
+                            if (s_ok < 8) {
                                 ESP_LOGI(TAG, "H264 push ok bytes=%u %ux%u",
                                          static_cast<unsigned>(annexb.size()), w, h);
                                 ++s_ok;
@@ -346,7 +368,7 @@ void VisionFrameHub::TaskLoop() {
                         }
                     } else {
                         static int s_enc_fail = 0;
-                        if (s_enc_fail < 5) {
+                        if (s_enc_fail < 8) {
                             ESP_LOGW(TAG, "H264 encode fail %ux%u", w, h);
                             ++s_enc_fail;
                         }

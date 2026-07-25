@@ -81,5 +81,6 @@ private:
     uint32_t reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MIN_MS;
     int64_t next_reconnect_ms_ = 0;
     std::atomic<int64_t> last_rtp_ok_ms_{0};
+    int64_t last_capture_ok_ms_ = 0;
     uint32_t capture_fail_streak_ = 0;
 };

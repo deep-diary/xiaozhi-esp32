@@ -19,8 +19,8 @@
 
 | Topic | 方向 | QoS | retain | 用途 |
 |-------|------|-----|--------|------|
-| `device/info` | ↑ | 0 | true | capabilities、固件、IP |
-| `device/status` | ↑ | 0 | false | 心跳（可选） |
+| `device/info` | ↑ | 0 | true | capabilities、固件、IP、复位原因、电量能力 |
+| `device/status` | ↑ | 0 | false | 心跳：RSSI、内存、health（可选） |
 
 前缀：`deepdiary/deep-dog/{device_id}/`。  
 Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
@@ -38,7 +38,7 @@ Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 
 - **Step 1** 使用 `device_id` 连接 EMQX（MQTT over WebSocket）。
 - **Step 2** 订阅 `…/device/info`（retain）与可选 `…/device/status`。
-- **Step 3** 渲染 Device Basic：`device_id` / `firmware` / `ip` / `http_port`；可链到 [01-device](../modules/01-device.md) 完整页。
+- **Step 3** 渲染 Device Basic（页头）：`device_id` / `firmware` / `ip` / `http_port`；有 status 时附加 `rssi`、内存摘要（如 `mem.internal.free` / `mem.psram.free`）、`health.ok`（`warn` 非空时可轻提示）。电量：仅当 `power.supported===true` 显示电量，否则可不展示或标「无电量」。可链到 [01-device](../modules/01-device.md) 完整页。
 - **Step 4** 读 `capabilities`，过滤模块列表，渲染入口卡（标题、图标、`module_id`、路由）。卡文案见各 `modules/NN-*.md`「入口卡文案」。
 - **Step 5** 点击入口卡 → `navigate(/device/:deviceId/modules/:moduleId)`（或等价路由）。
 - **Step 6** 离开本页时取消本页订阅；**不要**在此页管理模块 Topic（由详情页负责）。

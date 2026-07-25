@@ -2,11 +2,13 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
+#include "system_info.h"
 
 #include <wifi_manager.h>
 
 #include <cJSON.h>
 #include <esp_app_desc.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_system.h>
@@ -20,6 +22,8 @@
 #define TAG "dog_mqtt_dev"
 
 namespace {
+
+constexpr size_t kLowInternalHeapBytes = 32 * 1024;
 
 int64_t UnixTs() {
     const time_t now = time(nullptr);
@@ -46,6 +50,38 @@ std::string MacString() {
     snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4],
              mac[5]);
     return buf;
+}
+
+const char* ResetReasonString() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:
+            return "poweron";
+        case ESP_RST_EXT:
+            return "external";
+        case ESP_RST_SW:
+            return "software";
+        case ESP_RST_PANIC:
+            return "panic";
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT:
+            return "watchdog";
+        case ESP_RST_DEEPSLEEP:
+            return "deepsleep";
+        case ESP_RST_BROWNOUT:
+            return "brownout";
+        case ESP_RST_SDIO:
+            return "sdio";
+        default:
+            return "unknown";
+    }
+}
+
+void AddMemBucket(cJSON* parent, const char* key, uint32_t caps) {
+    cJSON* obj = cJSON_AddObjectToObject(parent, key);
+    cJSON_AddNumberToObject(obj, "free", static_cast<double>(heap_caps_get_free_size(caps)));
+    cJSON_AddNumberToObject(obj, "min", static_cast<double>(heap_caps_get_minimum_free_size(caps)));
+    cJSON_AddNumberToObject(obj, "total", static_cast<double>(heap_caps_get_total_size(caps)));
 }
 
 }  // namespace
@@ -107,11 +143,21 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "device_id", s.device_id.c_str());
     cJSON_AddStringToObject(root, "firmware", fw);
+    cJSON_AddStringToObject(root, "board", BOARD_NAME);
+    cJSON_AddStringToObject(root, "chip_model", SystemInfo::GetChipModelName().c_str());
+    if (app && app->idf_ver[0] != '\0') {
+        cJSON_AddStringToObject(root, "idf_version", app->idf_ver);
+    }
+    cJSON_AddNumberToObject(root, "flash_size", static_cast<double>(SystemInfo::GetFlashSize()));
     cJSON_AddStringToObject(root, "mac", MacString().c_str());
     if (!ip.empty()) {
         cJSON_AddStringToObject(root, "ip", ip.c_str());
     }
     cJSON_AddNumberToObject(root, "http_port", http_port_);
+    cJSON_AddStringToObject(root, "reset_reason", ResetReasonString());
+
+    cJSON* power = cJSON_AddObjectToObject(root, "power");
+    cJSON_AddBoolToObject(power, "supported", false);
 
     cJSON* caps = cJSON_AddObjectToObject(root, "capabilities");
     cJSON_AddBoolToObject(caps, "dog", caps_.dog);
@@ -148,11 +194,28 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     cJSON_AddBoolToObject(root, "online", true);
     cJSON_AddNumberToObject(root, "uptime_s", static_cast<double>(esp_timer_get_time() / 1000000LL));
     cJSON_AddNumberToObject(root, "free_heap", static_cast<double>(esp_get_free_heap_size()));
+    cJSON_AddNumberToObject(root, "min_free_heap", static_cast<double>(esp_get_minimum_free_heap_size()));
+
+    cJSON* mem = cJSON_AddObjectToObject(root, "mem");
+    AddMemBucket(mem, "internal", MALLOC_CAP_INTERNAL);
+    AddMemBucket(mem, "psram", MALLOC_CAP_SPIRAM);
 
     wifi_ap_record_t ap{};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
         cJSON_AddNumberToObject(root, "rssi", ap.rssi);
+        cJSON_AddStringToObject(root, "wifi_ssid", reinterpret_cast<const char*>(ap.ssid));
+        cJSON_AddNumberToObject(root, "wifi_channel", ap.primary);
     }
+
+    const size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    cJSON* health = cJSON_AddObjectToObject(root, "health");
+    cJSON* warn = cJSON_CreateArray();
+    if (internal_free < kLowInternalHeapBytes) {
+        cJSON_AddItemToArray(warn, cJSON_CreateString("low_internal_heap"));
+    }
+    cJSON_AddBoolToObject(health, "ok", cJSON_GetArraySize(warn) == 0);
+    cJSON_AddItemToObject(health, "warn", warn);
+
     const int64_t ts = UnixTs();
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", IsoTs(ts).c_str());

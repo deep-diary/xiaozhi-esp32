@@ -273,12 +273,21 @@ bool DeepDogStreamMqtt::PublishStatus(const char* error_override) {
     }
 #endif
 
+    std::string push_url;
+#if DEEP_DOG_VISION_HUB_ENABLE
+    if (hub_) {
+        push_url = hub_->RtspUrl();
+    }
+#endif
+    const char* lan_url = DEEP_DOG_VISION_LAN_PLAY_URL;
+
     const int64_t ts = UnixTs();
     const std::string ts_iso = IsoTs(ts);
 
-    char fingerprint[256];
-    snprintf(fingerprint, sizeof(fingerprint), "%s|%s|%s|%s", VisionPushStatusStr(state),
-             ProtocolModeStr(mode), url.c_str(), error ? error : "");
+    char fingerprint[384];
+    snprintf(fingerprint, sizeof(fingerprint), "%s|%s|%s|%s|%s|%s", VisionPushStatusStr(state),
+             ProtocolModeStr(mode), url.c_str(), lan_url ? lan_url : "", push_url.c_str(),
+             error ? error : "");
     if (error_override == nullptr && fingerprint == last_fingerprint_) {
         return true;  // no change
     }
@@ -288,6 +297,8 @@ bool DeepDogStreamMqtt::PublishStatus(const char* error_override) {
     cJSON_AddStringToObject(root, "state", VisionPushStatusStr(state));
     cJSON_AddStringToObject(root, "mode", ProtocolModeStr(mode));
     cJSON_AddStringToObject(root, "url", url.c_str());
+    cJSON_AddStringToObject(root, "lan_url", lan_url ? lan_url : "");
+    cJSON_AddStringToObject(root, "push_url", push_url.c_str());
     cJSON_AddStringToObject(root, "error", error ? error : "");
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", ts_iso.c_str());

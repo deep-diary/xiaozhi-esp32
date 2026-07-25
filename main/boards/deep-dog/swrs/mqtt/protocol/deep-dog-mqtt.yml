@@ -107,9 +107,24 @@ topics:
     payload:
       device_id: { type: string }
       firmware: { type: string }
+      board: { type: string, optional: true, note: "BOARD_NAME / board id, e.g. deep-dog" }
+      chip_model: { type: string, optional: true, note: "CONFIG_IDF_TARGET, e.g. esp32s3" }
+      idf_version: { type: string, optional: true }
+      flash_size: { type: int, optional: true, note: "bytes" }
       mac: { type: string, optional: true }
       ip: { type: string, optional: true }
       http_port: { type: int, optional: true }
+      reset_reason:
+        type: string
+        optional: true
+        note: "esp_reset_reason short form: poweron|external|software|panic|watchdog|deepsleep|brownout|sdio|unknown"
+      power:
+        type: object
+        optional: true
+        fields:
+          supported: { type: bool, note: "deep-dog currently false (no ADC/PMIC)" }
+          level_pct: { type: int, optional: true, note: "0-100 when supported" }
+          charging: { type: bool, optional: true }
       capabilities:
         type: object
         fields:
@@ -125,6 +140,7 @@ topics:
           touch: { type: bool }
           can: { type: bool }
       ts: { type: int }
+      ts_iso: { type: string, optional: true }
 
   device/status:
     module: device
@@ -136,9 +152,38 @@ topics:
     payload:
       online: { type: bool }
       uptime_s: { type: int, optional: true }
-      free_heap: { type: int, optional: true }
+      free_heap: { type: int, optional: true, note: "esp_get_free_heap_size bytes" }
+      min_free_heap: { type: int, optional: true, note: "esp_get_minimum_free_heap_size bytes" }
+      mem:
+        type: object
+        optional: true
+        fields:
+          internal:
+            type: object
+            fields:
+              free: { type: int }
+              min: { type: int }
+              total: { type: int }
+          psram:
+            type: object
+            fields:
+              free: { type: int }
+              min: { type: int }
+              total: { type: int, note: "0 if no PSRAM" }
       rssi: { type: int, optional: true }
+      wifi_ssid: { type: string, optional: true, note: "status only; may change on roam" }
+      wifi_channel: { type: int, optional: true }
+      health:
+        type: object
+        optional: true
+        fields:
+          ok: { type: bool }
+          warn:
+            type: array
+            items: { type: string }
+            note: "e.g. low_internal_heap (<32KiB free); motor faults stay in dog/status"
       ts: { type: int }
+      ts_iso: { type: string, optional: true }
 
   # ---- dog ----
   dog/cmd:
@@ -177,8 +222,8 @@ topics:
         type: enum
         values: [off, stream, rtsp_push]
         optional: true
-        note: "default start->rtsp_push, stop->off"
-      ts: { type: int }
+        note: "default start->rtsp_push, stop->off; stop always forces off"
+      ts: { type: int, optional: true }
 
   stream/status:
     module: stream
@@ -186,14 +231,25 @@ topics:
     qos: 0
     retain: true
     when: on_change
-    http: "GET /api/status push_status/push_url/mode"
+    http: "GET /api/status push_status/push_url/play_url/lan_play_url/mode"
     payload:
       state: { type: enum, values: [idle, starting, streaming, error] }
       mode: { type: enum, values: [off, stream, rtsp_push] }
       url:
         type: string
-        note: "Web play URL (public HLS); device still pushes LAN RTSP"
-      error: { type: string, optional: true }
+        note: "Public HLS play URL (DEEP_DOG_VISION_PUBLIC_PLAY_URL); always present for web player"
+      lan_url:
+        type: string
+        optional: true
+        note: "LAN HLS (DEEP_DOG_VISION_LAN_PLAY_URL); same MediaMTX path"
+      push_url:
+        type: string
+        optional: true
+        note: "Device RTSP publish URL (LAN); empty when not pushing"
+      error:
+        type: string
+        optional: true
+        note: "empty when ok; codes: invalid_json|missing_action|bad_mode|start_requires_mode|unknown_action|stream_unavailable|push_error|no_rtp"
       ts: { type: int }
       ts_iso: { type: string, optional: true, note: "UTC ISO8601 for UI display" }
 
