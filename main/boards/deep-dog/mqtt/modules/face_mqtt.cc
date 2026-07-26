@@ -12,8 +12,8 @@
 #include <esp_timer.h>
 
 #include <cstdio>
-#include <ctime>
 #include <cstring>
+#include <ctime>
 
 #define TAG "dog_mqtt_face"
 

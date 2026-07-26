@@ -217,13 +217,30 @@ topics:
     retain: false
     http: "POST /api/vision_publish"
     payload:
-      action: { type: enum, values: [start, stop] }
+      action: { type: enum, values: [start, stop, take_photo] }
       mode:
         type: enum
         values: [off, stream, rtsp_push]
         optional: true
-        note: "default start->rtsp_push, stop->off; stop always forces off"
+        note: "default start->rtsp_push, stop->off; stop always forces off; ignored for take_photo"
+      question:
+        type: string
+        optional: true
+        note: "only for take_photo; default 描述画面里有什么"
       ts: { type: int, optional: true }
+
+  stream/photo:
+    module: stream
+    dir: uplink
+    qos: 0
+    retain: false
+    when: after_take_photo
+    payload:
+      ok: { type: bool }
+      result: { type: string, optional: true, note: "Explain response when ok (often stringified JSON)" }
+      error: { type: string, optional: true }
+      elapsed_ms: { type: int }
+      ts: { type: int }
 
   stream/status:
     module: stream

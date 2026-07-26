@@ -3,6 +3,8 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 
+#include "board.h"
+#include "camera.h"
 #include "http-server/deep_dog_http_server.h"
 #include "vision/vision_config.h"
 #include "vision/vision_frame_hub.h"
@@ -10,10 +12,13 @@
 #include <cJSON.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <ctime>
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <string>
 
 #define TAG "dog_mqtt_stream"
@@ -52,6 +57,11 @@ VisionPushStatus ReportState(VisionPublishMode mode, VisionPushStatus state) {
     }
     return state;
 }
+
+struct TakePhotoJob {
+    DeepDogStreamMqtt* self = nullptr;
+    char question[160] = {};
+};
 
 }  // namespace
 
@@ -166,6 +176,104 @@ void DeepDogStreamMqtt::Stop() {
     OnDisconnected();
 }
 
+void DeepDogStreamMqtt::PublishPhotoResult(bool ok, const std::string& result, const char* error,
+                                           int elapsed_ms) {
+    if (!client_ || !client_->IsConnected()) {
+        return;
+    }
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", ok);
+    if (ok) {
+        cJSON_AddStringToObject(root, "result", result.c_str());
+    } else {
+        cJSON_AddStringToObject(root, "error", error ? error : "unknown");
+    }
+    cJSON_AddNumberToObject(root, "elapsed_ms", elapsed_ms);
+    cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+    char* printed = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!printed) {
+        return;
+    }
+    const bool pub = client_->Publish("stream/photo", printed, 0, false);
+    ESP_LOGI(TAG, "stream/photo ok=%d elapsed_ms=%d pub=%d err=%s", ok ? 1 : 0, elapsed_ms, pub ? 1 : 0,
+             ok ? "" : (error ? error : ""));
+    cJSON_free(printed);
+}
+
+void DeepDogStreamMqtt::TakePhotoTask(void* arg) {
+    auto* job = static_cast<TakePhotoJob*>(arg);
+    DeepDogStreamMqtt* self = job ? job->self : nullptr;
+    const int64_t t0 = esp_timer_get_time();
+    try {
+        Camera* cam = Board::GetInstance().GetCamera();
+        if (!cam) {
+            if (self) {
+                self->PublishPhotoResult(false, "", "no_camera", 0);
+            }
+        } else if (!cam->CaptureOnly() && !cam->Capture()) {
+            if (self) {
+                self->PublishPhotoResult(false, "", "capture_fail",
+                                        static_cast<int>((esp_timer_get_time() - t0) / 1000));
+            }
+            ESP_LOGE(TAG, "take_photo capture failed");
+        } else {
+            ESP_LOGI(TAG, "take_photo CaptureOnly ok, Explain q=%s", job->question);
+            const std::string r = cam->Explain(job->question);
+            const int elapsed = static_cast<int>((esp_timer_get_time() - t0) / 1000);
+            if (self) {
+                self->PublishPhotoResult(true, r, nullptr, elapsed);
+            }
+            ESP_LOGI(TAG, "take_photo done elapsed_ms=%d", elapsed);
+        }
+    } catch (const std::exception& e) {
+        const int elapsed = static_cast<int>((esp_timer_get_time() - t0) / 1000);
+        ESP_LOGE(TAG, "take_photo failed: %s", e.what());
+        if (self) {
+            self->PublishPhotoResult(false, "", e.what(), elapsed);
+        }
+    } catch (...) {
+        const int elapsed = static_cast<int>((esp_timer_get_time() - t0) / 1000);
+        ESP_LOGE(TAG, "take_photo failed: unknown");
+        if (self) {
+            self->PublishPhotoResult(false, "", "unknown", elapsed);
+        }
+    }
+    if (self) {
+        self->photo_busy_.store(false, std::memory_order_release);
+    }
+    delete job;
+    vTaskDelete(nullptr);
+}
+
+void DeepDogStreamMqtt::EnqueueTakePhoto(const char* question) {
+    if (photo_busy_.exchange(true, std::memory_order_acq_rel)) {
+        ESP_LOGW(TAG, "take_photo busy, skip");
+        PublishPhotoResult(false, "", "busy", 0);
+        return;
+    }
+    auto* job = new (std::nothrow) TakePhotoJob{};
+    if (!job) {
+        photo_busy_.store(false, std::memory_order_release);
+        PublishPhotoResult(false, "", "oom", 0);
+        return;
+    }
+    job->self = this;
+    const char* q = (question && question[0]) ? question : "描述画面里有什么";
+    strncpy(job->question, q, sizeof(job->question) - 1);
+    job->question[sizeof(job->question) - 1] = '\0';
+
+    constexpr uint32_t kStackWords = 12288;
+    if (xTaskCreate(TakePhotoTask, "dog_stream_photo", kStackWords, job, 3, nullptr) != pdPASS) {
+        delete job;
+        photo_busy_.store(false, std::memory_order_release);
+        PublishPhotoResult(false, "", "task_fail", 0);
+        ESP_LOGE(TAG, "take_photo task create failed");
+    } else {
+        ESP_LOGI(TAG, "take_photo queued q=%s", q);
+    }
+}
+
 void DeepDogStreamMqtt::OnMessage(const std::string& topic, const std::string& payload) {
     if (!enabled_ || !client_) {
         return;
@@ -191,6 +299,15 @@ void DeepDogStreamMqtt::OnMessage(const std::string& topic, const std::string& p
 
     const char* act = action->valuestring;
     std::string action_str = act ? act : "";
+
+    if (action_str == "take_photo") {
+        const cJSON* q = cJSON_GetObjectItem(root, "question");
+        const char* qs = (cJSON_IsString(q) && q->valuestring) ? q->valuestring : nullptr;
+        cJSON_Delete(root);
+        EnqueueTakePhoto(qs);
+        return;
+    }
+
     VisionPublishMode mode = VisionPublishMode::Off;
     bool ok = false;
 
@@ -218,7 +335,6 @@ void DeepDogStreamMqtt::OnMessage(const std::string& topic, const std::string& p
         if (cJSON_IsString(mode_j) && mode_j->valuestring) {
             VisionPublishMode parsed = VisionPublishMode::Off;
             if (ParseMode(mode_j->valuestring, &parsed) && parsed != VisionPublishMode::Off) {
-                // stop 仍强制 Off；非法非 off 模式记 warning 但不崩溃
                 ESP_LOGW(TAG, "stop ignores mode=%s", mode_j->valuestring);
             }
         }
@@ -242,7 +358,7 @@ void DeepDogStreamMqtt::OnMessage(const std::string& topic, const std::string& p
     ApplyMode(mode);
     ESP_LOGI(TAG, "stream/cmd action=%s -> mode=%s ok=%d", action_str.c_str(), ProtocolModeStr(mode),
              ok ? 1 : 0);
-    last_fingerprint_.clear();  // force status publish
+    last_fingerprint_.clear();
     PublishStatus(nullptr);
 }
 

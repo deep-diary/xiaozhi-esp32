@@ -6,7 +6,7 @@
 | capabilities | `stream` |
 | 路由建议 | `/device/:deviceId/modules/stream` |
 | 契约 | ready |
-| YAML | `stream/cmd`、`stream/status` |
+| YAML | `stream/cmd`、`stream/status`、`stream/photo` |
 | 路线图 | **V-C03**（原 M02） |
 | 依赖 | [C02 推流](../../vision/client/C02-device-push-stream.md)、[infra](../../vision/infra.md) |
 
@@ -20,7 +20,8 @@
 1. 显示 `state` / `mode` / `url`（外网 HLS）/ `lan_url` / `push_url` / `error`；start / stop；嵌 HLS 或外链 `url`。  
 2. **人脸叠加（推荐）**：若 `capabilities.face`，同页订 `face/status`；UI 开关「显示人脸框 / 显示人名」。  
 3. **跟踪（推荐）**：若 `capabilities.track`，同页订 `track/status`，开关发 `track/cmd`；可 `#track` 锚点。  
-4. 人脸总开关 / 间隔 / 清库可链到 [04-face](./04-face.md)，或本页简化发 `face/cmd`。
+4. **拍照视觉解释（推荐）**：按钮发 `stream/cmd` `take_photo`，订 `stream/photo` 展示结果（与推流并存，不改 mode）。  
+5. 人脸总开关 / 间隔 / 清库可链到 [04-face](./04-face.md)，或本页简化发 `face/cmd`。
 
 ## 边界
 
@@ -40,6 +41,7 @@
 |-------|------|-----|--------|
 | `stream/status` | ↑ | 0 | true |
 | `stream/cmd` | ↓ | 1 | false |
+| `stream/photo` | ↑ | 0 | false |
 
 前缀：`deepdiary/deep-dog/{device_id}/`。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
 
@@ -47,9 +49,28 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `action` | enum | 是 | `start` / `stop` |
-| `mode` | enum | 否 | `off` / `stream` / `rtsp_push`；`start` 缺省 → `rtsp_push`；`stop` 恒强制 `off`（带非 off 的 mode 会被忽略） |
+| `action` | enum | 是 | `start` / `stop` / `take_photo` |
+| `mode` | enum | 否 | `off` / `stream` / `rtsp_push`；`start` 缺省 → `rtsp_push`；`stop` 恒强制 `off`；**`take_photo` 忽略** |
+| `question` | string | 否 | 仅 `take_photo`；默认「描述画面里有什么」 |
 | `ts` | int | 否 | Unix 秒 |
+
+### 样例 · 拍照视觉解释
+
+```json
+{ "action": "take_photo", "question": "画面里有什么？简单描述。", "ts": 1710000000 }
+```
+
+异步执行，约数秒；结果走 `stream/photo`（不改推流 `mode`）。并发第二次会 `ok=false, error=busy`。需设备已配置 Explain URL（曾连小智云下发 vision）。
+
+## 字段表 · `stream/photo`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ok` | bool | 是否成功 |
+| `result` | string | 成功时 Explain 返回（多为 **字符串化 JSON**，内含 `text`） |
+| `error` | string | `busy` / `capture_fail` / `Image explain URL or token is not set` 等 |
+| `elapsed_ms` | int | 耗时 |
+| `ts` | int | Unix 秒 |
 
 ## 字段表 · `stream/status`
 

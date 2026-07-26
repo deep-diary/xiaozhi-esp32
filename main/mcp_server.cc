@@ -111,9 +111,9 @@ void McpServer::AddCommonTools() {
             [camera](const PropertyList& properties) -> ReturnValue {
                 TaskPriorityReset priority_reset(1);
                 auto question = properties["question"].value<std::string>();
-                // Capture() 含采帧 + 屏上预览；Explain() 仅上传并解析，不负责显示。
-                // 人脸管道持续刷新最后一帧后，可改为 CaptureOnly + Explain，避免与后台重复 DQBUF。
-                if (!camera->Capture()) {
+                // 优先 CaptureOnly：只采帧不预览，避免与 VisionFrameHub 争 Display/二次 alloc。
+                // 无 CaptureOnly 的板回退 Capture()（含屏上预览）。
+                if (!camera->CaptureOnly() && !camera->Capture()) {
                     throw std::runtime_error("Failed to capture camera frame");
                 }
                 return camera->Explain(question);

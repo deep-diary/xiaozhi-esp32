@@ -1008,7 +1008,12 @@ std::string EspVideo::Explain(const std::string& question) {
         throw std::runtime_error("Image explain URL or token is not set");
     }
 
-    // 确保已经有一帧可用于编码；如果还没有，就同步采一帧
+    // 锁内深拷贝一帧到 PSRAM，再解锁编码/上传，避免 VisionFrameHub CaptureOnlyTo 覆盖/释放 frame_（UAF）
+    uint8_t* jpeg_src = nullptr;
+    size_t jpeg_src_len = 0;
+    uint16_t enc_w = 320;
+    uint16_t enc_h = 240;
+    v4l2_pix_fmt_t enc_fmt = 0;
     {
         std::lock_guard<std::mutex> lock(capture_mu_);
         if (frame_.data == nullptr || frame_.len == 0 || frame_.format == 0) {
@@ -1017,22 +1022,36 @@ std::string EspVideo::Explain(const std::string& question) {
                 throw std::runtime_error("Failed to capture camera frame");
             }
         }
+        jpeg_src_len = frame_.len;
+        enc_w = frame_.width ? frame_.width : 320;
+        enc_h = frame_.height ? frame_.height : 240;
+        enc_fmt = frame_.format;
+        jpeg_src = static_cast<uint8_t*>(
+            heap_caps_malloc(jpeg_src_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (jpeg_src == nullptr) {
+            jpeg_src = static_cast<uint8_t*>(
+                heap_caps_malloc(jpeg_src_len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        }
+        if (jpeg_src == nullptr) {
+            ESP_LOGE(TAG, "Explain: failed to copy frame (%u bytes)", (unsigned)jpeg_src_len);
+            throw std::runtime_error("Failed to allocate frame copy for Explain");
+        }
+        memcpy(jpeg_src, frame_.data, jpeg_src_len);
     }
 
     // 创建局部的 JPEG 队列, 40 entries is about to store 512 * 40 = 20480 bytes of JPEG data
     QueueHandle_t jpeg_queue = xQueueCreate(40, sizeof(JpegChunk));
     if (jpeg_queue == nullptr) {
+        heap_caps_free(jpeg_src);
         ESP_LOGE(TAG, "Failed to create JPEG queue");
         throw std::runtime_error("Failed to create JPEG queue");
     }
 
-    // We spawn a thread to encode the image to JPEG using optimized encoder (cost about 500ms and 8KB SRAM)
-    encoder_thread_ = std::thread([this, jpeg_queue]() {
-        uint16_t w = frame_.width ? frame_.width : 320;
-        uint16_t h = frame_.height ? frame_.height : 240;
-        v4l2_pix_fmt_t enc_fmt = frame_.format;
+    // 用局部线程编码，勿写入成员 encoder_thread_：
+    // Hub 的 DoCaptureOnlyLocked 会 join 该成员，若与 Explain 并发会发生二次 join → abort。
+    std::thread enc_thread([jpeg_src, jpeg_src_len, enc_w, enc_h, enc_fmt, jpeg_queue]() {
         bool ok = image_to_jpeg_cb(
-            frame_.data, frame_.len, w, h, enc_fmt, 80,
+            jpeg_src, jpeg_src_len, enc_w, enc_h, enc_fmt, 80,
             [](void* arg, size_t index, const void* data, size_t len) -> size_t {
                 auto jpeg_queue = static_cast<QueueHandle_t>(arg);
                 JpegChunk chunk = {.data = nullptr, .len = len};
@@ -1074,7 +1093,7 @@ std::string EspVideo::Explain(const std::string& question) {
     if (!http->Open("POST", explain_url_)) {
         ESP_LOGE(TAG, "Failed to connect to explain URL");
         // Clear the queue
-        encoder_thread_.join();
+        enc_thread.join();
         JpegChunk chunk;
         while (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) == pdPASS) {
             if (chunk.data != nullptr) {
@@ -1084,6 +1103,7 @@ std::string EspVideo::Explain(const std::string& question) {
             }
         }
         vQueueDelete(jpeg_queue);
+        heap_caps_free(jpeg_src);
         throw std::runtime_error("Failed to connect to explain URL");
     }
 
@@ -1124,9 +1144,11 @@ std::string EspVideo::Explain(const std::string& question) {
         heap_caps_free(chunk.data);
     }
     // Wait for the encoder thread to finish
-    encoder_thread_.join();
+    enc_thread.join();
     // 清理队列
     vQueueDelete(jpeg_queue);
+    heap_caps_free(jpeg_src);
+    jpeg_src = nullptr;
 
     if (!saw_terminator || total_sent == 0) {
         ESP_LOGE(TAG, "JPEG encoder failed or produced empty output");
@@ -1153,6 +1175,6 @@ std::string EspVideo::Explain(const std::string& question) {
     // Get remain task stack size
     size_t remain_stack_size = uxTaskGetStackHighWaterMark(nullptr);
     ESP_LOGI(TAG, "Explain image size=%d bytes, compressed size=%d, remain stack size=%d, question=%s\n%s",
-             (int)frame_.len, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
+             (int)jpeg_src_len, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
     return result;
 }

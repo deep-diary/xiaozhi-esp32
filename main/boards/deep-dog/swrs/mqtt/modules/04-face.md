@@ -51,7 +51,7 @@
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `enabled` | bool | 否* | 总开关；关则检测+识别均停 |
-| `action` | enum | 否 | `clear_db`：清空本地已注册人脸；可选 `refresh_name` |
+| `action` | enum | 否 | `clear_db`：清空本地已注册人脸 |
 | `pipeline` | enum | 否 | `live` \| `identity` |
 | `detect_interval_ms` | int | 否 | **200–5000**；越界夹紧；status 回显生效值 |
 | `ts` | int | 否 | Unix 秒 |
@@ -125,6 +125,8 @@
 ```json
 { "action": "clear_db", "ts": 1710000000 }
 ```
+
+拍照视觉解释已迁到 [02-stream](./02-stream.md)（`stream/cmd` `take_photo` → `stream/photo`），不在本模块。
 
 ## 样例 · `face/status`
 
