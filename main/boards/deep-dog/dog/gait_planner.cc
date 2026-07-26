@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_DOG_ENABLE
+
 #include "gait_planner.h"
 #include <esp_log.h>
 
@@ -55,3 +59,5 @@ uint16_t GaitPlanner::effectiveStepForLeg(int leg_index) const {
 
     return (uint16_t)((cycle_index_ + off) % total_steps_);
 }
+
+#endif  // DEEP_DOG_DOG_ENABLE

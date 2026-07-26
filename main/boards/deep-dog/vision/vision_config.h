@@ -1,7 +1,9 @@
 #ifndef _DEEP_DOG_VISION_CONFIG_H_
 #define _DEEP_DOG_VISION_CONFIG_H_
 
-/** 1=编译 VisionFrameHub + RTSP JPEG Push；0=仅保留旧 HTTP 采帧路径（不推荐） */
+#include "config.h"
+
+/** 1=编译 VisionFrameHub + RTSP JPEG Push；默认见 board_features.h */
 #ifndef DEEP_DOG_VISION_HUB_ENABLE
 #define DEEP_DOG_VISION_HUB_ENABLE 1
 #endif

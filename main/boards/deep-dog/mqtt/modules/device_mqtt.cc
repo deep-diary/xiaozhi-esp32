@@ -2,6 +2,7 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
+#include "config.h"
 #include "system_info.h"
 
 #include <wifi_manager.h>
@@ -159,8 +160,14 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     cJSON* power = cJSON_AddObjectToObject(root, "power");
     cJSON_AddBoolToObject(power, "supported", false);
 
+    cJSON* ext_pins = cJSON_AddObjectToObject(root, "ext_pins");
+    cJSON_AddStringToObject(ext_pins, "mode", DEEP_DOG_EXT_PIN_MODE_STR);
+    cJSON_AddNumberToObject(ext_pins, "gpio_a", static_cast<double>(DEEP_DOG_EXT_PIN_A_GPIO));
+    cJSON_AddNumberToObject(ext_pins, "gpio_b", static_cast<double>(DEEP_DOG_EXT_PIN_B_GPIO));
+
     cJSON* caps = cJSON_AddObjectToObject(root, "capabilities");
     cJSON_AddBoolToObject(caps, "dog", caps_.dog);
+    cJSON_AddBoolToObject(caps, "motor", caps_.motor);
     cJSON_AddBoolToObject(caps, "stream", caps_.stream);
     cJSON_AddBoolToObject(caps, "face", caps_.face);
     cJSON_AddBoolToObject(caps, "track", caps_.track);
@@ -171,6 +178,8 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     cJSON_AddBoolToObject(caps, "handle", caps_.handle);
     cJSON_AddBoolToObject(caps, "touch", caps_.touch);
     cJSON_AddBoolToObject(caps, "can", caps_.can);
+    cJSON_AddBoolToObject(caps, "arm", caps_.arm);
+    cJSON_AddBoolToObject(caps, "uart", caps_.uart);
     const int64_t ts = UnixTs();
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", IsoTs(ts).c_str());

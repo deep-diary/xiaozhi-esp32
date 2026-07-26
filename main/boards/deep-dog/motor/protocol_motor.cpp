@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_MOTOR_ENABLE
+
 #include "protocol_motor.h"
 #include "motor_config.h"
 #include <esp_log.h>
@@ -438,3 +442,5 @@ void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* st
             break;
     }
 }
+
+#endif  // DEEP_DOG_MOTOR_ENABLE

@@ -1,6 +1,8 @@
 #pragma once
 
-/** 1=编译 BMI270 + MQTT imu/status；0=无 IMU 代码 */
+#include "config.h"
+
+/** 1=编译 BMI270 + MQTT imu/status；默认见 board_features.h */
 #ifndef DEEP_DOG_IMU_ENABLE
 #define DEEP_DOG_IMU_ENABLE 1
 #endif

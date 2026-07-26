@@ -1,5 +1,7 @@
 # Deep-Dog 机器狗板级说明
 
+> **配置入口**：硬件脚与引出脚模式见 [`config.h`](./config.h)；功能组合见 [`board_features.h`](./board_features.h)；剖面表见 [`FEATURE_FLAGS.md`](./FEATURE_FLAGS.md)。
+
 ## 功能需求
 
 通过**语音**控制机器狗完成：
@@ -15,32 +17,15 @@
 
 ```
 main/boards/deep-dog/
-├── README.md                 # 本文件：总览与开发计划
-├── config.h                  # 板级硬件配置（GPIO、CAN、显示、音频等）
-├── config.json               # 板型标识等
-├── esp_sparkbot_board.cc     # 板级入口：DeepDog 类、MCP 工具注册
-├── can/                      # CAN 通信（TWAI）
-│   ├── README.md
-│   ├── ESP32-TWAI-CAN.cpp
-│   └── ESP32-TWAI-CAN.hpp
-├── motor/                    # 单电机控制（协议、使能、位置/速度）
-│   ├── README.md
-│   ├── deep_motor*.cpp/h
-│   ├── deep_motor_control.cc/h
-│   ├── protocol_motor.cpp/h
-│   └── ...
-├── leg/                      # 单腿控制（3 关节，正弦步态）
-│   ├── README.md
-│   ├── leg_control.h
-│   └── leg_control.cc
-├── trajectory/               # 轨迹规划（点对点、插值）
-│   ├── README.md
-│   ├── trajectory_planner.h
-│   └── trajectory_planner.c
-└── dog/                      # 整机控制（4 条腿、步态编排、MCP 对接）
-    ├── README.md
-    ├── dog_control.h
-    └── dog_control.cc
+├── README.md / FEATURE_FLAGS.md
+├── config.h                  # 板级硬件 IO + EXT_PIN 成对模式
+├── board_features.h          # 分层 ENABLE / 非引脚总开关
+├── config.json
+├── esp_sparkbot_board.cc     # 板级编排
+├── can/ motor/ leg/ dog/ trajectory/
+├── uart/ led/ servo/ gimbal/ arm/ rs485/ io_ext/ ad/   # 引出脚相关占位
+├── mqtt/ vision/ face_ai/ http-server/ …
+└── swrs/                     # 需求与 MQTT 契约
 ```
 
 - **编译**：主项目 `CMakeLists.txt` 根据 `CONFIG_BOARD_TYPE_DEEP_DOG` 选择 `BOARD_TYPE=deep-dog`，并通过 `GLOB_RECURSE` 递归收集本目录及子目录下所有 `*.cc`/`*.cpp`/`*.c` 参与编译，无需修改主项目源列表。
@@ -97,7 +82,7 @@ main/boards/deep-dog/
 
 ## 硬件与配置要点
 
-- **CAN**：`config.h` 中已配置 `CAN_TX_GPIO` / `CAN_RX_GPIO`（如 38/48），与主项目其他板型隔离。
+- **CAN**：`EXT_PIN_MODE=CAN` 时由 `can/can_config.h` 将 A/B 映射为 `CAN_TX_GPIO` / `CAN_RX_GPIO`；开关见 `board_features.h`。
 - **电机**：12 个无刷电机，一路 CAN，ID 分配与腿/关节对应关系见 `dog/README.md`。
 - **UART 底盘**：原 SparkBot 底盘为 UART 控制；机器狗改为 CAN 控制电机，因此不再使用 UART 底盘指令（`SendUartMessage`），由 `dog` + `motor` + `can` 替代。
 

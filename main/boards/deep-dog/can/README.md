@@ -22,7 +22,7 @@
 
 | 项 | 当前典型值 |
 |----|------------|
-| 引脚 | `CAN_TX_GPIO` = **GPIO38**（接收发器 RXD），`CAN_RX_GPIO` = **GPIO48**（接收发器 TXD） |
+| 引脚 | `can/can_config.h`：`CAN_TX_GPIO`←`EXT_PIN_A`，`CAN_RX_GPIO`←`EXT_PIN_B`（需 `DEEP_DOG_EXT_PIN_MODE=CAN`） |
 | 波特率 | `InitializeCan()` 中使用 **`convertSpeed(1000)`** → **1 Mbps**（须与全部电机一致） |
 | 队列 | `setTxQueueSize(64)` / `setRxQueueSize(64)`，`begin(..., 64, 64)`（连续行走突发 12 帧更稳） |
 
@@ -120,6 +120,6 @@ uint8_t  data[8];
 ## 相关文档
 
 - `../motor/README.md` — 协议与 `DeepMotor`。
-- `../config.h` — `CAN_TX_GPIO` / `CAN_RX_GPIO`（GPIO38/48；源自 esp-sparkbot UART 脚，现作 TWAI）。
+- `../config.h` + `can/can_config.h` — 引出脚成对模式为 CAN 时映射 TX/RX；总开关 `DEEP_DOG_CAN_ENABLE`。
 - `../dog/README.md` — 整机与 MCP。
 - [`../swrs/mqtt/modules/12-can.md`](../swrs/mqtt/modules/12-can.md) — MQTT `can/*` 透传（网页帧表）。

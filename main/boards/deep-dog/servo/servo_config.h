@@ -1,0 +1,25 @@
+#ifndef _DEEP_DOG_SERVO_CONFIG_H_
+#define _DEEP_DOG_SERVO_CONFIG_H_
+
+#include "config.h"
+
+/**
+ * PWM 舵机：自由引出脚 A/B 分别作为 pan/tilt（与 EXT_PIN=PWM 配套）。
+ * 驱动参考 deep-diary/servo（MCPWM）。
+ */
+
+#if DEEP_DOG_PWM_AVAILABLE
+#ifndef DEEP_DOG_SERVO_PAN_GPIO
+#define DEEP_DOG_SERVO_PAN_GPIO  DEEP_DOG_EXT_PIN_A_GPIO
+#endif
+#ifndef DEEP_DOG_SERVO_TILT_GPIO
+#define DEEP_DOG_SERVO_TILT_GPIO DEEP_DOG_EXT_PIN_B_GPIO
+#endif
+#endif
+
+#define SERVO_MIN_PULSEWIDTH_US 500
+#define SERVO_MAX_PULSEWIDTH_US 2500
+#define SERVO_TIMEBASE_RESOLUTION_HZ 1000000
+#define SERVO_TIMEBASE_PERIOD 20000
+
+#endif  // _DEEP_DOG_SERVO_CONFIG_H_

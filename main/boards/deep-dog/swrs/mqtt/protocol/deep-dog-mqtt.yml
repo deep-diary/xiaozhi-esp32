@@ -125,10 +125,19 @@ topics:
           supported: { type: bool, note: "deep-dog currently false (no ADC/PMIC)" }
           level_pct: { type: int, optional: true, note: "0-100 when supported" }
           charging: { type: bool, optional: true }
+      ext_pins:
+        type: object
+        optional: true
+        note: "自由引出脚 GPIO38/48 成对模式；前端据此切换 can/uart/pwm 等页面"
+        fields:
+          mode: { type: string, note: "none|can|uart|rs485|pwm|io|ad" }
+          gpio_a: { type: int, note: "DEEP_DOG_EXT_PIN_A_GPIO" }
+          gpio_b: { type: int, note: "DEEP_DOG_EXT_PIN_B_GPIO" }
       capabilities:
         type: object
         fields:
           dog: { type: bool }
+          motor: { type: bool, note: "CAN 电机栈；可无 dog" }
           stream: { type: bool }
           face: { type: bool }
           track: { type: bool }
@@ -139,6 +148,8 @@ topics:
           handle: { type: bool }
           touch: { type: bool }
           can: { type: bool }
+          arm: { type: bool, note: "机械臂占位" }
+          uart: { type: bool }
       ts: { type: int }
       ts_iso: { type: string, optional: true }
 

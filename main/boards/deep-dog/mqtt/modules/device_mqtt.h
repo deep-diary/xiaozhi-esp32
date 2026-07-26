@@ -5,7 +5,8 @@
 class DeepDogMqttClient;
 
 struct DeepDogCapabilities {
-    bool dog = true;
+    bool dog = false;
+    bool motor = false;
     bool stream = false;
     bool face = false;
     bool track = false;
@@ -15,7 +16,9 @@ struct DeepDogCapabilities {
     bool gimbal = false;
     bool handle = false;
     bool touch = true;
-    bool can = true;
+    bool can = false;
+    bool arm = false;
+    bool uart = false;
 };
 
 /** device/info（retain）+ device/status 心跳 */

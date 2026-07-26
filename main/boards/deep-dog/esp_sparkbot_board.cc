@@ -4,15 +4,46 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
+#include "net/net_config.h"
 #include "mcp_server.h"
 #include "settings.h"
-#include "can/ESP32-TWAI-CAN.hpp"
-#include "motor/deep_motor.h"
-#include "motor/deep_motor_control.h"
-#include "leg/leg_control.h"
-#include "dog/dog_control.h"
 #include "touch_btn/touch_button_controller.h"
 #include "touch_btn/deep_dog_touch_app.h"
+
+#if DEEP_DOG_CAN_ENABLE
+#include "can/can_config.h"
+#include "can/ESP32-TWAI-CAN.hpp"
+#endif
+#if DEEP_DOG_MOTOR_ENABLE
+#include "motor/deep_motor.h"
+#include "motor/deep_motor_control.h"
+#endif
+#if DEEP_DOG_DOG_ENABLE
+#include "leg/leg_control.h"
+#include "dog/dog_control.h"
+#endif
+#if DEEP_DOG_UART_ENABLE
+#include "uart/uart_stub.h"
+#endif
+#if DEEP_DOG_LED_ENABLE
+#include "led/led_stub.h"
+#endif
+#if DEEP_DOG_SERVO_ENABLE || DEEP_DOG_GIMBAL_ENABLE
+#include "servo/servo_config.h"
+#include "gimbal/Gimbal.h"
+#endif
+#if DEEP_DOG_ARM_ENABLE
+#include "arm/arm_stub.h"
+#endif
+#if DEEP_DOG_RS485_ENABLE
+#include "rs485/rs485_stub.h"
+#endif
+#if DEEP_DOG_IO_ENABLE
+#include "io_ext/io_ext_stub.h"
+#endif
+#if DEEP_DOG_AD_ENABLE
+#include "ad/ad_stub.h"
+#endif
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -43,7 +74,11 @@
 #include <wifi_manager.h>
 
 #if DEEP_DOG_HTTP_SERVER_ENABLE
+#include "http-server/http_server_config.h"
 #include "http-server/deep_dog_http_server.h"
+#if DEEP_DOG_DOG_ENABLE
+#include "dog/dog_control.h"
+#endif
 #endif
 #if DEEP_DOG_VISION_HUB_ENABLE
 #include "vision/vision_frame_hub.h"
@@ -111,10 +146,10 @@ void DeepDogOnWifiStaConnected(void* arg, esp_event_base_t base, int32_t id, voi
 }  // namespace
 #endif  // DEEP_DOG_WIFI_USE_STATIC_IP
 
-// CAN 接收任务栈与优先级
+#if DEEP_DOG_CAN_ENABLE
 #define CAN_RX_TASK_STACK  4096
 #define CAN_RX_TASK_PRIO   5
-#define DEEP_DOG_TEST_MOTOR_ID  1
+#endif
 
 class SparkBotEs8311AudioCodec : public Es8311AudioCodec {
 private:    
@@ -146,11 +181,22 @@ private:
     TouchButtonController touch_buttons_;
     Display* display_ = nullptr;
     EspVideo* camera_ = nullptr;
+#if DEEP_DOG_MOTOR_ENABLE
     DeepMotor* deep_motor_ = nullptr;
-    DogControl dog_;  // 整机：4 条腿，内部持有 4 个 LegControl
-    DeepDogTouchApp touch_app_{&dog_};  // 触摸按键业务（须在 dog_ 之后构造）
-    LegControl* leg_ptrs_[4] = { nullptr };  // 供单腿 MCP 回调使用，指向 dog_ 内 4 腿
+#endif
+#if DEEP_DOG_CAN_ENABLE && DEEP_DOG_MOTOR_ENABLE
     TaskHandle_t can_rx_task_handle_ = nullptr;
+#endif
+#if DEEP_DOG_DOG_ENABLE
+    DogControl dog_;
+    DeepDogTouchApp touch_app_{&dog_};
+    LegControl* leg_ptrs_[4] = { nullptr };
+#else
+    DeepDogTouchApp touch_app_{};
+#endif
+#if DEEP_DOG_GIMBAL_ENABLE
+    Gimbal_t gimbal_{};
+#endif
 #if DEEP_DOG_IMU_ENABLE
     std::unique_ptr<DeepDogImuSensor> imu_sensor_;
     std::unique_ptr<DeepDogImuSwitch> imu_switch_;
@@ -165,6 +211,34 @@ private:
     std::unique_ptr<DeepDogMqtt> board_mqtt_;
 #endif
 
+#if DEEP_DOG_CAN_ENABLE
+    void InitializeCan() {
+        ESP32Can.setTxQueueSize(DEEP_DOG_CAN_TX_QUEUE_SIZE);
+        ESP32Can.setRxQueueSize(DEEP_DOG_CAN_RX_QUEUE_SIZE);
+        bool ok = ESP32Can.begin(
+            ESP32Can.convertSpeed(1000),
+            (int8_t)CAN_TX_GPIO,
+            (int8_t)CAN_RX_GPIO,
+            DEEP_DOG_CAN_TX_QUEUE_SIZE,
+            DEEP_DOG_CAN_RX_QUEUE_SIZE
+        );
+        if (ok) {
+            ESP_LOGI(TAG, "CAN init ok, TX=%d RX=%d, queue tx=%d rx=%d",
+                     (int)CAN_TX_GPIO, (int)CAN_RX_GPIO,
+                     (int)DEEP_DOG_CAN_TX_QUEUE_SIZE, (int)DEEP_DOG_CAN_RX_QUEUE_SIZE);
+#if DEEP_DOG_CAN_RX_HEX_LOG
+            ESP_LOGI(TAG, "CAN RX 报文日志已开启 (DEEP_DOG_CAN_RX_HEX_LOG)");
+#endif
+#if DEEP_DOG_CAN_TX_HEX_LOG
+            ESP_LOGI(TAG, "CAN TX 报文日志已开启 (DEEP_DOG_CAN_TX_HEX_LOG)");
+#endif
+        } else {
+            ESP_LOGE(TAG, "CAN init failed");
+        }
+    }
+#endif
+
+#if DEEP_DOG_CAN_ENABLE && DEEP_DOG_MOTOR_ENABLE
     static void CanRxTask(void* arg) {
         DeepMotor* motor = static_cast<DeepMotor*>(arg);
         CanFrame frame;
@@ -203,32 +277,44 @@ private:
             vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
+#endif
 
-    void InitializeCan() {
-        // 连续行走时每个小步会突发下发 12 个关节帧；队列太小容易触发 send 超时。
-        // 适当增大 TX/RX 队列可显著降低高频下的丢帧/超时概率。
-        ESP32Can.setTxQueueSize(DEEP_DOG_CAN_TX_QUEUE_SIZE);
-        ESP32Can.setRxQueueSize(DEEP_DOG_CAN_RX_QUEUE_SIZE);
-        bool ok = ESP32Can.begin(
-            ESP32Can.convertSpeed(1000),
-            (int8_t)CAN_TX_GPIO,
-            (int8_t)CAN_RX_GPIO,
-            DEEP_DOG_CAN_TX_QUEUE_SIZE,
-            DEEP_DOG_CAN_RX_QUEUE_SIZE
-        );
-        if (ok) {
-            ESP_LOGI(TAG, "CAN init ok, TX=%d RX=%d, queue tx=%d rx=%d",
-                     (int)CAN_TX_GPIO, (int)CAN_RX_GPIO,
-                     (int)DEEP_DOG_CAN_TX_QUEUE_SIZE, (int)DEEP_DOG_CAN_RX_QUEUE_SIZE);
-#if DEEP_DOG_CAN_RX_HEX_LOG
-            ESP_LOGI(TAG, "CAN RX 报文日志已开启 (DEEP_DOG_CAN_RX_HEX_LOG)：每条接收帧打印 ext id / dlc / data[0..7]");
-#endif
-#if DEEP_DOG_CAN_TX_HEX_LOG
-            ESP_LOGI(TAG, "CAN TX 报文日志已开启 (DEEP_DOG_CAN_TX_HEX_LOG)");
-#endif
-        } else {
-            ESP_LOGE(TAG, "CAN init failed");
+#if DEEP_DOG_GIMBAL_ENABLE
+    void InitializeGimbal() {
+        if (Gimbal_init(&gimbal_, DEEP_DOG_SERVO_PAN_GPIO, DEEP_DOG_SERVO_TILT_GPIO) != ESP_OK) {
+            ESP_LOGW(TAG, "Gimbal init failed");
         }
+    }
+#endif
+
+    void InitializeExtPinModules() {
+        ESP_LOGI(TAG, "ext_pins mode=%s A=%d B=%d can=%d motor=%d dog=%d arm=%d servo=%d gimbal=%d",
+                 DEEP_DOG_EXT_PIN_MODE_STR, (int)DEEP_DOG_EXT_PIN_A_GPIO, (int)DEEP_DOG_EXT_PIN_B_GPIO,
+                 DEEP_DOG_CAN_ENABLE, DEEP_DOG_MOTOR_ENABLE, DEEP_DOG_DOG_ENABLE, DEEP_DOG_ARM_ENABLE,
+                 DEEP_DOG_SERVO_ENABLE, DEEP_DOG_GIMBAL_ENABLE);
+#if DEEP_DOG_UART_ENABLE
+        DeepDogUartInit();
+#endif
+#if DEEP_DOG_RS485_ENABLE
+        DeepDogRs485Init();
+#endif
+#if DEEP_DOG_IO_ENABLE
+        DeepDogIoExtInit();
+#endif
+#if DEEP_DOG_AD_ENABLE
+        DeepDogAdInit();
+#endif
+#if DEEP_DOG_LED_ENABLE
+        DeepDogLedInit();
+#endif
+#if DEEP_DOG_GIMBAL_ENABLE
+        InitializeGimbal();
+#elif DEEP_DOG_SERVO_ENABLE
+        ESP_LOGI(TAG, "Servo ENABLE without gimbal — attach at product layer if needed");
+#endif
+#if DEEP_DOG_ARM_ENABLE
+        DeepDogArmInit();
+#endif
     }
 
     void InitializeI2c() {
@@ -431,7 +517,11 @@ private:
 #endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE
         // 须在 esp_netif_init / tcpip 就绪之后启动（见 StartNetwork）；勿在构造函数里 httpd_start
+#if DEEP_DOG_DOG_ENABLE
         http_server_ = std::make_unique<DeepDogHttpServer>(camera_, &dog_, DEEP_DOG_HTTP_SERVER_PORT);
+#else
+        http_server_ = std::make_unique<DeepDogHttpServer>(camera_, nullptr, DEEP_DOG_HTTP_SERVER_PORT);
+#endif
 #if DEEP_DOG_VISION_HUB_ENABLE
         http_server_->SetVisionHub(vision_hub_.get());
 #endif
@@ -475,12 +565,15 @@ private:
 
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
+#if DEEP_DOG_DOG_ENABLE
         dog_.setDeepMotor(deep_motor_);
         dog_.getLegs(leg_ptrs_);
-        // MCP 数量上限约 32：单电机/MIT 调试时只开电机工具，腿/整机先注释，需要整机时再改回
-        // RegisterMotorMcpTools(mcp_server, deep_motor_);
-        // RegisterLegMcpTools(mcp_server, leg_ptrs_);
         RegisterDogMcpTools(mcp_server, &dog_);
+#elif DEEP_DOG_MOTOR_ENABLE
+        RegisterMotorMcpTools(mcp_server, deep_motor_);
+#else
+        (void)mcp_server;
+#endif
     }
 
 public:
@@ -491,11 +584,17 @@ public:
         InitializeButtons();
         InitializeTouchButtons();
         InitializeCamera();
+        InitializeExtPinModules();
+#if DEEP_DOG_CAN_ENABLE
         InitializeCan();
+#endif
+#if DEEP_DOG_MOTOR_ENABLE
         deep_motor_ = new DeepMotor(nullptr);
-        // 不再预注册电机 1：整机 12 个电机（11–13,21–23,51–53,61–63）由 dog.init() 时全部注册，槽位刚好 12，预注册会占满导致电机 63 无法注册
-        InitializeTools();  // 内里会配置 leg_fl_ 并注册腿 MCP
+#if DEEP_DOG_CAN_ENABLE
         xTaskCreate(CanRxTask, "can_rx", CAN_RX_TASK_STACK, deep_motor_, CAN_RX_TASK_PRIO, &can_rx_task_handle_);
+#endif
+#endif
+        InitializeTools();
         GetBacklight()->RestoreBrightness();
     }
 

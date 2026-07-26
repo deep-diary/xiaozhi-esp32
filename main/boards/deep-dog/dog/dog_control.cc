@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_DOG_ENABLE
+
 #include "dog_control.h"
 #include "config.h"
 #include "motor/deep_motor.h"
@@ -959,6 +963,11 @@ bool DogControl::danceWithMode(const std::string& mode, int seed, int rounds, fl
 // --- MCP 工具注册 ---
 
 void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
+#if !DEEP_DOG_DOG_ENABLE
+    (void)mcp_server;
+    (void)dog;
+    return;
+#else
     if (!dog) return;
 
     // 描述尽量短：tools/list 经 MQTT TLS 发送，过长易触发 esp-aes 内部 RAM OOM
@@ -1141,4 +1150,7 @@ void RegisterDogMcpTools(McpServer& mcp_server, DogControl* dog) {
     ESP_LOGI(TAG,
              "Dog MCP: dog.init/stand/lie_down/disable; chassis.forward_big/backward_big/start_forward/start_backward/stop/status/"
              "set_speed/set_gait_steps/set_mit_gains/get_mit_gains/pose/dance");
+#endif  // DEEP_DOG_DOG_ENABLE
 }
+
+#endif  // DEEP_DOG_DOG_ENABLE

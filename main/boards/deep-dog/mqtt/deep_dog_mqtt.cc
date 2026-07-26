@@ -8,6 +8,7 @@
 #include "mqtt/modules/face_mqtt.h"
 #include "mqtt/modules/track_mqtt.h"
 
+#include "config.h"
 #include "face_ai_config.h"
 #include "http-server/http_server_config.h"
 #include "sensor/imu_config.h"
@@ -124,9 +125,32 @@ bool DeepDogMqtt::Start() {
     }
 
     DeepDogCapabilities caps;
-    caps.dog = true;
     caps.touch = true;
+#if DEEP_DOG_DOG_ENABLE
+    caps.dog = true;
+#else
+    caps.dog = false;
+#endif
+#if DEEP_DOG_MOTOR_ENABLE
+    caps.motor = true;
+#else
+    caps.motor = false;
+#endif
+#if DEEP_DOG_CAN_ENABLE
     caps.can = true;
+#else
+    caps.can = false;
+#endif
+#if DEEP_DOG_ARM_ENABLE
+    caps.arm = true;
+#else
+    caps.arm = false;
+#endif
+#if DEEP_DOG_UART_ENABLE
+    caps.uart = true;
+#else
+    caps.uart = false;
+#endif
 #if DEEP_DOG_VISION_HUB_ENABLE
     caps.stream = true;
 #else
@@ -147,9 +171,21 @@ bool DeepDogMqtt::Start() {
 #else
     caps.imu = false;
 #endif
+#if DEEP_DOG_LED_ENABLE
+    caps.led = true;
+#else
     caps.led = false;
+#endif
+#if DEEP_DOG_SERVO_ENABLE
+    caps.servo = true;
+#else
     caps.servo = false;
+#endif
+#if DEEP_DOG_GIMBAL_ENABLE
+    caps.gimbal = true;
+#else
     caps.gimbal = false;
+#endif
     caps.handle = false;
 
     impl_->device.SetCapabilities(caps);

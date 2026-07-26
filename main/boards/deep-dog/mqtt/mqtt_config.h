@@ -1,8 +1,10 @@
 #pragma once
 
+#include "config.h"
+
 #include <string>
 
-/** 1=编译板级 MQTT（device/stream）；0=桩 */
+/** 1=编译板级 MQTT（device/stream）；0=桩；默认见 board_features.h */
 #ifndef DEEP_DOG_MQTT_ENABLE
 #define DEEP_DOG_MQTT_ENABLE 1
 #endif

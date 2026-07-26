@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_MOTOR_ENABLE
+
 #include "deep_motor.h"
 #include "motor_config.h"
 #include <esp_log.h>
@@ -1205,3 +1209,5 @@ bool DeepMotor::setMotorMitCommand(uint8_t motor_id, float position_rad, float v
     invalidateMotorCommandCache(motor_id);
     return true;
 }
+
+#endif  // DEEP_DOG_MOTOR_ENABLE

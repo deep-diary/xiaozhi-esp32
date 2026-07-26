@@ -1,7 +1,5 @@
 #include "deep_dog_touch_app.h"
-#include "config.h"
 #include "touch_config.h"
-#include "dog/dog_control.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -11,6 +9,11 @@
 #include <atomic>
 #include <new>
 #include <string>
+
+#if DEEP_DOG_DOG_ENABLE
+#include "dog/dog_control.h"
+#include "motor/motor_config.h"
+#endif
 
 #define TAG "dog_touch"
 
@@ -43,7 +46,11 @@ void TouchExplainTask(void* arg) {
 
 }  // namespace
 
+#if DEEP_DOG_DOG_ENABLE
 DeepDogTouchApp::DeepDogTouchApp(DogControl* dog) : dog_(dog) {}
+#else
+DeepDogTouchApp::DeepDogTouchApp() = default;
+#endif
 
 void DeepDogTouchApp::QueueTouchPhotoExplainIfIdle() {
 #if !DEEP_DOG_TOUCH2_SHORT_PHOTO_EXPLAIN
@@ -74,6 +81,20 @@ void DeepDogTouchApp::QueueTouchPhotoExplainIfIdle() {
     }
 }
 
+void DeepDogTouchApp::OnPress1() {
+    btn1_long_fired_ = false;
+}
+
+void DeepDogTouchApp::OnRelease1() {
+    const bool was_short = !btn1_long_fired_;
+    btn1_long_fired_ = false;
+    if (was_short) {
+        QueueTouchPhotoExplainIfIdle();
+    }
+}
+
+#if DEEP_DOG_DOG_ENABLE
+
 void DeepDogTouchApp::MaybeQueuePhotoExplainAfterForward() {
     QueueTouchPhotoExplainIfIdle();
 }
@@ -102,10 +123,6 @@ void DeepDogTouchApp::ExpireComboIfNeeded() {
     }
 }
 
-void DeepDogTouchApp::OnPress1() {
-    btn1_long_fired_ = false;
-}
-
 void DeepDogTouchApp::OnLongPress1() {
     btn1_long_fired_ = true;
     if (!dog_) {
@@ -117,14 +134,6 @@ void DeepDogTouchApp::OnLongPress1() {
         ESP_LOGE(TAG, "Touch: dog init failed");
     }
     ArmComboAfterLongPress1();
-}
-
-void DeepDogTouchApp::OnRelease1() {
-    const bool was_short = !btn1_long_fired_;
-    btn1_long_fired_ = false;
-    if (was_short) {
-        QueueTouchPhotoExplainIfIdle();
-    }
 }
 
 void DeepDogTouchApp::OnPress2() {
@@ -350,3 +359,45 @@ void DeepDogTouchApp::OnTouchEvent(int button_id,
             break;
     }
 }
+
+#else  // !DEEP_DOG_DOG_ENABLE
+
+void DeepDogTouchApp::OnLongPress1() {
+    btn1_long_fired_ = true;
+    ESP_LOGI(TAG, "Touch: dog disabled — long-press1 ignored (no DogControl)");
+}
+
+void DeepDogTouchApp::OnTouchEvent(int button_id,
+                                   TouchButtonEvent event,
+                                   uint32_t value,
+                                   uint32_t baseline,
+                                   uint32_t abs_diff) {
+    (void)value;
+    (void)baseline;
+    (void)abs_diff;
+
+    switch (event) {
+        case TouchButtonEvent::kPress:
+            ESP_LOGI(TAG, "Touch button %d pressed", button_id);
+            if (button_id == 1) {
+                OnPress1();
+            }
+            break;
+
+        case TouchButtonEvent::kRelease:
+            ESP_LOGI(TAG, "Touch button %d released", button_id);
+            if (button_id == 1) {
+                OnRelease1();
+            }
+            break;
+
+        case TouchButtonEvent::kLongPress:
+            ESP_LOGI(TAG, "Touch button %d long-pressed", button_id);
+            if (button_id == 1) {
+                OnLongPress1();
+            }
+            break;
+    }
+}
+
+#endif  // DEEP_DOG_DOG_ENABLE

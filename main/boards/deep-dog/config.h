@@ -2,32 +2,89 @@
 #define _BOARD_CONFIG_H_
 
 #include <driver/gpio.h>
-#include <driver/uart.h>
 
-/** 须在 #include "motor/motor_config.h" 之前定义：否则 motor_config 会先默认 DEEP_DOG_CAN_RX_HEX_LOG=1，此处 #ifndef 不再生效。 */
-#ifndef DEEP_DOG_CAN_RX_HEX_LOG
-#define DEEP_DOG_CAN_RX_HEX_LOG 0
-#endif
-#ifndef DEEP_DOG_CAN_TX_HEX_LOG
-#define DEEP_DOG_CAN_TX_HEX_LOG 0
+/**
+ * 板级硬件 IO（引脚 / 总线脚位）。
+ * 产品功能开关见 board_features.h；模块参数见各 *_config.h。
+ * 联调剖面说明见 FEATURE_FLAGS.md。
+ */
+
+/* -------- 自由引出脚 GPIO38/48：成对模式 --------
+ * 必须用 #define 数值（不能仅用 enum）：#if 里未定义的标识符一律当 0，
+ * 若用 enum 常量比较会出现 NONE==CAN 恒真，MODE_STR 误报 can。
+ */
+#define DEEP_DOG_EXT_PIN_NONE  0
+#define DEEP_DOG_EXT_PIN_CAN   1
+#define DEEP_DOG_EXT_PIN_UART  2
+#define DEEP_DOG_EXT_PIN_RS485 3
+#define DEEP_DOG_EXT_PIN_PWM   4
+#define DEEP_DOG_EXT_PIN_IO    5
+#define DEEP_DOG_EXT_PIN_AD    6
+
+typedef int deep_dog_ext_pin_mode_t;
+
+/** 联调默认 none；四足/单电机改为 DEEP_DOG_EXT_PIN_CAN，云台改为 _PWM 等 */
+#ifndef DEEP_DOG_EXT_PIN_MODE
+#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_NONE
 #endif
 
-// 模块化配置拆分：电机相关宏移至 motor/motor_config.h（便于复用 motor/ 目录）
-#include "motor/motor_config.h"
-// 步态/底盘策略配置（便于复用 dog/、leg/）
-#include "dog/dog_config.h"
-// 轨迹插值配置（便于复用 trajectory/）
-#include "trajectory/trajectory_config.h"
-// 网页控制配置（便于复用 http-server/）
-#include "http-server/http_server_config.h"
-// 人脸检测配置（便于复用 face_ai/）
-#include "face_ai/face_ai_config.h"
-// 视觉 Hub / RTSP 推流（便于复用 vision/）
-#include "vision/vision_config.h"
-// 网络配置（便于复用 net/）
-#include "net/net_config.h"
-// 触摸按键行为配置（便于复用 touch_btn/）
-#include "touch_btn/touch_config.h"
+#define DEEP_DOG_EXT_PIN_A_GPIO GPIO_NUM_38
+#define DEEP_DOG_EXT_PIN_B_GPIO GPIO_NUM_48
+
+/* 由模式推导硬件可用性（不直接打开产品链） */
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_CAN
+#define DEEP_DOG_CAN_AVAILABLE 1
+#else
+#define DEEP_DOG_CAN_AVAILABLE 0
+#endif
+
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_UART
+#define DEEP_DOG_UART_AVAILABLE 1
+#else
+#define DEEP_DOG_UART_AVAILABLE 0
+#endif
+
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_RS485
+#define DEEP_DOG_RS485_AVAILABLE 1
+#else
+#define DEEP_DOG_RS485_AVAILABLE 0
+#endif
+
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_PWM
+#define DEEP_DOG_PWM_AVAILABLE 1
+#else
+#define DEEP_DOG_PWM_AVAILABLE 0
+#endif
+
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_IO
+#define DEEP_DOG_IO_AVAILABLE 1
+#else
+#define DEEP_DOG_IO_AVAILABLE 0
+#endif
+
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_AD
+#define DEEP_DOG_AD_AVAILABLE 1
+#else
+#define DEEP_DOG_AD_AVAILABLE 0
+#endif
+
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_CAN
+#define DEEP_DOG_EXT_PIN_MODE_STR "can"
+#elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_UART
+#define DEEP_DOG_EXT_PIN_MODE_STR "uart"
+#elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_RS485
+#define DEEP_DOG_EXT_PIN_MODE_STR "rs485"
+#elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_PWM
+#define DEEP_DOG_EXT_PIN_MODE_STR "pwm"
+#elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_IO
+#define DEEP_DOG_EXT_PIN_MODE_STR "io"
+#elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_AD
+#define DEEP_DOG_EXT_PIN_MODE_STR "ad"
+#else
+#define DEEP_DOG_EXT_PIN_MODE_STR "none"
+#endif
+
+#include "board_features.h"
 
 #define AUDIO_INPUT_SAMPLE_RATE  16000
 #define AUDIO_OUTPUT_SAMPLE_RATE 16000
@@ -69,57 +126,7 @@
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_46
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
-// #define UART_ECHO_TXD GPIO_NUM_38
-// #define UART_ECHO_RXD GPIO_NUM_48
-#define UART_ECHO_RTS (-1)
-#define UART_ECHO_CTS (-1)
-
-// CAN总线 (TWAI)：ESP32-S3 通过 GPIO 矩阵连接 TWAI，TX/RX 可任意选可用 GPIO。
-// GPIO 38、48 为普通 I/O，非 Strapping，可作为 CAN TX/RX 使用。
-// 接线：ESP32 TX(38) -> 收发器 RXD；ESP32 RX(48) <- 收发器 TXD；共地；总线两端 120Ω 终端；波特率与从站一致（当前 1Mbps）。
-#define CAN_TX_GPIO GPIO_NUM_38   // TX -> 收发器 RXD
-#define CAN_RX_GPIO GPIO_NUM_48   // RX <- 收发器 TXD
-// CAN RX/TX 十六进制日志宏见文件顶部（须在 motor_config.h 之前）
-
-/** TWAI/CAN 队列深度（增大可降低高频下发时的 send timeout/丢帧概率，代价是少量 RAM 占用） */
-#ifndef DEEP_DOG_CAN_TX_QUEUE_SIZE
-#define DEEP_DOG_CAN_TX_QUEUE_SIZE 96
-#endif
-#ifndef DEEP_DOG_CAN_RX_QUEUE_SIZE
-#define DEEP_DOG_CAN_RX_QUEUE_SIZE 96
-#endif
-
-/**
- * 电机「速度档位」占位宏（0～100 整数比例），与 esp-sparkbot 等板级模板同源。
- * 当前 deep-dog 工程内 **无任何 .cc/.h 引用**（电机实际限速用 rad/s，见 protocol_motor / MCP / LegControl）。
- * 若后续做语音「百分之八十速度」、UI 滑条或步态占空比，可在此统一换算；否则可删除或保持不动。
- */
-#define MOTOR_SPEED_MAX 100
-#define MOTOR_SPEED_80  80
-#define MOTOR_SPEED_60  60
-#define MOTOR_SPEED_MIN 0
-
-// 步态/轨迹相关宏已迁移至 dog/dog_config.h 与 trajectory/trajectory_config.h
-
-#define ECHO_UART_PORT_NUM      UART_NUM_1
-#define ECHO_UART_BAUD_RATE     (115200)
-#define BUF_SIZE                (1024)
-
-typedef enum {
-    LIGHT_MODE_CHARGING_BREATH = 0,
-    LIGHT_MODE_POWER_LOW,
-    LIGHT_MODE_ALWAYS_ON,
-    LIGHT_MODE_BLINK,
-    LIGHT_MODE_WHITE_BREATH_SLOW,
-    LIGHT_MODE_WHITE_BREATH_FAST,
-    LIGHT_MODE_FLOWING,
-    LIGHT_MODE_SHOW,
-    LIGHT_MODE_SLEEP,
-    LIGHT_MODE_MAX
-} light_mode_t;
-
-/* Camera：与 ESP-SparkBot 一致；SCCB 与 ES8311 共用 I2C0（SDA=4/SCL=5），SIOD/SIOC 为 NC 时由 esp_video 复用该总线。
- * 若日志出现 PID=0x0 / PID=0x60：多为摄像头未供电、软重启未复位、无上拉、或模组 SCCB 未接到该 I2C。 */
+/* Camera：与 ESP-SparkBot 一致；SCCB 与 ES8311 共用 I2C0 */
 #define SPARKBOT_CAMERA_XCLK      (GPIO_NUM_15)
 #define SPARKBOT_CAMERA_PCLK      (GPIO_NUM_13)
 #define SPARKBOT_CAMERA_VSYNC     (GPIO_NUM_6)
@@ -135,9 +142,7 @@ typedef enum {
 
 #define SPARKBOT_CAMERA_PWDN      (GPIO_NUM_NC)
 #define SPARKBOT_CAMERA_RESET     (GPIO_NUM_NC)
-/* OV3660 官方表 240×240 RGB565 常用 20MHz 输入；16M 时部分模组读 ID 不稳定 */
 #define SPARKBOT_CAMERA_XCLK_FREQ (20000000)
-/** 软重启后 SCCB 偶发读到错误 PID：首检前等待 + 失败重试 */
 #ifndef DEEP_DOG_CAMERA_INIT_DELAY_MS
 #define DEEP_DOG_CAMERA_INIT_DELAY_MS 500
 #endif
@@ -158,6 +163,12 @@ typedef enum {
 #define TOUCH_BUTTON2_GPIO       (GPIO_NUM_2)
 #define TOUCH_BUTTON3_GPIO       (GPIO_NUM_3)
 
-// HTTP server / face_ai / net / touch 配置已拆分到各模块目录的 *_config.h
+/* 灯带 GPIO（独立于 38/48；未接线时保持 NC） */
+#ifndef DEEP_DOG_LED_STRIP_GPIO
+#define DEEP_DOG_LED_STRIP_GPIO  GPIO_NUM_NC
+#endif
+#ifndef DEEP_DOG_LED_STRIP_COUNT
+#define DEEP_DOG_LED_STRIP_COUNT 0
+#endif
 
 #endif // _BOARD_CONFIG_H_

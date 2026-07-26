@@ -1,7 +1,10 @@
+#include "config.h"
 #include "http-server/deep_dog_http_server.h"
 
+#if DEEP_DOG_DOG_ENABLE
 #include "dog/dog_control.h"
 #include "motor/deep_motor.h"
+#endif
 #include "esp_video.h"
 
 #include "camera.h"
@@ -381,11 +384,13 @@ static esp_err_t ApiStatusHandler(httpd_req_t* req) {
     if (!srv) {
         return ESP_FAIL;
     }
-    const DogControl* dog = srv->dog();
     bool dog_initialized = false;
+#if DEEP_DOG_DOG_ENABLE
+    const DogControl* dog = srv->dog();
     if (dog) {
         dog_initialized = (dog->getPoseState() != DogPoseState::Uninitialized);
     }
+#endif
     const char* push_status = "idle";
     char push_url[128] = "";
     if (srv->vision_hub()) {
@@ -456,6 +461,11 @@ static esp_err_t ApiCmdHandler(httpd_req_t* req) {
     if (!srv) {
         return ESP_FAIL;
     }
+#if !DEEP_DOG_DOG_ENABLE
+    (void)srv;
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    return SendCorsJson(req, R"({"ok":false,"error":"dog disabled"})");
+#else
     if (req->method != HTTP_POST) {
         httpd_resp_set_status(req, "405 Method Not Allowed");
         return httpd_resp_send(req, nullptr, 0);
@@ -506,6 +516,7 @@ static esp_err_t ApiCmdHandler(httpd_req_t* req) {
     }
     ESP_LOGI(TAG, "网页 狗指令已入队: %s", val);
     return SendCorsJson(req, R"({"ok":true})");
+#endif  // DEEP_DOG_DOG_ENABLE
 }
 
 static esp_err_t ApiDogStatusHandler(httpd_req_t* req) {
@@ -513,6 +524,10 @@ static esp_err_t ApiDogStatusHandler(httpd_req_t* req) {
     if (!srv) {
         return ESP_FAIL;
     }
+#if !DEEP_DOG_DOG_ENABLE
+    (void)srv;
+    return SendCorsJson(req, R"({"motors":[],"torque_limit_nm":null,"has_fault":false})");
+#else
     DogControl* dog = srv->dog();
     if (!dog) {
         return SendCorsJson(req, R"({"motors":[],"torque_limit_nm":null,"has_fault":false})");
@@ -581,6 +596,7 @@ static esp_err_t ApiDogStatusHandler(httpd_req_t* req) {
     esp_err_t err = SendCorsJson(req, buf);
     heap_caps_free(buf);
     return err;
+#endif  // DEEP_DOG_DOG_ENABLE
 }
 
 static esp_err_t ApiFaceHandler(httpd_req_t* req) {
@@ -908,6 +924,14 @@ void DeepDogHttpServer::DogCmdTaskEntry(void* arg) {
 }
 
 void DeepDogHttpServer::DogCmdTaskLoop() {
+#if !DEEP_DOG_DOG_ENABLE
+    for (;;) {
+        uint8_t raw = 0;
+        if (xQueueReceive(dog_cmd_queue_, &raw, portMAX_DELAY) == pdTRUE) {
+            (void)raw;
+        }
+    }
+#else
     uint8_t raw = 0;
     for (;;) {
         if (xQueueReceive(dog_cmd_queue_, &raw, portMAX_DELAY) != pdTRUE) {
@@ -963,6 +987,7 @@ void DeepDogHttpServer::DogCmdTaskLoop() {
                 break;
         }
     }
+#endif  // DEEP_DOG_DOG_ENABLE
 }
 
 bool DeepDogHttpServer::Start() {

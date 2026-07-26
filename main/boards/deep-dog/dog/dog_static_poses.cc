@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_DOG_ENABLE
+
 #include "dog_static_poses.h"
 
 static inline void FillStandFromLegs(const LegControl legs[4], float out[4][LEG_JOINT_COUNT]) {
@@ -109,3 +113,4 @@ void FillDogStaticPose(DogStaticPoseId id, const LegControl legs[4], float out[4
     }
 }
 
+#endif  // DEEP_DOG_DOG_ENABLE

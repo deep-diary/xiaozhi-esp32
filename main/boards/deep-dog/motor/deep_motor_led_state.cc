@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_MOTOR_ENABLE
+
 #include "deep_motor_led_state.h"
 #include "deep_motor.h"  // 需要完整定义以调用getActiveMotorId()
 #include "esp_log.h"
@@ -445,3 +449,5 @@ bool DeepMotorLedState::IsBreatheEffectEnabled(uint8_t motor_id) const {
     int index = motor_id - 1;
     return breathe_effects_enabled_[index];
 }
+
+#endif  // DEEP_DOG_MOTOR_ENABLE

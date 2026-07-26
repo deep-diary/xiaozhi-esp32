@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_CAN_ENABLE
+
 #include "ESP32-TWAI-CAN.hpp"
 
 void TwaiCAN::setSpeed(TwaiSpeed twaiSpeed) {
@@ -304,3 +308,5 @@ bool TwaiCAN::end() {
 }
 
 TwaiCAN ESP32Can;
+
+#endif  // DEEP_DOG_CAN_ENABLE

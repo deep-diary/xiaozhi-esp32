@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_DOG_ENABLE
+
 #include "trajectory_planner.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -464,3 +468,5 @@ void trajectory_print_points(trajectory_planner_t* planner, uint16_t max_points)
     
     ESP_LOGI(TAG, "=== 轨迹点信息结束 ===");
 }
+
+#endif  // DEEP_DOG_DOG_ENABLE

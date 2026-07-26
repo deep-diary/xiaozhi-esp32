@@ -54,7 +54,9 @@
 | `power.supported` | bool | 否 | 当前固定 `false` |
 | `power.level_pct` | int | 否 | 仅 `supported=true` 时 |
 | `power.charging` | bool | 否 | 仅 `supported=true` 时 |
-| `capabilities.*` | bool | 是 | 与 `DEEP_DOG_*_ENABLE` 对齐 |
+| `ext_pins.mode` | string | 否 | 自由引出脚成对模式：`none\|can\|uart\|rs485\|pwm\|io\|ad` |
+| `ext_pins.gpio_a` / `gpio_b` | int | 否 | 默认 38 / 48 |
+| `capabilities.*` | bool | 是 | 与 `DEEP_DOG_*_ENABLE` 对齐（含 `motor`/`arm`/`uart`） |
 | `ts` | int | 是 | Unix 秒 |
 | `ts_iso` | string | 否 | UTC ISO8601 |
 
@@ -92,10 +94,11 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
   "http_port": 8080,
   "reset_reason": "poweron",
   "power": { "supported": false },
+  "ext_pins": { "mode": "none", "gpio_a": 38, "gpio_b": 48 },
   "capabilities": {
-    "dog": true, "stream": true, "face": true, "track": true, "imu": true,
+    "dog": false, "motor": false, "stream": true, "face": true, "track": true, "imu": true,
     "led": false, "servo": false, "gimbal": false,
-    "handle": false, "touch": true, "can": true
+    "handle": false, "touch": true, "can": false, "arm": false, "uart": false
   },
   "ts": 1710000000,
   "ts_iso": "2024-03-09T12:00:00Z"
@@ -158,6 +161,7 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 - 上线/重连后 publish `device/info`（retain）。
 - 周期 publish `device/status`（建议 ~0.2 Hz，现 5s）。
 - `capabilities.*` 与编译宏 `DEEP_DOG_*_ENABLE` 对齐。
+- `ext_pins` 反映 `config.h` 中 `DEEP_DOG_EXT_PIN_MODE`（成对引出脚）；前端用 `mode` 切换 can/uart/pwm 等页面，用 `capabilities.motor` vs `dog` 区分单电机与四足。
 - `mem.*` 用 `heap_caps_get_*`；`health.warn` 含 `low_internal_heap` 当 internal free &lt; 32768。
 - `power`：当前固定 `{ "supported": false }`。
 

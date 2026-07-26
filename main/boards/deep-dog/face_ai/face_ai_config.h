@@ -1,6 +1,8 @@
 #ifndef _DEEP_DOG_FACE_AI_CONFIG_H_
 #define _DEEP_DOG_FACE_AI_CONFIG_H_
 
+#include "config.h"
+
 /**
  * 网页人脸检测（human_face_detect / ESP-DL）相关配置（从 board `config.h` 拆分）。
  *
@@ -8,7 +10,7 @@
  *（240×240 降内存 / 640×480 提 Immich 成功率，二选一）。
  */
 
-/** 1=编译进固件；0=桩实现，零推理开销 */
+/** 1=编译进固件；0=桩实现；默认见 board_features.h */
 #ifndef DEEP_DOG_FACE_AI_ENABLE
 #define DEEP_DOG_FACE_AI_ENABLE 1
 #endif

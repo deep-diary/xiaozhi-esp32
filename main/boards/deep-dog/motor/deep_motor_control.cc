@@ -1,5 +1,10 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_MOTOR_ENABLE
+
 #include "deep_motor_control.h"
 #include "protocol_motor.h"
+#include "config.h"
 #include <esp_log.h>
 
 #define TAG "DeepMotorControl"
@@ -651,10 +656,17 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
 }
 
 void RegisterMotorMcpTools(McpServer& mcp_server, DeepMotor* deep_motor) {
+#if !DEEP_DOG_MOTOR_ENABLE
+    (void)mcp_server;
+    (void)deep_motor;
+#else
     RegisterMotorMcpToolsImpl(mcp_server, deep_motor);
+#endif
 }
 
 DeepMotorControl::DeepMotorControl(DeepMotor* deep_motor, McpServer& mcp_server)
     : deep_motor_(deep_motor) {
     RegisterMotorMcpTools(mcp_server, deep_motor);
 }
+
+#endif  // DEEP_DOG_MOTOR_ENABLE

@@ -1,3 +1,7 @@
+#include "config.h"
+/* deep-dog feature gate: whole-file */
+#if DEEP_DOG_DOG_ENABLE
+
 #include "leg_control.h"
 #include "../config.h"
 #include "motor/deep_motor.h"
@@ -386,3 +390,5 @@ void RegisterLegMcpTools(McpServer& mcp_server, LegControl* legs[4]) {
 
     ESP_LOGI(TAG, "Leg MCP tools registered: self.leg.init, stand, lie_down, step_forward, step_back");
 }
+
+#endif  // DEEP_DOG_DOG_ENABLE

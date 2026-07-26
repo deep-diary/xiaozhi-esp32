@@ -78,4 +78,21 @@
 #define DEEP_DOG_TORQUE_MAX_LOG_DELTA_NM 0.1f
 #endif
 
+/**
+ * 电机「速度档位」占位宏（0～100 整数比例）。
+ * 当前工程内运控多用 rad/s；若语音/UI 用百分比速度可在此换算。
+ */
+#ifndef MOTOR_SPEED_MAX
+#define MOTOR_SPEED_MAX 100
+#endif
+#ifndef MOTOR_SPEED_80
+#define MOTOR_SPEED_80  80
+#endif
+#ifndef MOTOR_SPEED_60
+#define MOTOR_SPEED_60  60
+#endif
+#ifndef MOTOR_SPEED_MIN
+#define MOTOR_SPEED_MIN 0
+#endif
+
 #endif  // _DEEP_DOG_MOTOR_CONFIG_H_
