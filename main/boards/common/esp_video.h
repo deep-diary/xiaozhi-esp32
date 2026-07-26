@@ -44,7 +44,10 @@ private:
 
 public:
     EspVideo(const esp_video_init_config_t& config);
-    ~EspVideo();
+    virtual ~EspVideo();
+
+    /** 传感器已 STREAMON 且 video fd 有效（探测/open 失败时为 false） */
+    bool IsReady() const { return streaming_on_ && video_fd_ >= 0; }
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
     virtual bool Capture();

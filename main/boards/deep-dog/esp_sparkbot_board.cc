@@ -144,8 +144,8 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     Button boot_button_;
     TouchButtonController touch_buttons_;
-    Display* display_;
-    EspVideo* camera_;
+    Display* display_ = nullptr;
+    EspVideo* camera_ = nullptr;
     DeepMotor* deep_motor_ = nullptr;
     DogControl dog_;  // 整机：4 条腿，内部持有 4 个 LegControl
     DeepDogTouchApp touch_app_{&dog_};  // 触摸按键业务（须在 dog_ 之后构造）
@@ -390,19 +390,41 @@ private:
             .dvp = &dvp_config,
         };
 
-        // 触摸/显示等初始化后给 SCCB 总线与传感器上电稳定一点时间，避免首读 PID=0。
-        // 软重启后 OV3660 偶发未就绪：加长等待（无 PWDN 脚时仍可能需断电）。
-        vTaskDelay(pdMS_TO_TICKS(300));
+        // 触摸/显示等初始化后给 SCCB 与传感器稳定时间；软重启无 PWDN 时更易首读 PID 错乱。
+        vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_CAMERA_INIT_DELAY_MS));
 
-        camera_ = new EspVideo(video_config);
+        for (int attempt = 1; attempt <= DEEP_DOG_CAMERA_INIT_RETRIES; ++attempt) {
+            if (camera_ != nullptr) {
+                delete camera_;
+                camera_ = nullptr;
+            }
+            ESP_LOGI(TAG, "Camera init attempt %d/%d", attempt, DEEP_DOG_CAMERA_INIT_RETRIES);
+            camera_ = new EspVideo(video_config);
+            if (camera_->IsReady()) {
+                ESP_LOGI(TAG, "Camera ready on attempt %d", attempt);
+                break;
+            }
+            ESP_LOGW(TAG, "Camera not ready (attempt %d/%d)", attempt, DEEP_DOG_CAMERA_INIT_RETRIES);
+            if (attempt < DEEP_DOG_CAMERA_INIT_RETRIES) {
+                vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_CAMERA_INIT_RETRY_GAP_MS * attempt));
+            }
+        }
+        if (camera_ == nullptr || !camera_->IsReady()) {
+            ESP_LOGE(TAG,
+                     "Camera init failed after %d attempts (check power/FPC/XCLK); "
+                     "vision hub will idle until power cycle",
+                     DEEP_DOG_CAMERA_INIT_RETRIES);
+        }
 
         Settings settings("sparkbot", false);
         // 考虑到部分复刻使用了不可动摄像头的设计，默认启用翻转
         bool camera_flipped = static_cast<bool>(settings.GetInt("camera-flipped", 0));
         ESP_LOGI(TAG, "Camera Flipped: %d", camera_flipped);
         camera_flipped = 1;
-        camera_->SetHMirror(camera_flipped);
-        camera_->SetVFlip(camera_flipped);
+        if (camera_ != nullptr) {
+            camera_->SetHMirror(camera_flipped);
+            camera_->SetVFlip(camera_flipped);
+        }
         touch_app_.SetCamera(camera_);
 #if DEEP_DOG_VISION_HUB_ENABLE
         vision_hub_ = std::make_unique<VisionFrameHub>(camera_);

@@ -25,6 +25,7 @@
 #include "lvgl_display.h"
 #include "mcp_server.h"
 #include "system_info.h"
+#include <esp_timer.h>
 
 #ifdef CONFIG_XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
 #undef LOG_LOCAL_LEVEL
@@ -417,10 +418,13 @@ bool EspVideo::DoCaptureOnlyLocked() {
     }
 
     if (!streaming_on_ || video_fd_ < 0) {
-        static int s_not_ready = 0;
-        if (s_not_ready < 8) {
-            ESP_LOGW(TAG, "CaptureOnly not ready streaming_on=%d fd=%d", (int)streaming_on_, video_fd_);
-            ++s_not_ready;
+        // 相机未就绪时可能被 Hub 高频调用：按时间节流，避免刷屏
+        static int64_t s_last_warn_us = 0;
+        const int64_t now_us = esp_timer_get_time();
+        if (s_last_warn_us == 0 || (now_us - s_last_warn_us) >= 10000000LL) {
+            ESP_LOGW(TAG, "CaptureOnly not ready streaming_on=%d fd=%d (retry/power-cycle camera)",
+                     (int)streaming_on_, video_fd_);
+            s_last_warn_us = now_us;
         }
         return false;
     }

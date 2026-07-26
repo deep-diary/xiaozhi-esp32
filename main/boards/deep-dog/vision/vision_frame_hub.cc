@@ -232,13 +232,17 @@ bool VisionFrameHub::CapturePackedRgb565(std::vector<uint8_t>* packed, uint16_t*
     if (!camera_ || !packed || !w || !h || !v4l_fmt) {
         return false;
     }
+    if (!camera_->IsReady()) {
+        return false;
+    }
     CameraFrame cf{};
     if (!camera_->CaptureOnlyTo(&cf)) {
-        static int s_cap = 0;
-        if (s_cap < 6 || (capture_fail_streak_ % 50) == 0) {
+        static int64_t s_last_stage_ms = 0;
+        const int64_t now = esp_timer_get_time() / 1000;
+        if (s_last_stage_ms == 0 || (now - s_last_stage_ms) >= 10000) {
             ESP_LOGW(TAG, "capture stage=CaptureOnlyTo fail streak=%lu",
                      static_cast<unsigned long>(capture_fail_streak_ + 1));
-            ++s_cap;
+            s_last_stage_ms = now;
         }
         return false;
     }
@@ -303,12 +307,24 @@ void VisionFrameHub::TaskLoop() {
         // 目标周期含采帧+编码；事后只 sleep 剩余时间，避免 work+delay 叠成约半速
         const int64_t frame_start_us = esp_timer_get_time();
 
+        // 相机从未就绪：长睡 + 稀有告警，避免 CaptureOnly/streak 刷屏；也不建空 RTSP
+        if (!camera_ || !camera_->IsReady()) {
+            static int64_t s_last_cam_warn_ms = 0;
+            if (s_last_cam_warn_ms == 0 || (now_ms - s_last_cam_warn_ms) >= 10000) {
+                ESP_LOGW(TAG, "camera not ready, vision idle (power-cycle sensor if persistent)");
+                s_last_cam_warn_ms = now_ms;
+            }
+            TearDownPusher();
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+
         std::vector<uint8_t> packed;
         uint16_t w = 0;
         uint16_t h = 0;
         uint32_t v4l = 0;
         if (!CapturePackedRgb565(&packed, &w, &h, &v4l)) {
-            if (++capture_fail_streak_ == 1 || (capture_fail_streak_ % 100) == 0) {
+            if (++capture_fail_streak_ == 1 || (capture_fail_streak_ % 200) == 0) {
                 ESP_LOGW(TAG, "capture fail streak=%lu mode=%s last_ok_ms=%lld",
                          static_cast<unsigned long>(capture_fail_streak_), VisionPublishModeStr(mode),
                          (long long)last_capture_ok_ms_);

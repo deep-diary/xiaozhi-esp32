@@ -119,7 +119,7 @@ typedef enum {
 } light_mode_t;
 
 /* Camera：与 ESP-SparkBot 一致；SCCB 与 ES8311 共用 I2C0（SDA=4/SCL=5），SIOD/SIOC 为 NC 时由 esp_video 复用该总线。
- * 若日志出现 PID=0x0：多为摄像头未供电、无上拉、或模组 SCCB 未接到该 I2C（需单独第二总线）。 */
+ * 若日志出现 PID=0x0 / PID=0x60：多为摄像头未供电、软重启未复位、无上拉、或模组 SCCB 未接到该 I2C。 */
 #define SPARKBOT_CAMERA_XCLK      (GPIO_NUM_15)
 #define SPARKBOT_CAMERA_PCLK      (GPIO_NUM_13)
 #define SPARKBOT_CAMERA_VSYNC     (GPIO_NUM_6)
@@ -137,6 +137,16 @@ typedef enum {
 #define SPARKBOT_CAMERA_RESET     (GPIO_NUM_NC)
 /* OV3660 官方表 240×240 RGB565 常用 20MHz 输入；16M 时部分模组读 ID 不稳定 */
 #define SPARKBOT_CAMERA_XCLK_FREQ (20000000)
+/** 软重启后 SCCB 偶发读到错误 PID：首检前等待 + 失败重试 */
+#ifndef DEEP_DOG_CAMERA_INIT_DELAY_MS
+#define DEEP_DOG_CAMERA_INIT_DELAY_MS 500
+#endif
+#ifndef DEEP_DOG_CAMERA_INIT_RETRIES
+#define DEEP_DOG_CAMERA_INIT_RETRIES 5
+#endif
+#ifndef DEEP_DOG_CAMERA_INIT_RETRY_GAP_MS
+#define DEEP_DOG_CAMERA_INIT_RETRY_GAP_MS 400
+#endif
 #define SPARKBOT_LEDC_TIMER       (LEDC_TIMER_0)
 #define SPARKBOT_LEDC_CHANNEL     (LEDC_CHANNEL_0)
 
