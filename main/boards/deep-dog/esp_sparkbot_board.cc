@@ -463,6 +463,10 @@ private:
             return;
         }
 
+        if (!touch_buttons_.LoadThresholdsFromNvs()) {
+            ESP_LOGI(TAG, "Touch thresholds: factory defaults (no NVS)");
+        }
+
         if (!touch_dispatcher_.StartPeriodic(DEEP_DOG_TOUCH_DISPATCH_INTERVAL_US)) {
             ESP_LOGE(TAG, "TouchAppDispatcher timer start failed");
         }

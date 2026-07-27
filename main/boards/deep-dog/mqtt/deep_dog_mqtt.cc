@@ -77,6 +77,7 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     face.OnMessage(topic, payload);
     track.OnMessage(topic, payload);
     led.OnMessage(topic, payload);
+    touch.OnMessage(topic, payload);
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}

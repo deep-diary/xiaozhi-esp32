@@ -68,7 +68,7 @@ modules:
   touch:
     status: defined
     required: false
-    note: "Driver + touch_mqtt publish touch/status on_button_event; optional last_combo when DEEP_DOG_TOUCH_COMBO_ENABLE; no cmd/bindings in v0.1"
+    note: "Driver + touch_mqtt; touch/status thresholds+calib; touch/cmd set/calibrate/reset"
     ref: main/boards/deep-dog/touch_btn/
   can:
     status: defined
@@ -543,13 +543,42 @@ topics:
       ts: { type: int }
 
   # ---- touch ----
+  touch/cmd:
+    module: touch
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    note: "Threshold tune + single-button soft calibrate; see modules/06-touch.md"
+    payload:
+      action:
+        type: enum
+        values: [set_thresholds, calibrate, reset_thresholds, cancel_calibrate]
+      persist: { type: bool, optional: true, default: true }
+      debug: { type: bool, optional: true, note: "Force debug[] in status" }
+      press_abs_ratio: { type: float, optional: true }
+      release_abs_ratio: { type: float, optional: true }
+      press_abs_offset: { type: int, optional: true }
+      release_abs_offset: { type: int, optional: true }
+      debounce_cycles: { type: int, optional: true }
+      baseline_alpha: { type: float, optional: true }
+      buttons:
+        type: array
+        optional: true
+        item:
+          id: { type: int, values: [1, 2, 3] }
+          press_abs_min: { type: int, optional: true }
+          release_abs_min: { type: int, optional: true }
+      button_id: { type: int, optional: true, values: [1, 2, 3], note: "calibrate" }
+      samples: { type: int, optional: true, default: 10, note: "calibrate" }
+
   touch/status:
     module: touch
     dir: uplink
     qos: 0
     retain: true
     when: on_button_event
-    note: "Full 3-button snapshot; optional last_combo {id,ts} on combo hit (retain); last_event enum unchanged; no touch/cmd in v0.1; see modules/06-touch.md"
+    note: "Full snapshot + thresholds always; calib progress; debug when calib or DEEP_DOG_TOUCH_MQTT_DEBUG/cmd"
     payload:
       ok: { type: bool }
       pressed_mask: { type: int, note: "bit0/1/2 = button 1/2/3 currently pressed" }
@@ -563,6 +592,35 @@ topics:
           last_event:
             type: enum
             values: [press, release, long_press, short_press, double_click]
+      thresholds:
+        type: object
+        note: "Always present when controller bound"
+        fields:
+          press_abs_ratio: { type: float }
+          release_abs_ratio: { type: float }
+          press_abs_offset: { type: int }
+          release_abs_offset: { type: int }
+          debounce_cycles: { type: int }
+          baseline_alpha: { type: float, optional: true }
+          baseline_update_abs_ratio: { type: float, optional: true }
+          baseline_update_abs_offset: { type: int, optional: true }
+          buttons:
+            type: array
+            length: 3
+            item:
+              id: { type: int, values: [1, 2, 3] }
+              press_abs_min: { type: int }
+              release_abs_min: { type: int }
+      calib:
+        type: object
+        optional: true
+        fields:
+          active: { type: bool }
+          button_id: { type: int }
+          phase: { type: enum, values: [idle, collect, done, fail] }
+          count: { type: int }
+          samples: { type: int }
+          error: { type: string, optional: true }
       last_combo:
         type: object
         optional: true

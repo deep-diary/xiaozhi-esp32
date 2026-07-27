@@ -5,8 +5,8 @@
 | module_id | `touch` |
 | capabilities | `touch` |
 | 路由建议 | `/device/:deviceId/modules/touch` |
-| 契约 | ready；驱动 + `touch_mqtt` |
-| YAML | `touch/status` |
+| 契约 | ready；驱动 + `touch_mqtt` + 阈值/标定 |
+| YAML | `touch/status`、`touch/cmd` |
 | 参考 | [touch_btn](../../../touch_btn/) |
 
 ## 入口卡文案
@@ -16,52 +16,80 @@
 
 ## 详情页目标
 
-只读可视化三键 `pressed` / `long_press` / `last_event`，以及 `pressed_mask`（物理同时按下位图）。v0.1 无 cmd。
+可视化三键 `pressed` / `long_press` / `last_event`、`pressed_mask`；展示并可调 `thresholds`；支持单键标定。
 
 展示建议：
 
-- 三键高亮 `pressed`
-- 长按角标 `long_press`
-- `last_event` 文案（含 `press` / `release` / `long_press` / `short_press` / `double_click`）
-- 底部显示 `pressed_mask`（bit0/1/2 = 键1/2/3）
-- 可选：按 [按键语义对照](#按键语义对照非-mqtt-字段) 展示静态说明（tooltip），**勿**期望报文内带应用语义
+- 三键高亮 `pressed`；长按角标；`last_event` 文案
+- 底部 `pressed_mask`
+- 阈值滑条（每键 `press_abs_min` / `release_abs_min`；高级区 ratio）
+- 「标定键 N」按钮 + `calib` 进度；「恢复出厂」
+- 标定中显示 `debug[].abs_diff`（固件标定中强制带 debug）
 
 ## Topic
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
 | `touch/status` | ↑ | 0 | true |
+| `touch/cmd` | ↓ | 1 | false |
 
-触发：Hub 每次按键事件 Push 时发**三键完整快照**（非单事件 JSON）；MQTT 重连成功后再发一次。retain 便于晚进页拿到当前态。
+触发：按键事件 / 改阈 / 标定进度（约 250ms）/ 重连。retain 便于晚进页。
 
-## 字段表
+## 字段表（status）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `ok` | bool | 是否有 Hub/Controller 数据源 |
-| `pressed_mask` | int | bit0/1/2 = 键1/2/3 当前物理按下 |
+| `ok` | bool | 是否有数据源 |
+| `pressed_mask` | int | bit0/1/2 = 键1/2/3 |
 | `buttons` | array[3] | 三键快照 |
-| `buttons[].id` | int | `1` / `2` / `3` |
-| `buttons[].pressed` | bool | 是否按下 |
-| `buttons[].long_press` | bool | 是否处于长按态 |
-| `buttons[].last_event` | enum | 见下 |
+| `buttons[].last_event` | enum | `press` \| `release` \| `long_press` \| `short_press` \| `double_click` |
+| `thresholds` | object | **始终**上报；见下 |
+| `calib` | object | 标定进度 / 最近结果 |
+| `last_combo` | object | 可选；组合命中 |
+| `debug` | array | 标定中强制；或 `DEEP_DOG_TOUCH_MQTT_DEBUG` / cmd `debug:true` |
 | `ts` | int | Unix 秒 |
-| `last_combo` | object | 可选；组合命中后出现，见下 |
-| `debug` | array | 可选；固件 `DEEP_DOG_TOUCH_MQTT_DEBUG=1` 时含 raw/baseline |
 
-`last_event` ∈ `press` | `release` | `long_press` | `short_press` | `double_click`。  
-以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
+### thresholds
 
-`last_combo`（可选，**不**写入 `buttons[].last_event`）：
+| 字段 | 说明 |
+|------|------|
+| `press_abs_ratio` / `release_abs_ratio` | 相对 baseline |
+| `press_abs_offset` / `release_abs_offset` | 比例项附加 |
+| `debounce_cycles` | 去抖周期 |
+| `buttons[].press_abs_min` / `release_abs_min` | 每键绝对下限（出厂默认键3=`500`/`400`） |
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | enum | `chord_short_1_2` \| `chord_short_1_3` \| `chord_short_2_3` \| `hold1_tap2` \| `hold1_tap3` |
-| `ts` | int | 组合识别 Unix 秒 |
+### calib
 
-## 样例 JSON
+| 字段 | 说明 |
+|------|------|
+| `active` | 是否进行中 |
+| `button_id` | 1–3 |
+| `phase` | `idle` \| `collect` \| `done` \| `fail` |
+| `count` / `samples` | 已采峰 / 目标次数 |
+| `error` | 失败时：`timeout` / `cancelled` 等 |
 
-同一时刻的 retain 快照；各键 `last_event` **不必**同时发生。含组合时示例：
+## touch/cmd
+
+| action | 说明 |
+|--------|------|
+| `set_thresholds` | 改全局 ratio/offset 与/或 `buttons[{id,press_abs_min,release_abs_min}]`；`persist` 默认 true |
+| `calibrate` | `button_id`（默认 3）、`samples`（默认 10）；软检测采峰，不依赖当前过高 min |
+| `reset_thresholds` | 恢复出厂并 persist |
+| `cancel_calibrate` | 取消 |
+
+可选顶层 `debug: true` 强制 status 带 `debug[]`。
+
+样例：
+
+```json
+{ "action": "set_thresholds", "buttons": [{ "id": 3, "press_abs_min": 400, "release_abs_min": 300 }], "persist": true }
+```
+
+```json
+{ "action": "calibrate", "button_id": 3, "samples": 10 }
+```
+
+## 样例 JSON（status）
 
 ```json
 {
@@ -70,20 +98,30 @@
   "buttons": [
     { "id": 1, "pressed": false, "long_press": false, "last_event": "release" },
     { "id": 2, "pressed": false, "long_press": false, "last_event": "release" },
-    { "id": 3, "pressed": false, "long_press": false, "last_event": "double_click" }
+    { "id": 3, "pressed": false, "long_press": false, "last_event": "short_press" }
   ],
-  "last_combo": { "id": "chord_short_2_3", "ts": 1710000000 },
+  "thresholds": {
+    "press_abs_ratio": 0.05,
+    "release_abs_ratio": 0.03,
+    "press_abs_offset": 200,
+    "release_abs_offset": 120,
+    "debounce_cycles": 2,
+    "buttons": [
+      { "id": 1, "press_abs_min": 2600, "release_abs_min": 2200 },
+      { "id": 2, "press_abs_min": 800, "release_abs_min": 650 },
+      { "id": 3, "press_abs_min": 500, "release_abs_min": 400 }
+    ]
+  },
+  "calib": { "active": false, "button_id": 3, "phase": "done", "count": 10, "samples": 10 },
   "ts": 1710000000
 }
 ```
 
-无组合命中前可无 `last_combo` 字段。其它合法 `last_event`：`"press"` / `"short_press"` / `"long_press"`。可选 `debug[]`。
+以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
 
 ## 按键语义对照（非 MQTT 字段）
 
-`touch/status` **只反映物理态**，不含 dog/servo/log 业务含义。Web 若需说明「键1 短按做什么」，请用编译期映射表做**静态文案**（tooltip / 帮助），勿往 uplink 塞 `action` / `app` 字段。
-
-完整表见 [touch_btn/README.md · 应用与按键映射](../../../touch_btn/README.md#应用与按键映射)。摘要：
+`touch/status` **物理态 + 阈值**；不含 dog/servo 业务动作名。Web 静态说明见 [touch_btn/README.md](../../../touch_btn/README.md#应用与按键映射)。
 
 | 手势 | log | dog（`DEEP_DOG_DOG_ENABLE`） | servo（占位） |
 |------|-----|------------------------------|---------------|
@@ -93,84 +131,34 @@
 | 键2/3 press | — | 小步前/后 | — |
 | 键2/3 长按 | — | 持续走；组合窗内站立/趴下 | 日志 |
 | 键2/3 short（组合窗） | — | 大步前/后 | 预留微调 |
-| 键2+3 短按释放 | — | 停持续走（和弦） | — |
-| double_click | — | （dog 未用，空槽） | 预留 |
-
-应用启用由 `DEEP_DOG_TOUCH_APP_*_ENABLE` 编译期决定；事件经 `TouchAppDispatcher` **fan-out** 到全部已注册应用。
+| 键2+3 短按释放 | — | 停持续走 | — |
 
 ## 组合键（识别层）
 
-通用跨键组合；**与 dog/servo 业务映射无关**。固件：[`touch_combo_recognizer`](../../../touch_btn/touch_combo_recognizer.h)，经 `TouchAppDispatcher` 在 fan-out 前 `Feed`。
+见既有白名单；`last_combo` 与阈值无关。宏：`DEEP_DOG_TOUCH_COMBO_ENABLE` / `COMBO_CONSUME`。
 
-### 硬件几何
-
-| 逻辑键 | 物理分布 |
-|--------|----------|
-| 键1 | 正方体**两侧**各一片（同一 channel） |
-| 键2 / 键3 | 顶面左 / 右半边 |
-
-### 白名单（5 个）
-
-| id | 类型 | 识别摘要 |
-|----|------|----------|
-| `chord_short_1_2` | Chord | 1+2 重叠后短抬（&lt; 长按阈） |
-| `chord_short_1_3` | Chord | 1+3 重叠后短抬 |
-| `chord_short_2_3` | Chord | 2+3 重叠后短抬 |
-| `hold1_tap2` | Hold+Tap | 键1 仍按下时键2 `press` |
-| `hold1_tap3` | Hold+Tap | 键1 仍按下时键3 `press` |
-
-优先级：键1 已按下再出 2/3 `press` → **hold+tap**；两键近乎同时按下再同抬 → **chord**。不做 `chord_long_*`、不做时间窗 Seq。
-
-### 宏
-
-| 宏 | 默认 | 说明 |
-|----|------|------|
-| `DEEP_DOG_TOUCH_COMBO_ENABLE` | `1` | `0` 关闭识别与 `last_combo` |
-| `DEEP_DOG_TOUCH_COMBO_CONSUME` | `0` | `1` 时命中组合跳过应用 fan-out；默认 `0` 以免影响现有 dog |
-
-命中时：串口 `touch_combo` + 补发 `touch/status`（带 `last_combo`）。狗控映射暂不迁到组合层。
-
-## 评估 · Web 可配置绑定（未来 / 未立项）
-
-**技术可行，v0.1 不做。** 若要「Web 指定短按=某动作并写入 NVS」，大致需要：
-
-1. 配置模型：`button_id × gesture → action_id`（或覆盖默认映射）
-2. 下行 `touch/cmd` + 上行 `touch/bindings`（retain）确认
-3. NVS 持久化；启动加载覆盖编译期默认
-4. Dispatcher / 应用从硬编码改为查表
-5. 非法 action、与 dog 状态机冲突、出厂回滚
-
-当前：**无** `touch/cmd`、**无** NVS 按键绑定。
-
-## 手势实现说明
-
-| 层级 | 实现 |
-|------|------|
-| 采样 | ESP-IDF `driver/touch_pad` |
-| 去抖 / 长短按 / 双击 / `pressed_mask` | 板级自研 [`TouchButtonController`](../../../touch_btn/touch_button_controller.cc) |
-| 官方对照 | 仓库 `common/button`（`iot_button`，GPIO/ADC）不直接覆盖本板电容三键；`espressif/touch_button_sensor` 可评估替换采样层，手势与 Hub 仍需板级 |
-
-**v0.1 维持自研**；误触问题突出时再评估迁移采样层。细节见 [touch_btn/README.md](../../../touch_btn/README.md)。
+| id | 类型 |
+|----|------|
+| `chord_short_1_2` / `_1_3` / `_2_3` | Chord |
+| `hold1_tap2` / `hold1_tap3` | Hold+Tap |
 
 ## Steps（前端）
 
-- **Step 1** 校验 `capabilities.touch`。
-- **Step 2** 订阅 `touch/status`（retain，晚进页也有当前态）。
-- **Step 3** 三键 UI 高亮 + `last_event` + `pressed_mask`；若有 `last_combo` 可展示最近组合 id。
-- **Step 4** unmount 退订。
+1. 校验 `capabilities.touch`。
+2. 订 `touch/status`；渲染三键 + `thresholds` 滑条。
+3. 调阈 → `touch/cmd` `set_thresholds`；标定 → `calibrate`，看 `calib.count`。
+4. unmount 退订 status（不必长期订 cmd）。
 
 ## 固件实现
 
-- `TouchButtonController` → `TouchEventHub`；Hub Push 时 `touch_mqtt` 发整包三键快照。
-- `TouchComboRecognizer`（`DEEP_DOG_TOUCH_COMBO_ENABLE`）：Dispatcher Poll 识别；命中补发 `touch/status` 含 `last_combo`。
-- 与 `dog` / `servo` 业务解耦：`buttons[].last_event` 仍为物理单键；组合只在 `last_combo`。
-- 按键应用经 `TouchAppDispatcher` 板级 timer 调度，见 [touch_btn/README.md](../../../touch_btn/README.md)。
+- `TouchThresholds` 运行时结构；NVS `touch_thr`；开机 `LoadThresholdsFromNvs`
+- 标定：idle 采噪声 → soft_thr 采 N 峰 → `press_abs_min = min(peaks)*0.45`（夹紧）并 persist
+- `touch_mqtt` 订 `touch/cmd`；标定中约 250ms 刷新 status
 
 ## 验收
 
-- [x] 按下时详情页即时更新（retain 快照）
-- [x] 无 capability 隐藏入口卡
-- [x] `press` / `short_press` / `double_click` / `long_press` / `release` / `pressed_mask` 可展示
-- [x] 文档对照表可供 Web 静态说明（报文不含应用语义）
-- [x] 契约含可选 `last_combo`（YAML + 固件）
-- [ ] 实机组合后 MQTT / 串口可见对应 id
+- [x] 按下详情页即时更新
+- [x] `thresholds` 始终在 status
+- [x] `set_thresholds` / `calibrate` / `reset_thresholds` 契约 + 固件
+- [ ] 实机键3：默认或标定后短按稳定
+- [ ] 标定 10 次后 NVS 重启仍在
