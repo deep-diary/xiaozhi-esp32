@@ -11,9 +11,10 @@ class DeepDogImuSwitch;
 class TouchEventHub;
 class TouchButtonController;
 class TouchComboRecognizer;
+class LedStripControl;
 
 /**
- * deep-dog 板级 MQTT 门面：device + stream + imu + touch …
+ * deep-dog 板级 MQTT 门面：device + stream + imu + touch + led …
  * StartNetwork 之后调用 Start()。
  */
 class DeepDogMqtt {
@@ -31,6 +32,7 @@ public:
     void SetTouchComboRecognizer(TouchComboRecognizer* combo);
     /** 组合命中后补发 touch/status（含 last_combo） */
     void NotifyTouchCombo(const char* combo_id);
+    void SetLedControl(LedStripControl* ctrl);
 
     bool Start();
     void Stop();

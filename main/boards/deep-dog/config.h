@@ -20,12 +20,13 @@
 #define DEEP_DOG_EXT_PIN_PWM   4
 #define DEEP_DOG_EXT_PIN_IO    5
 #define DEEP_DOG_EXT_PIN_AD    6
+#define DEEP_DOG_EXT_PIN_LED   7
 
 typedef int deep_dog_ext_pin_mode_t;
 
-/** 联调默认 none；四足/单电机改为 DEEP_DOG_EXT_PIN_CAN，云台改为 _PWM 等 */
+/** 联调默认 none；四足/单电机改为 DEEP_DOG_EXT_PIN_CAN，云台改为 _PWM，灯带改为 _LED 等 */
 #ifndef DEEP_DOG_EXT_PIN_MODE
-#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_NONE
+#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_LED
 #endif
 
 #define DEEP_DOG_EXT_PIN_A_GPIO GPIO_NUM_38
@@ -68,6 +69,12 @@ typedef int deep_dog_ext_pin_mode_t;
 #define DEEP_DOG_AD_AVAILABLE 0
 #endif
 
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_LED
+#define DEEP_DOG_LED_AVAILABLE 1
+#else
+#define DEEP_DOG_LED_AVAILABLE 0
+#endif
+
 #if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_CAN
 #define DEEP_DOG_EXT_PIN_MODE_STR "can"
 #elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_UART
@@ -80,6 +87,8 @@ typedef int deep_dog_ext_pin_mode_t;
 #define DEEP_DOG_EXT_PIN_MODE_STR "io"
 #elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_AD
 #define DEEP_DOG_EXT_PIN_MODE_STR "ad"
+#elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_LED
+#define DEEP_DOG_EXT_PIN_MODE_STR "led"
 #else
 #define DEEP_DOG_EXT_PIN_MODE_STR "none"
 #endif
@@ -163,12 +172,21 @@ typedef int deep_dog_ext_pin_mode_t;
 #define TOUCH_BUTTON2_GPIO       (GPIO_NUM_2)
 #define TOUCH_BUTTON3_GPIO       (GPIO_NUM_3)
 
-/* 灯带 GPIO（独立于 38/48；未接线时保持 NC） */
+/* 灯带：mode=led 时默认 DIN=gpio_a(38)、count=24；其它 mode 默认 NC/0（可覆盖） */
+#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_LED
+#ifndef DEEP_DOG_LED_STRIP_GPIO
+#define DEEP_DOG_LED_STRIP_GPIO  DEEP_DOG_EXT_PIN_A_GPIO
+#endif
+#ifndef DEEP_DOG_LED_STRIP_COUNT
+#define DEEP_DOG_LED_STRIP_COUNT 24
+#endif
+#else
 #ifndef DEEP_DOG_LED_STRIP_GPIO
 #define DEEP_DOG_LED_STRIP_GPIO  GPIO_NUM_NC
 #endif
 #ifndef DEEP_DOG_LED_STRIP_COUNT
 #define DEEP_DOG_LED_STRIP_COUNT 0
+#endif
 #endif
 
 #endif // _BOARD_CONFIG_H_

@@ -54,7 +54,7 @@
 | `power.supported` | bool | 否 | 当前固定 `false` |
 | `power.level_pct` | int | 否 | 仅 `supported=true` 时 |
 | `power.charging` | bool | 否 | 仅 `supported=true` 时 |
-| `ext_pins.mode` | string | 否 | 自由引出脚成对模式：`none\|can\|uart\|rs485\|pwm\|io\|ad` |
+| `ext_pins.mode` | string | 否 | 自由引出脚成对模式：`none\|can\|uart\|rs485\|pwm\|io\|ad\|led` |
 | `ext_pins.gpio_a` / `gpio_b` | int | 否 | 默认 38 / 48 |
 | `capabilities.*` | bool | 是 | 与 `DEEP_DOG_*_ENABLE` 对齐（含 `motor`/`arm`/`uart`） |
 | `ts` | int | 是 | Unix 秒 |
@@ -161,7 +161,7 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 - 上线/重连后 publish `device/info`（retain）。
 - 周期 publish `device/status`（建议 ~0.2 Hz，现 5s）。
 - `capabilities.*` 与编译宏 `DEEP_DOG_*_ENABLE` 对齐。
-- `ext_pins` 反映 `config.h` 中 `DEEP_DOG_EXT_PIN_MODE`（成对引出脚）；前端用 `mode` 切换 can/uart/pwm 等页面，用 `capabilities.motor` vs `dog` 区分单电机与四足。
+- `ext_pins` 反映 `config.h` 中 `DEEP_DOG_EXT_PIN_MODE`（成对引出脚）；前端用 `mode` 切换 can/uart/pwm/led 等页面，用 `capabilities.motor` vs `dog` 区分单电机与四足；`mode=led` 时 DIN=`gpio_a`，须 `capabilities.led` 才出灯带卡。
 - `mem.*` 用 `heap_caps_get_*`；`health.warn` 含 `low_internal_heap` 当 internal free &lt; 32768。
 - `power`：当前固定 `{ "supported": false }`。
 

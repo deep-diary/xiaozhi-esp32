@@ -4,22 +4,20 @@
 #include "config.h"
 
 /**
- * 灯带模块配置（独立 GPIO，不占用 38/48）。
- * light_mode_t 保留自 SparkBot UART 灯效语义，便于后续对接；
- * WS2812 实装可参考 deep-diary/led（mode 0–5）。
+ * 灯带模块配置。
+ * EXT_PIN_MODE=LED 时 DIN 默认 gpio_a(38)、count 默认 24。
+ * MQTT / 控制层 mode：0 关 / 1 静态 / 2 闪烁 / 3 呼吸 / 4 滚动 / 5 系统(应用绑定)。
+ * （旧 SparkBot UART light_mode_t 已废弃，勿再使用。）
  */
 
+/** MQTT / 控制层灯效 mode */
 typedef enum {
-    LIGHT_MODE_CHARGING_BREATH = 0,
-    LIGHT_MODE_POWER_LOW,
-    LIGHT_MODE_ALWAYS_ON,
-    LIGHT_MODE_BLINK,
-    LIGHT_MODE_WHITE_BREATH_SLOW,
-    LIGHT_MODE_WHITE_BREATH_FAST,
-    LIGHT_MODE_FLOWING,
-    LIGHT_MODE_SHOW,
-    LIGHT_MODE_SLEEP,
-    LIGHT_MODE_MAX
-} light_mode_t;
+    DEEP_DOG_LED_MODE_OFF = 0,
+    DEEP_DOG_LED_MODE_STATIC = 1,
+    DEEP_DOG_LED_MODE_BLINK = 2,
+    DEEP_DOG_LED_MODE_BREATHE = 3,
+    DEEP_DOG_LED_MODE_SCROLL = 4,
+    DEEP_DOG_LED_MODE_SYSTEM = 5,
+} deep_dog_led_mode_t;
 
 #endif  // _DEEP_DOG_LED_CONFIG_H_

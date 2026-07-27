@@ -31,7 +31,7 @@ Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 2. Stream → IMU → **Face** → Touch → Dog → Motor → UART → LED → Gimbal → Servo → Arm → Handle → CAN  
 
 仅当 `capabilities.<module_id> === true` 时渲染对应入口卡。  
-另读 `ext_pins.mode`（`none|can|uart|rs485|pwm|io|ad`）决定总线类页面骨架（与 capabilities 互补；`mode` 为真源）。
+另读 `ext_pins.mode`（`none|can|uart|rs485|pwm|io|ad|led`）决定总线/灯带类页面骨架（与 capabilities 互补；`mode` 为真源）。LED 卡需 `mode=led` 且 `capabilities.led`。
 
 **Track 不单独出卡**：跟踪 UI 在 [02-stream](../modules/02-stream.md)（`#track`）。  
 **Person 不单独出卡**：并入 [04-face](../modules/04-face.md)；`/modules/person` redirect 到 face。

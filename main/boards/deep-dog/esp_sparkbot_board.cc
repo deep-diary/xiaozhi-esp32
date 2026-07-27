@@ -40,7 +40,8 @@
 #include "uart/uart_stub.h"
 #endif
 #if DEEP_DOG_LED_ENABLE
-#include "led/led_stub.h"
+#include "led/led_init.h"
+#include "led/led_mcp.h"
 #endif
 #if DEEP_DOG_SERVO_ENABLE || DEEP_DOG_GIMBAL_ENABLE
 #include "servo/servo_config.h"
@@ -317,10 +318,10 @@ private:
 #endif
 
     void InitializeExtPinModules() {
-        ESP_LOGI(TAG, "ext_pins mode=%s A=%d B=%d can=%d motor=%d dog=%d arm=%d servo=%d gimbal=%d",
+        ESP_LOGI(TAG, "ext_pins mode=%s A=%d B=%d can=%d motor=%d dog=%d arm=%d servo=%d gimbal=%d led=%d",
                  DEEP_DOG_EXT_PIN_MODE_STR, (int)DEEP_DOG_EXT_PIN_A_GPIO, (int)DEEP_DOG_EXT_PIN_B_GPIO,
                  DEEP_DOG_CAN_ENABLE, DEEP_DOG_MOTOR_ENABLE, DEEP_DOG_DOG_ENABLE, DEEP_DOG_ARM_ENABLE,
-                 DEEP_DOG_SERVO_ENABLE, DEEP_DOG_GIMBAL_ENABLE);
+                 DEEP_DOG_SERVO_ENABLE, DEEP_DOG_GIMBAL_ENABLE, DEEP_DOG_LED_ENABLE);
 #if DEEP_DOG_UART_ENABLE
         DeepDogUartInit();
 #endif
@@ -644,7 +645,11 @@ private:
         RegisterDogMcpTools(mcp_server, &dog_);
 #elif DEEP_DOG_MOTOR_ENABLE
         RegisterMotorMcpTools(mcp_server, deep_motor_);
-#else
+#endif
+#if DEEP_DOG_LED_ENABLE
+        RegisterLedMcpTools(mcp_server, DeepDogLedGetControl());
+#endif
+#if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_LED_ENABLE
         (void)mcp_server;
 #endif
     }
@@ -658,6 +663,11 @@ public:
         InitializeTouchButtons();
         InitializeCamera();
         InitializeExtPinModules();
+#if DEEP_DOG_MQTT_ENABLE && DEEP_DOG_LED_ENABLE
+        if (board_mqtt_) {
+            board_mqtt_->SetLedControl(DeepDogLedGetControl());
+        }
+#endif
 #if DEEP_DOG_CAN_ENABLE
         InitializeCan();
 #endif

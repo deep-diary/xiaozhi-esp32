@@ -8,6 +8,7 @@
  *
  * 依赖：CAN_AVAILABLE → CAN → MOTOR → DOG | ARM
  *       PWM_AVAILABLE → SERVO → GIMBAL
+ *       LED_AVAILABLE → LED（EXT_PIN=LED，DIN=gpio_a）
  */
 
 /* -------- 总线 / 驱动（默认全关，便于前端壳联调） -------- */
@@ -66,7 +67,7 @@
 #define DEEP_DOG_HTTP_SERVER_ENABLE 0
 #endif
 #ifndef DEEP_DOG_LED_ENABLE
-#define DEEP_DOG_LED_ENABLE 0
+#define DEEP_DOG_LED_ENABLE 1
 #endif
 
 /* -------- 依赖钳位 -------- */
@@ -111,6 +112,11 @@
 #if !DEEP_DOG_SERVO_ENABLE
 #undef DEEP_DOG_GIMBAL_ENABLE
 #define DEEP_DOG_GIMBAL_ENABLE 0
+#endif
+
+#if !DEEP_DOG_LED_AVAILABLE
+#undef DEEP_DOG_LED_ENABLE
+#define DEEP_DOG_LED_ENABLE 0
 #endif
 
 #endif  // _DEEP_DOG_BOARD_FEATURES_H_

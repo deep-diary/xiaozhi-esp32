@@ -48,7 +48,8 @@ modules:
   led:
     status: defined
     required: false
-    ref: main/boards/deep-thumble/led/
+    impl: mqtt/modules/led_mqtt
+    ref: main/boards/deep-dog/led/
   servo:
     status: defined
     required: false
@@ -128,11 +129,11 @@ topics:
       ext_pins:
         type: object
         optional: true
-        note: "自由引出脚 GPIO38/48 成对模式；前端据此切换 can/uart/pwm 等页面"
+        note: "自由引出脚 GPIO38/48 成对模式；前端据此切换 can/uart/pwm/led 等页面"
         fields:
-          mode: { type: string, note: "none|can|uart|rs485|pwm|io|ad" }
-          gpio_a: { type: int, note: "DEEP_DOG_EXT_PIN_A_GPIO" }
-          gpio_b: { type: int, note: "DEEP_DOG_EXT_PIN_B_GPIO" }
+          mode: { type: string, note: "none|can|uart|rs485|pwm|io|ad|led" }
+          gpio_a: { type: int, note: "DEEP_DOG_EXT_PIN_A_GPIO；mode=led 时为 WS2812 DIN" }
+          gpio_b: { type: int, note: "DEEP_DOG_EXT_PIN_B_GPIO；mode=led 时空闲保留" }
       capabilities:
         type: object
         fields:
@@ -432,6 +433,9 @@ topics:
       r: { type: int }
       g: { type: int }
       b: { type: int }
+      low_r: { type: int, optional: true }
+      low_g: { type: int, optional: true }
+      low_b: { type: int, optional: true }
       interval_ms: { type: int, optional: true }
       scroll_length: { type: int, optional: true }
       led_count: { type: int, optional: true }

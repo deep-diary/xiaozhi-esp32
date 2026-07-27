@@ -21,6 +21,7 @@
 | `RS485` | `RS485_AVAILABLE` | 占位 |
 | `PWM` | `PWM_AVAILABLE` | 舵机/云台 pan/tilt |
 | `IO` / `AD` | 对应 | 占位 |
+| `LED` | `LED_AVAILABLE` | WS2812；A=DIN，B 空闲保留 |
 
 ## 分层 ENABLE（CAN 栈）
 
@@ -42,19 +43,24 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 
 | 剖面 | EXT_PIN | CAN | MOTOR | DOG | ARM | SERVO/GIMBAL | 说明 |
 |------|---------|-----|-------|-----|-----|--------------|------|
-| 前端壳 | `NONE` | 0 | 0 | 0 | 0 | 0 | **默认**；MQTT 设备页 |
+| 前端壳 | `NONE` | 0 | 0 | 0 | 0 | 0 | MQTT 设备页 |
+| **灯带联调（当前默认）** | `LED` | 0 | 0 | 0 | 0 | 0 | `LED_ENABLE=1`；DIN=`gpio_a`(38) |
 | 单电机 | `CAN` | 1 | 1 | 0 | 0 | 0 | 协议/MCP 点动 |
 | 四足狗 | `CAN` | 1 | 1 | 1 | 0 | 0 | 完整运控 |
 | 机械臂 | `CAN` | 1 | 1 | 0 | 1 | 0 | 占位，实现后启用 |
 | 云台 | `PWM` | 0 | 0 | 0 | 0 | 1/1 | pan/tilt |
 | UART | `UART` | 0 | 0 | 0 | 0 | 0 | `UART_ENABLE=1` |
+| 灯带 | `LED` | 0 | 0 | 0 | 0 | 0 | 见上「灯带联调」 |
 
 非引脚开关（默认可按联调需要改 `board_features.h`）：
 
 - `DEEP_DOG_MQTT_ENABLE`（默认 1）
 - `DEEP_DOG_VISION_HUB_ENABLE` / `FACE_AI` / `IMU` / `TRACK_MQTT`
 - `DEEP_DOG_HTTP_SERVER_ENABLE`（默认 0）
-- `DEEP_DOG_LED_ENABLE`（默认 0；灯带 GPIO 在 `config.h`，不占 38/48）
+
+引出脚产品（需对应 `EXT_PIN_MODE`）：
+
+- `DEEP_DOG_LED_ENABLE`（默认 0；仅 `EXT_PIN_MODE=LED` 时有效；默认 DIN=38、count=24）
 
 ## MQTT 上报
 
@@ -77,7 +83,7 @@ config.h / board_features.h
     ├─ arm/          ← ARM_ENABLE（占位）
     ├─ uart/ rs485/ io_ext/ ad/  ← 对应 EXT 模式
     ├─ servo/ gimbal/ ← PWM 模式
-    ├─ led/          ← LED_ENABLE（独立脚）
+    ├─ led/          ← LED_ENABLE（EXT_PIN=LED；DIN=gpio_a）
     ├─ mqtt/ vision/ face_ai/ sensor/ http-server/ …
     └─ esp_sparkbot_board.cc 编排
 ```
