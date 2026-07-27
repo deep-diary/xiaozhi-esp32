@@ -13,6 +13,8 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 
 **可裁剪全功能模块板**：狗控可选。前端设备页为**入口卡**，点进**模块独立页**（见 [mqtt/frontend/00-device-page](./mqtt/frontend/00-device-page.md)）。
 
+不倒翁产品（`deep-thumble`）以本板为功能枢纽、再移植落地；开源产品板参考见 [开源产品板参考-不倒翁.md](../../deep-thumble/docs/开源产品板参考-不倒翁.md)。
+
 ## 下一步
 
 视觉轨以 ROADMAP 为准；MQTT 前端规格见 [mqtt/README](./mqtt/README.md)；固件实现从 [modules/02-stream](./mqtt/modules/02-stream.md)（V-C03）起。

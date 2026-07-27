@@ -1,5 +1,7 @@
 # deep-dog 功能开关与可复用配置
 
+> **与 Deep Thumble（不倒翁）**：多数能力先在本板落地，再按剖面裁剪移植到 [`deep-thumble`](../deep-thumble/)。产品形态与开源板参考见 [`deep-thumble/docs/开源产品板参考-不倒翁.md`](../deep-thumble/docs/开源产品板参考-不倒翁.md)。
+
 同硬件（ESP-SparkBot 系）只改两处即可切换产品形态：
 
 | 文件 | 职责 |
@@ -15,11 +17,11 @@
 
 | `DEEP_DOG_EXT_PIN_*` | AVAILABLE | 典型用途 |
 |---------------------|-----------|----------|
-| `NONE`（默认） | — | 前端壳联调 |
+| `NONE` | — | 前端壳联调 |
 | `CAN` | `CAN_AVAILABLE` | TWAI；A=TX B=RX |
 | `UART` | `UART_AVAILABLE` | A=TXD B=RXD |
 | `RS485` | `RS485_AVAILABLE` | 占位 |
-| `PWM` | `PWM_AVAILABLE` | 舵机/云台 pan/tilt |
+| `PWM`（默认） | `PWM_AVAILABLE` | 舵机/云台 pan/tilt |
 | `IO` / `AD` | 对应 | 占位 |
 
 ## 分层 ENABLE（CAN 栈）
@@ -42,11 +44,12 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 
 | 剖面 | EXT_PIN | CAN | MOTOR | DOG | ARM | SERVO/GIMBAL | 说明 |
 |------|---------|-----|-------|-----|-----|--------------|------|
-| 前端壳 | `NONE` | 0 | 0 | 0 | 0 | 0 | **默认**；MQTT 设备页 |
+| 舵机调试 | `PWM` | 0 | 0 | 0 | 0 | **1/0** | **默认**；2 路裸舵机 MQTT/MCP |
+| 前端壳 | `NONE` | 0 | 0 | 0 | 0 | 0 | MQTT 设备页联调 |
 | 单电机 | `CAN` | 1 | 1 | 0 | 0 | 0 | 协议/MCP 点动 |
 | 四足狗 | `CAN` | 1 | 1 | 1 | 0 | 0 | 完整运控 |
 | 机械臂 | `CAN` | 1 | 1 | 0 | 1 | 0 | 占位，实现后启用 |
-| 云台 | `PWM` | 0 | 0 | 0 | 0 | 1/1 | pan/tilt |
+| 云台 | `PWM` | 0 | 0 | 0 | 0 | 1/1 | pan/tilt（开 GIMBAL） |
 | UART | `UART` | 0 | 0 | 0 | 0 | 0 | `UART_ENABLE=1` |
 
 非引脚开关（默认可按联调需要改 `board_features.h`）：
@@ -61,7 +64,7 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 `device/info`（retain）含：
 
 ```json
-"ext_pins": { "mode": "none", "gpio_a": 38, "gpio_b": 48 },
+"ext_pins": { "mode": "pwm", "gpio_a": 38, "gpio_b": 48 },
 "capabilities": { "can", "motor", "dog", "arm", "uart", "servo", "gimbal", "led", ... }
 ```
 

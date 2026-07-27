@@ -8,6 +8,7 @@
 #include "mqtt/modules/face_mqtt.h"
 #include "mqtt/modules/track_mqtt.h"
 #include "mqtt/modules/touch_mqtt.h"
+#include "mqtt/modules/servo_mqtt.h"
 #include "touch_btn/touch_event_hub.h"
 
 #include "config.h"
@@ -34,6 +35,7 @@ struct DeepDogMqtt::Impl {
     DeepDogFaceMqtt face{&client};
     DeepDogTrackMqtt track{&client};
     DeepDogTouchMqtt touch{&client};
+    DeepDogServoMqtt servo{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
     TouchEventHub* touch_hub = nullptr;
@@ -57,6 +59,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         face.OnConnected();
         track.OnConnected();
         touch.OnConnected();
+        servo.OnConnected();
     } else {
         device.OnDisconnected();
         stream.OnDisconnected();
@@ -64,6 +67,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         face.OnDisconnected();
         track.OnDisconnected();
         touch.OnDisconnected();
+        servo.OnDisconnected();
     }
 }
 
@@ -71,6 +75,7 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     stream.OnMessage(topic, payload);
     face.OnMessage(topic, payload);
     track.OnMessage(topic, payload);
+    servo.OnMessage(topic, payload);
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
@@ -250,6 +255,7 @@ bool DeepDogMqtt::Start() {
     impl_->touch.SetEnabled(caps.touch);
     impl_->touch.SetHub(impl_->touch_hub);
     impl_->touch.SetController(impl_->touch_ctrl);
+    impl_->servo.SetEnabled(caps.servo);
 
     impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
     impl_->client.SetMessageCallback(
@@ -267,6 +273,7 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
+    impl_->servo.Stop();
     impl_->touch.Stop();
     impl_->track.Stop();
     impl_->face.Stop();

@@ -44,6 +44,7 @@
 #endif
 #if DEEP_DOG_SERVO_ENABLE || DEEP_DOG_GIMBAL_ENABLE
 #include "servo/servo_config.h"
+#include "servo/servo_control.h"
 #include "gimbal/Gimbal.h"
 #endif
 #if DEEP_DOG_ARM_ENABLE
@@ -339,7 +340,9 @@ private:
 #if DEEP_DOG_GIMBAL_ENABLE
         InitializeGimbal();
 #elif DEEP_DOG_SERVO_ENABLE
-        ESP_LOGI(TAG, "Servo ENABLE without gimbal — attach at product layer if needed");
+        if (DeepDogServoInit() != ESP_OK) {
+            ESP_LOGW(TAG, "Servo bank init failed");
+        }
 #endif
 #if DEEP_DOG_ARM_ENABLE
         DeepDogArmInit();
@@ -644,7 +647,11 @@ private:
         RegisterDogMcpTools(mcp_server, &dog_);
 #elif DEEP_DOG_MOTOR_ENABLE
         RegisterMotorMcpTools(mcp_server, deep_motor_);
-#else
+#endif
+#if DEEP_DOG_SERVO_ENABLE
+        RegisterServoMcpTools(mcp_server);
+#endif
+#if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_SERVO_ENABLE
         (void)mcp_server;
 #endif
     }

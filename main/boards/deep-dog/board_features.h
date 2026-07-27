@@ -10,7 +10,7 @@
  *       PWM_AVAILABLE → SERVO → GIMBAL
  */
 
-/* -------- 总线 / 驱动（默认全关，便于前端壳联调） -------- */
+/* -------- 总线 / 驱动（CAN 等默认关；舵机见下方 PWM） -------- */
 #ifndef DEEP_DOG_CAN_ENABLE
 #define DEEP_DOG_CAN_ENABLE 0
 #endif
@@ -38,9 +38,9 @@
 #define DEEP_DOG_ARM_ENABLE 0
 #endif
 
-/* -------- PWM 产品（需 EXT_PIN=PWM） -------- */
+/* -------- PWM 产品（需 EXT_PIN=PWM；默认开舵机调试） -------- */
 #ifndef DEEP_DOG_SERVO_ENABLE
-#define DEEP_DOG_SERVO_ENABLE 0
+#define DEEP_DOG_SERVO_ENABLE 1
 #endif
 #ifndef DEEP_DOG_GIMBAL_ENABLE
 #define DEEP_DOG_GIMBAL_ENABLE 0

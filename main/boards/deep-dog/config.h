@@ -23,9 +23,9 @@
 
 typedef int deep_dog_ext_pin_mode_t;
 
-/** 联调默认 none；四足/单电机改为 DEEP_DOG_EXT_PIN_CAN，云台改为 _PWM 等 */
+/** 联调默认 PWM（舵机调试）；四足/单电机改为 DEEP_DOG_EXT_PIN_CAN，前端壳改为 _NONE */
 #ifndef DEEP_DOG_EXT_PIN_MODE
-#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_NONE
+#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_PWM
 #endif
 
 #define DEEP_DOG_EXT_PIN_A_GPIO GPIO_NUM_38

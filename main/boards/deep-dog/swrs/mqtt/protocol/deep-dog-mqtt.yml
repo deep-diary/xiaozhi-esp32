@@ -446,8 +446,9 @@ topics:
     retain: false
     note: "Low-level; prefer gimbal/* for pan-tilt product path"
     payload:
-      index: { type: int }
+      index: { type: int, note: "0=GPIO38(A), 1=GPIO48(B)" }
       angle: { type: int, optional: true }
+      duration_ms: { type: int, optional: true, note: "0 or omit = ASAP; >0 interpolate to angle" }
       attach: { type: bool, optional: true }
       type: { type: enum, values: [90, 180, 270, 360], optional: true }
       ts: { type: int }
@@ -463,7 +464,9 @@ topics:
         item:
           index: { type: int }
           angle: { type: int }
+          target: { type: int, optional: true, note: "goal angle; equals angle when idle" }
           attached: { type: bool }
+          moving: { type: bool, optional: true }
           type: { type: int, optional: true }
           min: { type: int, optional: true }
           max: { type: int, optional: true }

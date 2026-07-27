@@ -52,7 +52,7 @@
 | 5 | dog | [07-dog](./modules/07-dog.md) | ready |
 | 6 | led | [08-led](./modules/08-led.md) | planned |
 | 7 | gimbal | [09-gimbal](./modules/09-gimbal.md)（V-C04） | ready / 更后 |
-| 8 | servo | [10-servo](./modules/10-servo.md) | planned |
+| 8 | servo | [10-servo](./modules/10-servo.md) | ready |
 | 9 | handle | [11-handle](./modules/11-handle.md) | 骨架 |
 | 10 | can | [12-can](./modules/12-can.md) | planned |
 | — | person | [13-person](./modules/13-person.md) | 并入 face；**无入口卡** |
