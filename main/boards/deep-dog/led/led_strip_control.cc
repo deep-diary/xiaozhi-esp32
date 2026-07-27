@@ -32,8 +32,8 @@ void LedStripControl::ApplyOff() {
 }
 
 void LedStripControl::ApplyStatic(StripColor color) {
-    const bool off = (color.red == 0 && color.green == 0 && color.blue == 0);
-    current_mode_ = off ? DEEP_DOG_LED_MODE_OFF : DEEP_DOG_LED_MODE_STATIC;
+    /* mode=1 保持静态，即使 RGB 全 0（黑灯）；关灯只能走 ApplyOff / mode=0 */
+    current_mode_ = DEEP_DOG_LED_MODE_STATIC;
     current_color_ = color;
     if (led_strip_) {
         led_strip_->SetAllColor(color);
