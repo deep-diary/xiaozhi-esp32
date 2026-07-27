@@ -8,9 +8,12 @@ class VisionFrameHub;
 class DeepDogHttpServer;
 class DeepDogImuSensor;
 class DeepDogImuSwitch;
+class TouchEventHub;
+class TouchButtonController;
+class TouchComboRecognizer;
 
 /**
- * deep-dog 板级 MQTT 门面：device + stream + imu。
+ * deep-dog 板级 MQTT 门面：device + stream + imu + touch …
  * StartNetwork 之后调用 Start()。
  */
 class DeepDogMqtt {
@@ -23,6 +26,11 @@ public:
     void SetHttpPort(int port);
     void SetImuSensor(DeepDogImuSensor* sensor);
     void SetImuSwitch(DeepDogImuSwitch* hub);
+    void SetTouchHub(TouchEventHub* hub);
+    void SetTouchController(TouchButtonController* ctrl);
+    void SetTouchComboRecognizer(TouchComboRecognizer* combo);
+    /** 组合命中后补发 touch/status（含 last_combo） */
+    void NotifyTouchCombo(const char* combo_id);
 
     bool Start();
     void Stop();

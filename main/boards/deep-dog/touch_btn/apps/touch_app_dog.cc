@@ -1,5 +1,5 @@
-#include "deep_dog_touch_app.h"
-#include "touch_config.h"
+#include "touch_btn/apps/touch_app_dog.h"
+#include "touch_btn/touch_config.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -15,7 +15,7 @@
 #include "motor/motor_config.h"
 #endif
 
-#define TAG "dog_touch"
+#define TAG "touch_app_dog"
 
 namespace {
 
@@ -47,12 +47,12 @@ void TouchExplainTask(void* arg) {
 }  // namespace
 
 #if DEEP_DOG_DOG_ENABLE
-DeepDogTouchApp::DeepDogTouchApp(DogControl* dog) : dog_(dog) {}
+TouchAppDog::TouchAppDog(DogControl* dog) : dog_(dog) {}
 #else
-DeepDogTouchApp::DeepDogTouchApp() = default;
+TouchAppDog::TouchAppDog() = default;
 #endif
 
-void DeepDogTouchApp::QueueTouchPhotoExplainIfIdle() {
+void TouchAppDog::QueueTouchPhotoExplainIfIdle() {
 #if !DEEP_DOG_TOUCH2_SHORT_PHOTO_EXPLAIN
     return;
 #endif
@@ -81,50 +81,45 @@ void DeepDogTouchApp::QueueTouchPhotoExplainIfIdle() {
     }
 }
 
-void DeepDogTouchApp::OnPress1() {
-    btn1_long_fired_ = false;
-}
-
-void DeepDogTouchApp::OnRelease1() {
-    const bool was_short = !btn1_long_fired_;
-    btn1_long_fired_ = false;
-    if (was_short) {
-        QueueTouchPhotoExplainIfIdle();
-    }
+void TouchAppDog::OnShortPress1() {
+    QueueTouchPhotoExplainIfIdle();
 }
 
 #if DEEP_DOG_DOG_ENABLE
 
-void DeepDogTouchApp::MaybeQueuePhotoExplainAfterForward() {
+void TouchAppDog::MaybeQueuePhotoExplainAfterForward() {
     QueueTouchPhotoExplainIfIdle();
 }
 
-bool DeepDogTouchApp::ComboArmed() const {
+bool TouchAppDog::ComboArmed() const {
     if (combo_deadline_us_ == 0) {
         return false;
     }
     return (int64_t)esp_timer_get_time() < combo_deadline_us_;
 }
 
-void DeepDogTouchApp::ArmComboAfterLongPress1() {
+void TouchAppDog::ArmComboAfterLongPress1() {
     combo_deadline_us_ = (int64_t)esp_timer_get_time() + (int64_t)kComboWindowMs * 1000;
     ESP_LOGI(TAG,
              "组合键窗口：长按1 后 %d ms 内 短按2/3=前进/后退一大步；长按2=站立 长按3=趴下",
              kComboWindowMs);
 }
 
-void DeepDogTouchApp::DisarmCombo() {
+void TouchAppDog::DisarmCombo() {
     combo_deadline_us_ = 0;
+    btn2_touching_ = false;
+    btn3_touching_ = false;
 }
 
-void DeepDogTouchApp::ExpireComboIfNeeded() {
+void TouchAppDog::ExpireComboIfNeeded() {
     if (combo_deadline_us_ != 0 && (int64_t)esp_timer_get_time() >= combo_deadline_us_) {
         DisarmCombo();
     }
 }
 
-void DeepDogTouchApp::OnLongPress1() {
-    btn1_long_fired_ = true;
+void TouchAppDog::OnPress1() {}
+
+void TouchAppDog::OnLongPress1() {
     if (!dog_) {
         return;
     }
@@ -136,7 +131,7 @@ void DeepDogTouchApp::OnLongPress1() {
     ArmComboAfterLongPress1();
 }
 
-void DeepDogTouchApp::OnPress2() {
+void TouchAppDog::OnPress2() {
     if (!dog_) {
         return;
     }
@@ -145,11 +140,8 @@ void DeepDogTouchApp::OnPress2() {
 
     if (ComboArmed()) {
         btn2_touching_ = true;
-        btn2_long_fired_ = false;
         return;
     }
-
-    btn2_long_fired_ = false;
 
     if (dog_->isContinuousLocomotionActive()) {
         if (btn3_down_) {
@@ -163,14 +155,14 @@ void DeepDogTouchApp::OnPress2() {
     }
 
     if (dog_->goForward()) {
-        ESP_LOGI(TAG, "Touch: goForward 一小步 ok（短按2）");
+        ESP_LOGI(TAG, "Touch: goForward 一小步 ok（press2）");
     } else {
         ESP_LOGE(TAG, "Touch: goForward failed");
     }
     MaybeQueuePhotoExplainAfterForward();
 }
 
-void DeepDogTouchApp::OnPress3() {
+void TouchAppDog::OnPress3() {
     if (!dog_) {
         return;
     }
@@ -179,11 +171,8 @@ void DeepDogTouchApp::OnPress3() {
 
     if (ComboArmed()) {
         btn3_touching_ = true;
-        btn3_long_fired_ = false;
         return;
     }
-
-    btn3_long_fired_ = false;
 
     if (dog_->isContinuousLocomotionActive()) {
         if (btn2_down_) {
@@ -197,14 +186,13 @@ void DeepDogTouchApp::OnPress3() {
     }
 
     if (dog_->goBack()) {
-        ESP_LOGI(TAG, "Touch: goBack 一小步 ok（短按3）");
+        ESP_LOGI(TAG, "Touch: goBack 一小步 ok（press3）");
     } else {
         ESP_LOGE(TAG, "Touch: goBack failed");
     }
 }
 
-void DeepDogTouchApp::OnLongPress2() {
-    btn2_long_fired_ = true;
+void TouchAppDog::OnLongPress2() {
     gesture_long2_ = true;
     dual_stop_armed_ = false;
     if (!dog_) {
@@ -226,8 +214,7 @@ void DeepDogTouchApp::OnLongPress2() {
     }
 }
 
-void DeepDogTouchApp::OnLongPress3() {
-    btn3_long_fired_ = true;
+void TouchAppDog::OnLongPress3() {
     gesture_long3_ = true;
     dual_stop_armed_ = false;
     if (!dog_) {
@@ -249,7 +236,7 @@ void DeepDogTouchApp::OnLongPress3() {
     }
 }
 
-void DeepDogTouchApp::MaybeDualShortStopOnBothReleased() {
+void TouchAppDog::MaybeDualShortStopOnBothReleased() {
     if (!dog_) {
         return;
     }
@@ -267,19 +254,12 @@ void DeepDogTouchApp::MaybeDualShortStopOnBothReleased() {
     gesture_long3_ = false;
 }
 
-void DeepDogTouchApp::OnRelease2() {
+void TouchAppDog::OnShortPress2() {
     if (!dog_) {
         return;
     }
-    btn2_down_ = false;
-    const bool was_combo_touch = btn2_touching_;
-    const bool was_short = !btn2_long_fired_;
-    if (was_combo_touch) {
+    if (ComboArmed() && btn2_touching_) {
         btn2_touching_ = false;
-    }
-    btn2_long_fired_ = false;
-
-    if (ComboArmed() && was_combo_touch && was_short) {
         if (dog_->goForwardBigStep(DEEP_DOG_MIT_VDES_RAD_S, 40)) {
             ESP_LOGI(TAG, "Touch: 组合键 长按1→短按2 → goForwardBigStep ok");
         } else {
@@ -287,22 +267,14 @@ void DeepDogTouchApp::OnRelease2() {
         }
         DisarmCombo();
     }
-    MaybeDualShortStopOnBothReleased();
 }
 
-void DeepDogTouchApp::OnRelease3() {
+void TouchAppDog::OnShortPress3() {
     if (!dog_) {
         return;
     }
-    btn3_down_ = false;
-    const bool was_combo_touch = btn3_touching_;
-    const bool was_short = !btn3_long_fired_;
-    if (was_combo_touch) {
+    if (ComboArmed() && btn3_touching_) {
         btn3_touching_ = false;
-    }
-    btn3_long_fired_ = false;
-
-    if (ComboArmed() && was_combo_touch && was_short) {
         if (dog_->goBackBigStep(DEEP_DOG_MIT_VDES_RAD_S, 40)) {
             ESP_LOGI(TAG, "Touch: 组合键 长按1→短按3 → goBackBigStep ok");
         } else {
@@ -310,93 +282,78 @@ void DeepDogTouchApp::OnRelease3() {
         }
         DisarmCombo();
     }
+}
+
+void TouchAppDog::OnRelease2() {
+    if (!dog_) {
+        return;
+    }
+    btn2_down_ = false;
     MaybeDualShortStopOnBothReleased();
 }
 
-void DeepDogTouchApp::OnTouchEvent(int button_id,
-                                   TouchButtonEvent event,
-                                   uint32_t value,
-                                   uint32_t baseline,
-                                   uint32_t abs_diff) {
-    (void)value;
-    (void)baseline;
-    (void)abs_diff;
+void TouchAppDog::OnRelease3() {
+    if (!dog_) {
+        return;
+    }
+    btn3_down_ = false;
+    MaybeDualShortStopOnBothReleased();
+}
 
+void TouchAppDog::OnEvent(const TouchEvent& ev) {
     ExpireComboIfNeeded();
 
-    switch (event) {
+    switch (ev.event) {
         case TouchButtonEvent::kPress:
-            ESP_LOGI(TAG, "Touch button %d pressed", button_id);
-            if (button_id == 1) {
+            if (ev.button_id == 1) {
                 OnPress1();
-            } else if (button_id == 2) {
+            } else if (ev.button_id == 2) {
                 OnPress2();
-            } else if (button_id == 3) {
+            } else if (ev.button_id == 3) {
                 OnPress3();
             }
             break;
 
         case TouchButtonEvent::kRelease:
-            ESP_LOGI(TAG, "Touch button %d released", button_id);
-            if (button_id == 1) {
-                OnRelease1();
-            } else if (button_id == 2) {
+            if (ev.button_id == 2) {
                 OnRelease2();
-            } else if (button_id == 3) {
+            } else if (ev.button_id == 3) {
                 OnRelease3();
             }
             break;
 
         case TouchButtonEvent::kLongPress:
-            ESP_LOGI(TAG, "Touch button %d long-pressed", button_id);
-            if (button_id == 1) {
+            if (ev.button_id == 1) {
                 OnLongPress1();
-            } else if (button_id == 2) {
+            } else if (ev.button_id == 2) {
                 OnLongPress2();
-            } else if (button_id == 3) {
+            } else if (ev.button_id == 3) {
                 OnLongPress3();
             }
+            break;
+
+        case TouchButtonEvent::kShortPress:
+            if (ev.button_id == 1) {
+                OnShortPress1();
+            } else if (ev.button_id == 2) {
+                OnShortPress2();
+            } else if (ev.button_id == 3) {
+                OnShortPress3();
+            }
+            break;
+
+        case TouchButtonEvent::kDoubleClick:
             break;
     }
 }
 
 #else  // !DEEP_DOG_DOG_ENABLE
 
-void DeepDogTouchApp::OnLongPress1() {
-    btn1_long_fired_ = true;
-    ESP_LOGI(TAG, "Touch: dog disabled — long-press1 ignored (no DogControl)");
-}
-
-void DeepDogTouchApp::OnTouchEvent(int button_id,
-                                   TouchButtonEvent event,
-                                   uint32_t value,
-                                   uint32_t baseline,
-                                   uint32_t abs_diff) {
-    (void)value;
-    (void)baseline;
-    (void)abs_diff;
-
-    switch (event) {
-        case TouchButtonEvent::kPress:
-            ESP_LOGI(TAG, "Touch button %d pressed", button_id);
-            if (button_id == 1) {
-                OnPress1();
-            }
-            break;
-
-        case TouchButtonEvent::kRelease:
-            ESP_LOGI(TAG, "Touch button %d released", button_id);
-            if (button_id == 1) {
-                OnRelease1();
-            }
-            break;
-
-        case TouchButtonEvent::kLongPress:
-            ESP_LOGI(TAG, "Touch button %d long-pressed", button_id);
-            if (button_id == 1) {
-                OnLongPress1();
-            }
-            break;
+void TouchAppDog::OnEvent(const TouchEvent& ev) {
+    if (ev.event == TouchButtonEvent::kShortPress && ev.button_id == 1) {
+        OnShortPress1();
+    } else if (ev.event == TouchButtonEvent::kLongPress && ev.button_id == 1) {
+        ESP_LOGI(TAG, "Touch: dog disabled — long-press1 ignored (no DogControl)");
     }
 }
 

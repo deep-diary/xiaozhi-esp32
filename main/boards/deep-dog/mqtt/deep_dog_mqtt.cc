@@ -7,6 +7,8 @@
 #include "mqtt/modules/imu_mqtt.h"
 #include "mqtt/modules/face_mqtt.h"
 #include "mqtt/modules/track_mqtt.h"
+#include "mqtt/modules/touch_mqtt.h"
+#include "touch_btn/touch_event_hub.h"
 
 #include "config.h"
 #include "face_ai_config.h"
@@ -31,8 +33,11 @@ struct DeepDogMqtt::Impl {
     DeepDogImuMqtt imu{&client};
     DeepDogFaceMqtt face{&client};
     DeepDogTrackMqtt track{&client};
+    DeepDogTouchMqtt touch{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
+    TouchEventHub* touch_hub = nullptr;
+    TouchButtonController* touch_ctrl = nullptr;
 #if DEEP_DOG_IMU_ENABLE
     DeepDogImuSensor* imu_sensor = nullptr;
     DeepDogImuSwitch* imu_switch = nullptr;
@@ -51,12 +56,14 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         imu.OnConnected();
         face.OnConnected();
         track.OnConnected();
+        touch.OnConnected();
     } else {
         device.OnDisconnected();
         stream.OnDisconnected();
         imu.OnDisconnected();
         face.OnDisconnected();
         track.OnDisconnected();
+        touch.OnDisconnected();
     }
 }
 
@@ -69,6 +76,9 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
 
 DeepDogMqtt::~DeepDogMqtt() {
+    if (impl_ && impl_->touch_hub) {
+        impl_->touch_hub->SetPushListener(nullptr);
+    }
     Stop();
 }
 
@@ -113,6 +123,43 @@ void DeepDogMqtt::SetImuSwitch(DeepDogImuSwitch* hub) {
 #else
     (void)hub;
 #endif
+}
+
+void DeepDogMqtt::SetTouchHub(TouchEventHub* hub) {
+    if (!impl_) {
+        return;
+    }
+    if (impl_->touch_hub && impl_->touch_hub != hub) {
+        impl_->touch_hub->SetPushListener(nullptr);
+    }
+    impl_->touch_hub = hub;
+    impl_->touch.SetHub(hub);
+    if (hub) {
+        hub->SetPushListener([this](const TouchEvent& ev) {
+            if (impl_) {
+                impl_->touch.OnButtonEvent(ev);
+            }
+        });
+    }
+}
+
+void DeepDogMqtt::SetTouchController(TouchButtonController* ctrl) {
+    if (impl_) {
+        impl_->touch_ctrl = ctrl;
+        impl_->touch.SetController(ctrl);
+    }
+}
+
+void DeepDogMqtt::SetTouchComboRecognizer(TouchComboRecognizer* combo) {
+    if (impl_) {
+        impl_->touch.SetComboRecognizer(combo);
+    }
+}
+
+void DeepDogMqtt::NotifyTouchCombo(const char* combo_id) {
+    if (impl_) {
+        impl_->touch.OnComboRecognized(combo_id);
+    }
 }
 
 bool DeepDogMqtt::IsRunning() const {
@@ -200,6 +247,9 @@ bool DeepDogMqtt::Start() {
 #endif
     impl_->face.SetEnabled(caps.face);
     impl_->track.SetModuleEnabled(caps.track);
+    impl_->touch.SetEnabled(caps.touch);
+    impl_->touch.SetHub(impl_->touch_hub);
+    impl_->touch.SetController(impl_->touch_ctrl);
 
     impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
     impl_->client.SetMessageCallback(
@@ -217,6 +267,7 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
+    impl_->touch.Stop();
     impl_->track.Stop();
     impl_->face.Stop();
     impl_->imu.Stop();
@@ -235,6 +286,10 @@ void DeepDogMqtt::SetHttpServer(DeepDogHttpServer*) {}
 void DeepDogMqtt::SetHttpPort(int) {}
 void DeepDogMqtt::SetImuSensor(DeepDogImuSensor*) {}
 void DeepDogMqtt::SetImuSwitch(DeepDogImuSwitch*) {}
+void DeepDogMqtt::SetTouchHub(TouchEventHub*) {}
+void DeepDogMqtt::SetTouchController(TouchButtonController*) {}
+void DeepDogMqtt::SetTouchComboRecognizer(TouchComboRecognizer*) {}
+void DeepDogMqtt::NotifyTouchCombo(const char*) {}
 bool DeepDogMqtt::Start() { return false; }
 void DeepDogMqtt::Stop() {}
 bool DeepDogMqtt::IsRunning() const { return false; }

@@ -67,7 +67,7 @@ modules:
   touch:
     status: defined
     required: false
-    note: "Driver exists; MQTT publish pending client"
+    note: "Driver + touch_mqtt publish touch/status on_button_event; optional last_combo when DEEP_DOG_TOUCH_COMBO_ENABLE; no cmd/bindings in v0.1"
     ref: main/boards/deep-dog/touch_btn/
   can:
     status: defined
@@ -545,9 +545,10 @@ topics:
     qos: 0
     retain: true
     when: on_button_event
-    note: "Full 3-button snapshot; no touch/cmd in v0.1"
+    note: "Full 3-button snapshot; optional last_combo {id,ts} on combo hit (retain); last_event enum unchanged; no touch/cmd in v0.1; see modules/06-touch.md"
     payload:
       ok: { type: bool }
+      pressed_mask: { type: int, note: "bit0/1/2 = button 1/2/3 currently pressed" }
       buttons:
         type: array
         length: 3
@@ -555,7 +556,19 @@ topics:
           id: { type: int, values: [1, 2, 3] }
           pressed: { type: bool }
           long_press: { type: bool }
-          last_event: { type: enum, values: [press, release, long_press] }
+          last_event:
+            type: enum
+            values: [press, release, long_press, short_press, double_click]
+      last_combo:
+        type: object
+        optional: true
+        note: "Present after combo recognizer hit when DEEP_DOG_TOUCH_COMBO_ENABLE=1; retained with snapshot"
+        fields:
+          id:
+            type: enum
+            values:
+              [chord_short_1_2, chord_short_1_3, chord_short_2_3, hold1_tap2, hold1_tap3]
+          ts: { type: int, note: "Unix seconds of combo recognition" }
       debug:
         type: array
         optional: true

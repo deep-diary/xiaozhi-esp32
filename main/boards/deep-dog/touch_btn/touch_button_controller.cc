@@ -1,6 +1,7 @@
 #include "touch_btn/touch_button_controller.h"
 
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <soc/touch_sensor_periph.h>
 
 #include <algorithm>
@@ -17,22 +18,108 @@ int TouchButtonController::FindChannelByGpio(int gpio) const {
     return -1;
 }
 
+void TouchButtonController::UpdateSnapshotLocked(int button_idx,
+                                                 TouchButtonEvent event,
+                                                 uint32_t value,
+                                                 uint32_t baseline,
+                                                 uint32_t abs_diff) {
+    TouchButtonState& s = snapshot_[button_idx];
+    s.last_event = event;
+    s.value = value;
+    s.baseline = baseline;
+    s.abs_diff = abs_diff;
+    switch (event) {
+        case TouchButtonEvent::kPress:
+            s.pressed = true;
+            s.long_press = false;
+            break;
+        case TouchButtonEvent::kRelease:
+            s.pressed = false;
+            s.long_press = false;
+            break;
+        case TouchButtonEvent::kLongPress:
+            s.pressed = true;
+            s.long_press = true;
+            break;
+        case TouchButtonEvent::kShortPress:
+        case TouchButtonEvent::kDoubleClick:
+            s.pressed = false;
+            s.long_press = false;
+            break;
+    }
+}
+
 void TouchButtonController::DispatchEvent(int button_idx,
                                           TouchButtonEvent event,
                                           uint32_t value,
                                           uint32_t baseline,
                                           uint32_t abs_diff) {
+    portENTER_CRITICAL(&snapshot_mux_);
+    UpdateSnapshotLocked(button_idx, event, value, baseline, abs_diff);
+    portEXIT_CRITICAL(&snapshot_mux_);
+
     if (!event_callback_) {
         return;
     }
     event_callback_(button_idx + 1, event, value, baseline, abs_diff);
 }
 
+uint8_t TouchButtonController::GetPressedMask() const {
+    uint8_t mask = 0;
+    portENTER_CRITICAL(&snapshot_mux_);
+    for (int i = 0; i < 3; i++) {
+        if (snapshot_[i].pressed) {
+            mask |= static_cast<uint8_t>(1u << i);
+        }
+    }
+    portEXIT_CRITICAL(&snapshot_mux_);
+    return mask;
+}
+
+bool TouchButtonController::GetButtonState(int button_id, TouchButtonState* out) const {
+    if (!out || button_id < 1 || button_id > 3) {
+        return false;
+    }
+    portENTER_CRITICAL(&snapshot_mux_);
+    *out = snapshot_[button_id - 1];
+    portEXIT_CRITICAL(&snapshot_mux_);
+    return true;
+}
+
+void TouchButtonController::FlushPendingShortPress(int button_idx,
+                                                   uint32_t value,
+                                                   uint32_t baseline,
+                                                   uint32_t abs_diff) {
+    if (!pending_short_[button_idx]) {
+        return;
+    }
+    pending_short_[button_idx] = false;
+    pending_short_deadline_us_[button_idx] = 0;
+    click_armed_[button_idx] = false;
+    DispatchEvent(button_idx, TouchButtonEvent::kShortPress, value, baseline, abs_diff);
+}
+
+void TouchButtonController::PollDoubleClickWindows() {
+    const int64_t now = esp_timer_get_time();
+    for (int i = 0; i < 3; i++) {
+        if (!pending_short_[i]) {
+            continue;
+        }
+        if (now < pending_short_deadline_us_[i]) {
+            continue;
+        }
+        FlushPendingShortPress(i,
+                               pending_short_value_[i],
+                               pending_short_baseline_[i],
+                               pending_short_abs_diff_[i]);
+    }
+}
+
 bool TouchButtonController::Initialize(gpio_num_t button1_gpio,
                                        gpio_num_t button2_gpio,
                                        gpio_num_t button3_gpio,
                                        TouchButtonEventCallback callback) {
-    event_callback_ = callback;
+    event_callback_ = std::move(callback);
 
     touch_pad_init();
 
@@ -57,6 +144,10 @@ bool TouchButtonController::Initialize(gpio_num_t button1_gpio,
         touch_release_confirm_cnt_[i] = 0;
         touch_hold_cycles_[i] = 0;
         touch_longpress_fired_[i] = false;
+        pending_short_[i] = false;
+        pending_short_deadline_us_[i] = 0;
+        click_armed_[i] = false;
+        snapshot_[i] = TouchButtonState{};
     }
 
     touch_pad_filter_enable();
@@ -88,28 +179,28 @@ void TouchButtonController::TouchButtonsTask(void* arg) {
         return;
     }
 
-    // 这组阈值按当前板子的实测噪声调高，避免上电后未触摸就误判为 pressed。
     const float press_abs_ratio = 0.05f;
     const float release_abs_ratio = 0.03f;
     const uint32_t press_abs_min[3] = {2600, 1200, 900};
     const uint32_t release_abs_min[3] = {2200, 950, 700};
-    const uint8_t confirm_cycles = 2;
+    const uint8_t confirm_cycles = DEEP_DOG_TOUCH_DEBOUNCE_CYCLES;
     const float baseline_alpha = 0.01f;
     const float baseline_update_abs_ratio = 0.12f;
     const uint32_t baseline_update_abs_offset = 200;
-    // 长按判定：每轮任务周期约 50ms（见末尾 vTaskDelay），cycles * 50ms ≈ 长按时长
-    const uint16_t long_press_cycles = 20;  // ≈ 1s
+    const uint16_t long_press_cycles = static_cast<uint16_t>(
+        (DEEP_DOG_TOUCH_LONG_PRESS_MS + DEEP_DOG_TOUCH_POLL_MS - 1) / DEEP_DOG_TOUCH_POLL_MS);
+    const int64_t double_window_us = (int64_t)DEEP_DOG_TOUCH_DOUBLE_MS * 1000;
 
-    // 仅打印按键状态变化（pressed/released/long-pressed）
-    // 如需再次打开“raw/baseline/abs_diff”调试，把 enable_raw_debug 改为 true。
     const bool enable_raw_debug = false;
     TickType_t start_tick = xTaskGetTickCount();
     TickType_t last_debug_tick = start_tick;
     const TickType_t debug_window_ticks = pdMS_TO_TICKS(180000);
     const TickType_t debug_interval_ticks = pdMS_TO_TICKS(1000);
-    const int debug_button_index = 1; // 仅打印 2 号按键 raw 调试值（enable_raw_debug=true 才生效）
+    const int debug_button_index = 1;
 
     while (true) {
+        self->PollDoubleClickWindows();
+
         const TickType_t now_tick = xTaskGetTickCount();
         const bool do_debug = enable_raw_debug &&
                                (now_tick - start_tick < debug_window_ticks) &&
@@ -170,11 +261,32 @@ void TouchButtonController::TouchButtonsTask(void* arg) {
                         self->touch_release_confirm_cnt_[i]++;
                     }
                     if (self->touch_release_confirm_cnt_[i] >= confirm_cycles) {
+                        const bool was_long = self->touch_longpress_fired_[i];
                         self->touch_pressed_[i] = false;
                         self->touch_release_confirm_cnt_[i] = 0;
                         self->touch_hold_cycles_[i] = 0;
                         self->touch_longpress_fired_[i] = false;
                         self->DispatchEvent(i, TouchButtonEvent::kRelease, value, baseline, abs_diff);
+
+                        if (was_long) {
+                            self->pending_short_[i] = false;
+                            self->click_armed_[i] = false;
+                        } else if (self->pending_short_[i] || self->click_armed_[i]) {
+                            // 双击：窗口内第二次抬起
+                            self->pending_short_[i] = false;
+                            self->pending_short_deadline_us_[i] = 0;
+                            self->click_armed_[i] = false;
+                            self->DispatchEvent(i, TouchButtonEvent::kDoubleClick, value, baseline, abs_diff);
+                        } else {
+                            // 首次抬起：启动双击等待窗，暂不发 short_press
+                            self->pending_short_[i] = true;
+                            self->pending_short_deadline_us_[i] =
+                                esp_timer_get_time() + double_window_us;
+                            self->pending_short_value_[i] = value;
+                            self->pending_short_baseline_[i] = baseline;
+                            self->pending_short_abs_diff_[i] = abs_diff;
+                            self->click_armed_[i] = true;
+                        }
                     }
                 } else {
                     self->touch_release_confirm_cnt_[i] = 0;
@@ -184,12 +296,13 @@ void TouchButtonController::TouchButtonsTask(void* arg) {
                     if (!self->touch_longpress_fired_[i] &&
                         self->touch_hold_cycles_[i] >= long_press_cycles) {
                         self->touch_longpress_fired_[i] = true;
+                        self->pending_short_[i] = false;
+                        self->click_armed_[i] = false;
                         self->DispatchEvent(i, TouchButtonEvent::kLongPress, value, baseline, abs_diff);
                     }
                 }
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_TOUCH_POLL_MS));
     }
 }
-

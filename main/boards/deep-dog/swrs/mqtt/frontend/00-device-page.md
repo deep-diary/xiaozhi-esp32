@@ -36,7 +36,7 @@ Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 **Track 不单独出卡**：跟踪 UI 在 [02-stream](../modules/02-stream.md)（`#track`）。  
 **Person 不单独出卡**：并入 [04-face](../modules/04-face.md)；`/modules/person` redirect 到 face。
 
-Stream 卡说明可写「推流与人脸叠加」；Face 卡「检测 / 识别 / Immich」。  
+Stream 卡说明可写「推流与人脸叠加」；Face 卡「检测 / 识别 / Immich」；Touch 卡「三键按下 / 长按 / 短按 / 双击」（详情见 [06-touch](../modules/06-touch.md)）。  
 Motor 卡：单电机调试（`capabilities.motor && !dog` 或独立电机页）；Dog 卡：四足运控。
 
 ## Steps（前端）

@@ -8,7 +8,21 @@
 #include "mcp_server.h"
 #include "settings.h"
 #include "touch_btn/touch_button_controller.h"
-#include "touch_btn/deep_dog_touch_app.h"
+#include "touch_btn/touch_event_hub.h"
+#include "touch_btn/touch_app_dispatcher.h"
+#include "touch_btn/touch_config.h"
+#if DEEP_DOG_TOUCH_COMBO_ENABLE
+#include "touch_btn/touch_combo_recognizer.h"
+#endif
+#if DEEP_DOG_TOUCH_APP_LOG_ENABLE
+#include "touch_btn/apps/touch_app_log.h"
+#endif
+#if DEEP_DOG_TOUCH_APP_DOG_ENABLE
+#include "touch_btn/apps/touch_app_dog.h"
+#endif
+#if DEEP_DOG_TOUCH_APP_SERVO_ENABLE
+#include "touch_btn/apps/touch_app_servo.h"
+#endif
 
 #if DEEP_DOG_CAN_ENABLE
 #include "can/can_config.h"
@@ -179,6 +193,28 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     Button boot_button_;
     TouchButtonController touch_buttons_;
+    TouchEventHub touch_hub_;
+    TouchAppDispatcher touch_dispatcher_{&touch_hub_};
+#if DEEP_DOG_TOUCH_COMBO_ENABLE
+    TouchComboRecognizer touch_combo_;
+#endif
+#if DEEP_DOG_TOUCH_APP_LOG_ENABLE
+    TouchAppLog touch_app_log_;
+#endif
+#if DEEP_DOG_DOG_ENABLE
+    DogControl dog_;
+#if DEEP_DOG_TOUCH_APP_DOG_ENABLE
+    TouchAppDog touch_app_dog_{&dog_};
+#endif
+    LegControl* leg_ptrs_[4] = { nullptr };
+#else
+#if DEEP_DOG_TOUCH_APP_DOG_ENABLE
+    TouchAppDog touch_app_dog_{};
+#endif
+#endif
+#if DEEP_DOG_TOUCH_APP_SERVO_ENABLE
+    TouchAppServo touch_app_servo_;
+#endif
     Display* display_ = nullptr;
     EspVideo* camera_ = nullptr;
 #if DEEP_DOG_MOTOR_ENABLE
@@ -186,13 +222,6 @@ private:
 #endif
 #if DEEP_DOG_CAN_ENABLE && DEEP_DOG_MOTOR_ENABLE
     TaskHandle_t can_rx_task_handle_ = nullptr;
-#endif
-#if DEEP_DOG_DOG_ENABLE
-    DogControl dog_;
-    DeepDogTouchApp touch_app_{&dog_};
-    LegControl* leg_ptrs_[4] = { nullptr };
-#else
-    DeepDogTouchApp touch_app_{};
 #endif
 #if DEEP_DOG_GIMBAL_ENABLE
     Gimbal_t gimbal_{};
@@ -388,6 +417,31 @@ private:
     }
 
     void InitializeTouchButtons() {
+        if (!touch_hub_.Init()) {
+            ESP_LOGE(TAG, "TouchEventHub init failed");
+            return;
+        }
+
+#if DEEP_DOG_TOUCH_COMBO_ENABLE
+        touch_dispatcher_.SetComboRecognizer(&touch_combo_);
+#if DEEP_DOG_MQTT_ENABLE
+        touch_dispatcher_.SetComboHitListener([this](const char* id) {
+            if (board_mqtt_) {
+                board_mqtt_->NotifyTouchCombo(id);
+            }
+        });
+#endif
+#endif
+#if DEEP_DOG_TOUCH_APP_LOG_ENABLE
+        touch_dispatcher_.Register(&touch_app_log_);
+#endif
+#if DEEP_DOG_TOUCH_APP_DOG_ENABLE
+        touch_dispatcher_.Register(&touch_app_dog_);
+#endif
+#if DEEP_DOG_TOUCH_APP_SERVO_ENABLE
+        touch_dispatcher_.Register(&touch_app_servo_);
+#endif
+
         if (!touch_buttons_.Initialize(
                 TOUCH_BUTTON1_GPIO, TOUCH_BUTTON2_GPIO, TOUCH_BUTTON3_GPIO,
                 [this](int button_id,
@@ -395,9 +449,21 @@ private:
                        uint32_t value,
                        uint32_t baseline,
                        uint32_t abs_diff) {
-                    touch_app_.OnTouchEvent(button_id, event, value, baseline, abs_diff);
+                    TouchEvent ev;
+                    ev.button_id = button_id;
+                    ev.event = event;
+                    ev.value = value;
+                    ev.baseline = baseline;
+                    ev.abs_diff = abs_diff;
+                    ev.pressed_mask = touch_buttons_.GetPressedMask();
+                    touch_hub_.Push(ev);
                 })) {
             ESP_LOGE(TAG, "Touch button controller init failed");
+            return;
+        }
+
+        if (!touch_dispatcher_.StartPeriodic(DEEP_DOG_TOUCH_DISPATCH_INTERVAL_US)) {
+            ESP_LOGE(TAG, "TouchAppDispatcher timer start failed");
         }
     }
 
@@ -511,7 +577,9 @@ private:
             camera_->SetHMirror(camera_flipped);
             camera_->SetVFlip(camera_flipped);
         }
-        touch_app_.SetCamera(camera_);
+#if DEEP_DOG_TOUCH_APP_DOG_ENABLE
+        touch_app_dog_.SetCamera(camera_);
+#endif
 #if DEEP_DOG_VISION_HUB_ENABLE
         vision_hub_ = std::make_unique<VisionFrameHub>(camera_);
 #endif
@@ -528,6 +596,11 @@ private:
 #endif
 #if DEEP_DOG_MQTT_ENABLE
         board_mqtt_ = std::make_unique<DeepDogMqtt>();
+        board_mqtt_->SetTouchHub(&touch_hub_);
+        board_mqtt_->SetTouchController(&touch_buttons_);
+#if DEEP_DOG_TOUCH_COMBO_ENABLE
+        board_mqtt_->SetTouchComboRecognizer(&touch_combo_);
+#endif
 #if DEEP_DOG_VISION_HUB_ENABLE
         board_mqtt_->SetVisionHub(vision_hub_.get());
 #endif
