@@ -9,6 +9,7 @@
 #include "mqtt/modules/track_mqtt.h"
 #include "mqtt/modules/touch_mqtt.h"
 #include "mqtt/modules/led_mqtt.h"
+#include "mqtt/modules/servo_mqtt.h"
 #include "touch_btn/touch_event_hub.h"
 #include "led/led_strip_control.h"
 
@@ -37,6 +38,7 @@ struct DeepDogMqtt::Impl {
     DeepDogTrackMqtt track{&client};
     DeepDogTouchMqtt touch{&client};
     DeepDogLedMqtt led{&client};
+    DeepDogServoMqtt servo{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
     TouchEventHub* touch_hub = nullptr;
@@ -61,6 +63,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         track.OnConnected();
         touch.OnConnected();
         led.OnConnected();
+        servo.OnConnected();
     } else {
         device.OnDisconnected();
         stream.OnDisconnected();
@@ -69,6 +72,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         track.OnDisconnected();
         touch.OnDisconnected();
         led.OnDisconnected();
+        servo.OnDisconnected();
     }
 }
 
@@ -78,6 +82,7 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     track.OnMessage(topic, payload);
     led.OnMessage(topic, payload);
     touch.OnMessage(topic, payload);
+    servo.OnMessage(topic, payload);
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
@@ -264,6 +269,7 @@ bool DeepDogMqtt::Start() {
     impl_->touch.SetHub(impl_->touch_hub);
     impl_->touch.SetController(impl_->touch_ctrl);
     impl_->led.SetEnabled(caps.led);
+    impl_->servo.SetEnabled(caps.servo);
 
     impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
     impl_->client.SetMessageCallback(
@@ -272,8 +278,9 @@ bool DeepDogMqtt::Start() {
     const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
     const bool ok = impl_->client.Start(settings);
     impl_->started = true;
-    ESP_LOGI(TAG, "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d", ok ? 1 : 0,
-             caps.stream ? 1 : 0, caps.face ? 1 : 0, caps.track ? 1 : 0, caps.imu ? 1 : 0, caps.led ? 1 : 0);
+    ESP_LOGI(TAG, "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d servo=%d",
+             ok ? 1 : 0, caps.stream ? 1 : 0, caps.face ? 1 : 0, caps.track ? 1 : 0, caps.imu ? 1 : 0,
+             caps.led ? 1 : 0, caps.servo ? 1 : 0);
     return ok;
 }
 
@@ -281,6 +288,7 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
+    impl_->servo.Stop();
     impl_->led.Stop();
     impl_->touch.Stop();
     impl_->track.Stop();

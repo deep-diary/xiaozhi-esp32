@@ -94,10 +94,10 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
   "http_port": 8080,
   "reset_reason": "poweron",
   "power": { "supported": false },
-  "ext_pins": { "mode": "none", "gpio_a": 38, "gpio_b": 48 },
+  "ext_pins": { "mode": "pwm", "gpio_a": 38, "gpio_b": 48 },
   "capabilities": {
     "dog": false, "motor": false, "stream": true, "face": true, "track": true, "imu": true,
-    "led": false, "servo": false, "gimbal": false,
+    "led": false, "servo": true, "gimbal": false,
     "handle": false, "touch": true, "can": false, "arm": false, "uart": false
   },
   "ts": 1710000000,
