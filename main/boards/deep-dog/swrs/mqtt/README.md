@@ -20,7 +20,7 @@
 | 08 | [led](./modules/08-led.md) |
 | 09 | [gimbal](./modules/09-gimbal.md)（V-C04） |
 | 10 | [servo](./modules/10-servo.md) |
-| 11 | [handle](./modules/11-handle.md) |
+| 11 | [handle](./modules/11-handle.md)（双源；架构见 [../input/](../input/)） |
 | 12 | [can](./modules/12-can.md) |
 | 13 | [person](./modules/13-person.md) |
 

@@ -63,8 +63,12 @@ modules:
   handle:
     status: defined
     required: false
-    note: "Skeleton; axis map may patch in 0.1.x after hardware pick"
-    ref: main/boards/deep-diary/handle/
+    note: >
+      Dual-source v0.1: onboard Bluepad32+Xbox BLE (source=bt) and PC MQTT
+      bridge (source=wifi, handle/input). Hub+App layering in swrs/input/;
+      firmware planned (needs OTA partition headroom for BLE).
+    ref: main/boards/deep-dog/swrs/input/
+    impl: modules/11-handle
   touch:
     status: defined
     required: false
@@ -503,13 +507,50 @@ topics:
       ts: { type: int }
 
   # ---- handle ----
+  # Snapshot fields (status uplink + input downlink) share the same shape.
   handle/cmd:
     module: handle
     dir: downlink
     qos: 1
     retain: false
+    note: "enable/disable gate local HandleApps; pair is onboard BT only"
     payload:
       action: { type: enum, values: [enable, disable, pair] }
+      ts: { type: int }
+
+  handle/input:
+    module: handle
+    dir: downlink
+    qos: 0
+    retain: false
+    when: on_change_or_poll
+    note: >
+      PC/web injects control snapshot (PS4/Xbox bridge). Device merges into
+      HandleEventHub; last-writer-wins. Prefer source=wifi. See swrs/input/I03.
+    payload:
+      connected: { type: bool }
+      source: { type: enum, values: [bt, usb, wifi], optional: true, note: "bridge should set wifi" }
+      axes:
+        type: object
+        fields:
+          lx: { type: float, range: [-1, 1] }
+          ly: { type: float, range: [-1, 1] }
+          rx: { type: float, range: [-1, 1] }
+          ry: { type: float, range: [-1, 1] }
+      buttons:
+        type: object
+        fields:
+          a: { type: bool }
+          b: { type: bool }
+          x: { type: bool }
+          y: { type: bool }
+          l1: { type: bool }
+          r1: { type: bool }
+          l2: { type: float, range: [0, 1] }
+          r2: { type: float, range: [0, 1] }
+          start: { type: bool }
+          select: { type: bool }
+      raw: { type: object, optional: true }
       ts: { type: int }
 
   handle/status:
@@ -518,7 +559,9 @@ topics:
     qos: 0
     retain: false
     when: on_change_or_poll
-    note: "Reports actual control request values for web/actuators"
+    note: >
+      Merged control request after Hub normalize (bt and/or wifi input).
+      Web UI read-only viz; actuators consume via HandleApps not this topic alone.
     payload:
       connected: { type: bool }
       source: { type: enum, values: [bt, usb, wifi], optional: true }

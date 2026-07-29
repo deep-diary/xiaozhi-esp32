@@ -24,6 +24,21 @@
 #include "touch_btn/apps/touch_app_servo.h"
 #endif
 
+#include "handle/handle_config.h"
+#if DEEP_DOG_HANDLE_ENABLE
+#include "handle/handle_event_hub.h"
+#include "handle/handle_app_dispatcher.h"
+#if DEEP_DOG_HANDLE_APP_LOG_ENABLE
+#include "handle/apps/handle_app_log.h"
+#endif
+#if DEEP_DOG_HANDLE_APP_DOG_ENABLE
+#include "handle/apps/handle_app_dog.h"
+#endif
+#if DEEP_DOG_HANDLE_APP_SERVO_ENABLE
+#include "handle/apps/handle_app_servo.h"
+#endif
+#endif
+
 #if DEEP_DOG_CAN_ENABLE
 #include "can/can_config.h"
 #include "can/ESP32-TWAI-CAN.hpp"
@@ -216,6 +231,23 @@ private:
 #endif
 #if DEEP_DOG_TOUCH_APP_SERVO_ENABLE
     TouchAppServo touch_app_servo_;
+#endif
+#if DEEP_DOG_HANDLE_ENABLE
+    HandleEventHub handle_hub_;
+    HandleAppDispatcher handle_dispatcher_{&handle_hub_};
+#if DEEP_DOG_HANDLE_APP_LOG_ENABLE
+    HandleAppLog handle_app_log_;
+#endif
+#if DEEP_DOG_HANDLE_APP_DOG_ENABLE
+#if DEEP_DOG_DOG_ENABLE
+    HandleAppDog handle_app_dog_{&dog_, &handle_hub_};
+#else
+    HandleAppDog handle_app_dog_{&handle_hub_};
+#endif
+#endif
+#if DEEP_DOG_HANDLE_APP_SERVO_ENABLE
+    HandleAppServo handle_app_servo_;
+#endif
 #endif
     Display* display_ = nullptr;
     EspVideo* camera_ = nullptr;
@@ -475,6 +507,29 @@ private:
         }
     }
 
+#if DEEP_DOG_HANDLE_ENABLE
+    void InitializeHandle() {
+        if (!handle_hub_.Init()) {
+            ESP_LOGE(TAG, "HandleEventHub init failed");
+            return;
+        }
+#if DEEP_DOG_HANDLE_APP_LOG_ENABLE
+        handle_dispatcher_.Register(&handle_app_log_);
+#endif
+#if DEEP_DOG_HANDLE_APP_DOG_ENABLE
+        handle_dispatcher_.Register(&handle_app_dog_);
+#endif
+#if DEEP_DOG_HANDLE_APP_SERVO_ENABLE
+        handle_dispatcher_.Register(&handle_app_servo_);
+#endif
+        if (!handle_dispatcher_.StartPeriodic(DEEP_DOG_HANDLE_DISPATCH_INTERVAL_US)) {
+            ESP_LOGE(TAG, "HandleAppDispatcher timer start failed");
+        }
+        ESP_LOGI(TAG, "Handle input ready (BT=%d mqtt_input=%d)",
+                 DEEP_DOG_HANDLE_BT_ENABLE, DEEP_DOG_HANDLE_MQTT_INPUT_ENABLE);
+    }
+#endif
+
     void InitializeDisplay() {
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         esp_lcd_panel_handle_t panel = nullptr;
@@ -606,6 +661,9 @@ private:
         board_mqtt_ = std::make_unique<DeepDogMqtt>();
         board_mqtt_->SetTouchHub(&touch_hub_);
         board_mqtt_->SetTouchController(&touch_buttons_);
+#if DEEP_DOG_HANDLE_ENABLE
+        board_mqtt_->SetHandleHub(&handle_hub_);
+#endif
 #if DEEP_DOG_TOUCH_COMBO_ENABLE
         board_mqtt_->SetTouchComboRecognizer(&touch_combo_);
 #endif
@@ -671,6 +729,9 @@ public:
         InitializeDisplay();
         InitializeButtons();
         InitializeTouchButtons();
+#if DEEP_DOG_HANDLE_ENABLE
+        InitializeHandle();
+#endif
         InitializeCamera();
         InitializeExtPinModules();
 #if DEEP_DOG_MQTT_ENABLE && DEEP_DOG_LED_ENABLE

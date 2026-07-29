@@ -11,6 +11,7 @@ class DeepDogImuSwitch;
 class TouchEventHub;
 class TouchButtonController;
 class TouchComboRecognizer;
+class HandleEventHub;
 class LedStripControl;
 
 /**
@@ -33,6 +34,7 @@ public:
     /** 组合命中后补发 touch/status（含 last_combo） */
     void NotifyTouchCombo(const char* combo_id);
     void SetLedControl(LedStripControl* ctrl);
+    void SetHandleHub(HandleEventHub* hub);
 
     bool Start();
     void Stop();

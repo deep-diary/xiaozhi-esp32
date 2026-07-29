@@ -69,6 +69,9 @@
 #ifndef DEEP_DOG_LED_ENABLE
 #define DEEP_DOG_LED_ENABLE 1
 #endif
+#ifndef DEEP_DOG_HANDLE_ENABLE
+#define DEEP_DOG_HANDLE_ENABLE 1
+#endif
 
 /* -------- 依赖钳位 -------- */
 #if !DEEP_DOG_CAN_AVAILABLE

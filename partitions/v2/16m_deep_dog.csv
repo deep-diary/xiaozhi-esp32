@@ -1,10 +1,18 @@
 # ESP-IDF Partition Table (deep-dog: OTA + face detect/recog + assets)
 # Name,   Type, SubType, Offset,  Size, Flags
+# 2026-07: ota_* enlarged (+512KiB each) from assets (-1MiB) for handle/BLE headroom.
+# Changing this table requires full flash erase / re-flash of the partition table before OTA.
+#
+# Flash budget (16 MiB):
+#   ota_0/ota_1:  0x5a0000 (~5.625 MiB) each
+#   human_face_feat: 2 MiB
+#   facedb: 0.5 MiB
+#   assets: 0x220000 (~2.125 MiB)
 nvs,      data, nvs,     0x9000,    0x4000,
 otadata,  data, ota,     0xd000,    0x2000,
 phy_init, data, phy,     0xf000,    0x1000,
-ota_0,    app,  ota_0,   0x20000,   0x520000,
-ota_1,    app,  ota_1,   ,          0x520000,
+ota_0,    app,  ota_0,   0x20000,   0x5a0000,
+ota_1,    app,  ota_1,   ,          0x5a0000,
 human_face_feat, data, spiffs, ,    0x200000,
 facedb,   data, fat,     ,          0x80000,
-assets,   data, spiffs,  ,          0x320000
+assets,   data, spiffs,  ,          0x220000

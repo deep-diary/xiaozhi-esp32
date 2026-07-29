@@ -8,9 +8,12 @@
 #include "mqtt/modules/face_mqtt.h"
 #include "mqtt/modules/track_mqtt.h"
 #include "mqtt/modules/touch_mqtt.h"
+#include "mqtt/modules/handle_mqtt.h"
 #include "mqtt/modules/led_mqtt.h"
 #include "mqtt/modules/servo_mqtt.h"
 #include "touch_btn/touch_event_hub.h"
+#include "handle/handle_event_hub.h"
+#include "handle/handle_config.h"
 #include "led/led_strip_control.h"
 
 #include "config.h"
@@ -37,12 +40,14 @@ struct DeepDogMqtt::Impl {
     DeepDogFaceMqtt face{&client};
     DeepDogTrackMqtt track{&client};
     DeepDogTouchMqtt touch{&client};
+    DeepDogHandleMqtt handle{&client};
     DeepDogLedMqtt led{&client};
     DeepDogServoMqtt servo{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
     TouchEventHub* touch_hub = nullptr;
     TouchButtonController* touch_ctrl = nullptr;
+    HandleEventHub* handle_hub = nullptr;
 #if DEEP_DOG_IMU_ENABLE
     DeepDogImuSensor* imu_sensor = nullptr;
     DeepDogImuSwitch* imu_switch = nullptr;
@@ -62,6 +67,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         face.OnConnected();
         track.OnConnected();
         touch.OnConnected();
+        handle.OnConnected();
         led.OnConnected();
         servo.OnConnected();
     } else {
@@ -71,6 +77,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         face.OnDisconnected();
         track.OnDisconnected();
         touch.OnDisconnected();
+        handle.OnDisconnected();
         led.OnDisconnected();
         servo.OnDisconnected();
     }
@@ -82,6 +89,7 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     track.OnMessage(topic, payload);
     led.OnMessage(topic, payload);
     touch.OnMessage(topic, payload);
+    handle.OnMessage(topic, payload);
     servo.OnMessage(topic, payload);
 }
 
@@ -90,6 +98,9 @@ DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
 DeepDogMqtt::~DeepDogMqtt() {
     if (impl_ && impl_->touch_hub) {
         impl_->touch_hub->SetPushListener(nullptr);
+    }
+    if (impl_ && impl_->handle_hub) {
+        impl_->handle_hub->SetPushListener(nullptr);
     }
     Stop();
 }
@@ -180,6 +191,24 @@ void DeepDogMqtt::SetLedControl(LedStripControl* ctrl) {
     }
 }
 
+void DeepDogMqtt::SetHandleHub(HandleEventHub* hub) {
+    if (!impl_) {
+        return;
+    }
+    if (impl_->handle_hub && impl_->handle_hub != hub) {
+        impl_->handle_hub->SetPushListener(nullptr);
+    }
+    impl_->handle_hub = hub;
+    impl_->handle.SetHub(hub);
+    if (hub) {
+        hub->SetPushListener([this](const HandleSnapshot& snap) {
+            if (impl_) {
+                impl_->handle.OnSnapshot(snap);
+            }
+        });
+    }
+}
+
 bool DeepDogMqtt::IsRunning() const {
     return impl_ && impl_->started;
 }
@@ -251,7 +280,11 @@ bool DeepDogMqtt::Start() {
 #else
     caps.gimbal = false;
 #endif
+#if DEEP_DOG_HANDLE_ENABLE
+    caps.handle = true;
+#else
     caps.handle = false;
+#endif
 
     impl_->device.SetCapabilities(caps);
     impl_->device.SetHttpPort(impl_->http_port);
@@ -268,6 +301,8 @@ bool DeepDogMqtt::Start() {
     impl_->touch.SetEnabled(caps.touch);
     impl_->touch.SetHub(impl_->touch_hub);
     impl_->touch.SetController(impl_->touch_ctrl);
+    impl_->handle.SetEnabled(caps.handle);
+    impl_->handle.SetHub(impl_->handle_hub);
     impl_->led.SetEnabled(caps.led);
     impl_->servo.SetEnabled(caps.servo);
 
@@ -278,9 +313,10 @@ bool DeepDogMqtt::Start() {
     const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
     const bool ok = impl_->client.Start(settings);
     impl_->started = true;
-    ESP_LOGI(TAG, "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d servo=%d",
+    ESP_LOGI(TAG,
+             "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d servo=%d handle=%d",
              ok ? 1 : 0, caps.stream ? 1 : 0, caps.face ? 1 : 0, caps.track ? 1 : 0, caps.imu ? 1 : 0,
-             caps.led ? 1 : 0, caps.servo ? 1 : 0);
+             caps.led ? 1 : 0, caps.servo ? 1 : 0, caps.handle ? 1 : 0);
     return ok;
 }
 
@@ -290,6 +326,7 @@ void DeepDogMqtt::Stop() {
     }
     impl_->servo.Stop();
     impl_->led.Stop();
+    impl_->handle.Stop();
     impl_->touch.Stop();
     impl_->track.Stop();
     impl_->face.Stop();
@@ -314,6 +351,7 @@ void DeepDogMqtt::SetTouchController(TouchButtonController*) {}
 void DeepDogMqtt::SetTouchComboRecognizer(TouchComboRecognizer*) {}
 void DeepDogMqtt::NotifyTouchCombo(const char*) {}
 void DeepDogMqtt::SetLedControl(LedStripControl*) {}
+void DeepDogMqtt::SetHandleHub(HandleEventHub*) {}
 bool DeepDogMqtt::Start() { return false; }
 void DeepDogMqtt::Stop() {}
 bool DeepDogMqtt::IsRunning() const { return false; }
