@@ -13,6 +13,15 @@ std::string DeepDogMqttConfig::TopicPrefix(const std::string& device_id) {
     return "deepdiary/deep-dog/" + device_id + "/";
 }
 
+std::string DeepDogMqttConfig::MacCompactDeviceId() {
+    uint8_t mac[6] = {};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char buf[13];
+    snprintf(buf, sizeof(buf), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4],
+             mac[5]);
+    return buf;
+}
+
 std::string DeepDogMqttConfig::DefaultClientId(const std::string& device_id) {
     uint8_t mac[6] = {};
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -26,13 +35,14 @@ DeepDogMqttSettings DeepDogMqttConfig::Load() {
     DeepDogMqttSettings s;
     s.broker_host = settings.GetString("broker_host", DEEP_DOG_MQTT_DEFAULT_BROKER_HOST);
     s.broker_port = settings.GetInt("broker_port", DEEP_DOG_MQTT_DEFAULT_BROKER_PORT);
-    s.device_id = settings.GetString("device_id", DEEP_DOG_MQTT_DEFAULT_DEVICE_ID);
+    // 空 = NVS 未配置 → 生产用 MAC 紧凑；联调可 NVS 写 "dev"
+    s.device_id = settings.GetString("device_id", "");
     s.client_id = settings.GetString("client_id", "");
     s.username = settings.GetString("username", "");
     s.password = settings.GetString("password", "");
     s.keepalive_s = settings.GetInt("keepalive_s", DEEP_DOG_MQTT_DEFAULT_KEEPALIVE_S);
     if (s.device_id.empty()) {
-        s.device_id = DEEP_DOG_MQTT_DEFAULT_DEVICE_ID;
+        s.device_id = MacCompactDeviceId();
     }
     if (s.client_id.empty()) {
         s.client_id = DefaultClientId(s.device_id);

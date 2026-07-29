@@ -37,12 +37,14 @@
 - 设备：`mqtt://192.168.31.25:1883`
 - 网页：`wss://mqtt-ws.deep-diary.com/mqtt`
 - 前缀：`deepdiary/deep-dog/{device_id}/`
+- **默认 `device_id`**：STA MAC 紧凑串（小写无冒号）；NVS 可覆盖为 `dev` 仅联调。见 [00-pairing](./modules/00-pairing.md)。
 - cmd QoS=1；status QoS=0；部分 status retain（见 YAML）
 
 ## 5. 模块索引（前端推荐顺序）
 
 | 顺序 | module_id | 文档 | 契约 |
 |------|-----------|------|------|
+| — | pairing | [00-pairing](./modules/00-pairing.md) | defined；**无 Hub 卡**；网页添加设备用 |
 | 页头 | device | [01-device](./modules/01-device.md) | ready |
 | 1 | stream | [02-stream](./modules/02-stream.md)（V-C03；含 face/track overlay UI） | ready |
 | 2 | imu | [03-imu](./modules/03-imu.md) | ready / D9 |
@@ -68,6 +70,7 @@
 
 ```text
 deepdiary/deep-dog/{device_id}/
+├── pairing/status|cmd
 ├── device/info|status
 ├── stream|face|dog|led|servo|gimbal|handle  …/cmd|status
 ├── imu/status · touch/status

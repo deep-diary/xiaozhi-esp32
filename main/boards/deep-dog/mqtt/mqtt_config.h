@@ -22,7 +22,11 @@
 #define DEEP_DOG_MQTT_DEFAULT_BROKER_PORT 1883
 #endif
 
-/** Topic 前缀中的 device_id；与 RTSP path deep-dog/<id> 对齐 */
+/**
+ * Topic 前缀中的 device_id；与 RTSP path deep-dog/<id> 对齐。
+ * 生产默认：NVS 未写 device_id 时用 STA MAC 紧凑串（见 Load）。
+ * 本宏仅作文档/联调说明；联调可在 NVS 写入 "dev"。
+ */
 #ifndef DEEP_DOG_MQTT_DEFAULT_DEVICE_ID
 #define DEEP_DOG_MQTT_DEFAULT_DEVICE_ID "dev"
 #endif
@@ -69,4 +73,6 @@ public:
     static void Save(const DeepDogMqttSettings& s);
     static std::string TopicPrefix(const std::string& device_id);
     static std::string DefaultClientId(const std::string& device_id);
+    /** STA MAC 紧凑小写无冒号，如 aabbccddeeff */
+    static std::string MacCompactDeviceId();
 };

@@ -10,6 +10,7 @@
 
 | 顺序 | 模块文档 |
 |------|----------|
+| 00 | [pairing](./modules/00-pairing.md)（添加设备 / MAC `device_id`；无 Hub 卡） |
 | 01 | [device](./modules/01-device.md) |
 | 02 | [stream](./modules/02-stream.md)（V-C03） |
 | 03 | [imu](./modules/03-imu.md) |
@@ -41,8 +42,8 @@ Broker 地址：[vision/infra.md](../vision/infra.md)。推流能力依赖 [C02]
 
 源码：`main/boards/deep-dog/mqtt/`（`DEEP_DOG_MQTT_ENABLE`，默认 1）。
 
-NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password`。  
-默认 broker `192.168.31.25:1883`，`device_id=dev`，Topic 前缀 `deepdiary/deep-dog/dev/`。
+NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password` /（规划）`bound`。  
+默认 broker `192.168.31.25:1883`。**生产默认 `device_id` = STA MAC 紧凑串**（如 `aabbccddeeff`）；NVS 显式写入 `dev` 仅用于联调，前缀则为 `deepdiary/deep-dog/dev/`。配对见 [00-pairing](./modules/00-pairing.md)。
 
 ### MQTTX / 脚本验收清单
 
@@ -58,13 +59,14 @@ NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` /
 ```
 
 1. 连接外网 WSS（或局域网 `192.168.31.25:1883`）。
-2. 订阅 `deepdiary/deep-dog/dev/device/info` → retain 可见 capabilities / ip / firmware。
-3. 订阅 `…/device/status` → 约 5s 心跳。
-4. 订阅 `…/stream/status`；向 `…/stream/cmd` 发 QoS1：
+2. 订阅 `deepdiary/deep-dog/{device_id}/device/info`（联调可用 `dev`）→ retain 可见 capabilities / ip / firmware。
+3. 未绑定设备另订 `…/pairing/status` → retain 含 6 位 `code`；向 `…/pairing/cmd` 发 `{"action":"bound","ts":…}` 可模拟后端确认。
+4. 订阅 `…/device/status` → 约 5s 心跳。
+5. 订阅 `…/stream/status`；向 `…/stream/cmd` 发 QoS1：
    - `{"action":"start","ts":1710000000}` → status 进入 starting/streaming，MediaMTX 可拉。
    - `{"action":"stop","ts":1710000000}` → idle/off。
-5. 发非法 `{"action":"nope"}` → 设备不重启，status.error 非空。
-6. 断网重连后 info/status 重新 retain，stream/cmd 仍可控制。
+6. 发非法 `{"action":"nope"}` → 设备不重启，status.error 非空。
+7. 断网重连后 info/status 重新 retain，stream/cmd 仍可控制。
 
 Face / Track（同页联调）：
 

@@ -3,6 +3,7 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/modules/device_mqtt.h"
+#include "mqtt/modules/pairing_mqtt.h"
 #include "mqtt/modules/stream_mqtt.h"
 #include "mqtt/modules/imu_mqtt.h"
 #include "mqtt/modules/face_mqtt.h"
@@ -32,6 +33,7 @@
 struct DeepDogMqtt::Impl {
     DeepDogMqttClient client;
     DeepDogDeviceMqtt device{&client};
+    DeepDogPairingMqtt pairing{&client};
     DeepDogStreamMqtt stream{&client};
     DeepDogImuMqtt imu{&client};
     DeepDogFaceMqtt face{&client};
@@ -57,6 +59,7 @@ struct DeepDogMqtt::Impl {
 void DeepDogMqtt::Impl::OnConnection(bool connected) {
     if (connected) {
         device.OnConnected();
+        pairing.OnConnected();
         stream.OnConnected();
         imu.OnConnected();
         face.OnConnected();
@@ -66,6 +69,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         servo.OnConnected();
     } else {
         device.OnDisconnected();
+        pairing.OnDisconnected();
         stream.OnDisconnected();
         imu.OnDisconnected();
         face.OnDisconnected();
@@ -77,6 +81,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
 }
 
 void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& payload) {
+    pairing.OnMessage(topic, payload);
     stream.OnMessage(topic, payload);
     face.OnMessage(topic, payload);
     track.OnMessage(topic, payload);
@@ -295,6 +300,7 @@ void DeepDogMqtt::Stop() {
     impl_->face.Stop();
     impl_->imu.Stop();
     impl_->stream.Stop();
+    impl_->pairing.Stop();
     impl_->device.Stop();
     impl_->client.Stop();
     impl_->started = false;
