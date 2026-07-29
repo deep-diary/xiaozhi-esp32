@@ -42,9 +42,9 @@
 #define DEEP_DOG_HANDLE_INPUT_TIMEOUT_MS 500
 #endif
 
-/** status 发布最小间隔（ms） */
+/** status 发布最小间隔（ms）；过小易打满 Wi‑Fi，过大前端发粘 */
 #ifndef DEEP_DOG_HANDLE_STATUS_MIN_INTERVAL_MS
-#define DEEP_DOG_HANDLE_STATUS_MIN_INTERVAL_MS 50
+#define DEEP_DOG_HANDLE_STATUS_MIN_INTERVAL_MS 25
 #endif
 
 /** 左摇杆死区 */

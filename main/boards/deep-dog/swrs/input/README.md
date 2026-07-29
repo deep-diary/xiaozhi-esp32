@@ -24,8 +24,11 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 |------|------|
 | [I01-architecture](./I01-architecture.md) | Hub / Dispatcher / App；与 touch 对照 |
 | [I02-source-bluepad32-xbox](./I02-source-bluepad32-xbox.md) | 板载 Xbox；Flash/RAM；分区（已扩 OTA） |
-| [I03-source-pc-mqtt-bridge](./I03-source-pc-mqtt-bridge.md) | PC→MQTT 桥（含脚本用法） |
+| [I03-source-pc-mqtt-bridge](./I03-source-pc-mqtt-bridge.md) | PC→MQTT 桥；**PS4 HID 对照表 + 极性** |
 | [I04-apps-mapping](./I04-apps-mapping.md) | App 启用与键位映射 |
+| [I05-mqtt-message-examples](./I05-mqtt-message-examples.md) | **三段报文展开** · 触控板说明 · Xbox/PS4 异同 |
+| [I06-touchpad-xy](./I06-touchpad-xy.md) | **触控板 XY 扩展（planned）**：hidapi + 契约 + 前端 |
+| [assets/ps4-hid-map.png](./assets/ps4-hid-map.png) | DualShock 4 实测标注（Linux） |
 
 ## 边界
 

@@ -2,7 +2,7 @@
 """PC gamepad → MQTT handle/input bridge for deep-dog.
 
 Reads a local controller (PS4 / Xbox / generic via pygame) and publishes
-snapshots to deepdiary/deep-dog/{device_id}/handle/input.
+normalized snapshots to deepdiary/deep-dog/{device_id}/handle/input.
 
 Dependencies:
   pip3 install paho-mqtt pygame
@@ -12,9 +12,19 @@ Credentials (do not commit):
   export DEEP_DOG_MQTT_PASS=...
 
 Examples:
-  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan
-  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via web --hz 20
+  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --layout auto
+  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --layout ds4_sdl
   /usr/bin/python3 scripts/deep_dog_handle_bridge.py --list-joysticks
+  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --probe
+  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
+
+Profiles:
+  ds4_sdl   — pygame 2.x「PS4 Controller」(macOS/Windows 常见)：轴 0-3 摇杆、4-5 扳机
+  ds4_linux — Linux HID 标注图（L2 在 axis2；面键 △=2 □=3）
+  xbox      — 常见 XInput
+  auto      — 按名称 / 空闲轴启发式选择
+
+抽象极性（I01）：lx/rx 右为正；ly/ry 下为正（前推 ly<0）。
 """
 
 from __future__ import annotations
@@ -44,6 +54,8 @@ WEB_WSS_DEFAULT = "wss://mqtt-ws.deep-diary.com/mqtt"
 LAN_HOST_DEFAULT = "192.168.31.25"
 LAN_PORT_DEFAULT = 1883
 
+LAYOUT_CHOICES = ("auto", "ds4_sdl", "ds4_linux", "ds4", "xbox")
+
 
 def ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
@@ -68,47 +80,156 @@ def axis_deadzone(v: float, dz: float = 0.08) -> float:
     return 0.0 if abs(v) < dz else clamp(v, -1.0, 1.0)
 
 
-def read_snapshot(joy: pygame.joystick.Joystick) -> dict:
-    """Map pygame joystick to deep-dog handle snapshot (best-effort for PS4/Xbox)."""
+def detect_layout(joy: pygame.joystick.Joystick, explicit: str = "auto") -> str:
+    """Pick HID profile. `ds4` is alias for ds4_sdl (pygame2 官方表)."""
+    if explicit == "ds4":
+        return "ds4_sdl"
+    if explicit in ("ds4_sdl", "ds4_linux", "xbox"):
+        return explicit
+
+    name = (joy.get_name() or "").lower()
+    n_axes = joy.get_numaxes()
+    n_buttons = joy.get_numbuttons()
+    pygame.event.pump()
+    idle = [joy.get_axis(i) if i < n_axes else 0.0 for i in range(min(n_axes, 8))]
+
+    if any(k in name for k in ("xbox", "x-box", "xinput", "360")):
+        return "xbox"
+
+    # 扳机静置 ≈ -1：若 axis4/5 是扳机而 axis2≈0 → pygame2 SDL 布局
+    if n_axes >= 6 and n_buttons >= 14:
+        a2 = abs(idle[2]) if len(idle) > 2 else 0
+        a4 = idle[4] if len(idle) > 4 else 0
+        if a2 < 0.25 and a4 < -0.5:
+            return "ds4_sdl"
+        if a2 < -0.5:
+            return "ds4_linux"
+
+    if "wireless controller" in name or "dualshock" in name or "dualsense" in name:
+        return "ds4_linux" if n_axes >= 8 else "ds4_sdl"
+
+    if "ps4" in name or "ps5" in name:
+        return "ds4_sdl"
+
+    return "ds4_sdl"
+
+
+def read_snapshot(joy: pygame.joystick.Joystick, layout: str) -> dict:
+    """Map pygame joystick → deep-dog abstract snapshot."""
     pygame.event.pump()
     n_axes = joy.get_numaxes()
     n_buttons = joy.get_numbuttons()
+    n_hats = joy.get_numhats()
 
-    def ax(i: int) -> float:
-        return axis_deadzone(joy.get_axis(i)) if i < n_axes else 0.0
+    def raw_ax(i: int) -> float:
+        return joy.get_axis(i) if i < n_axes else 0.0
 
     def btn(i: int) -> bool:
         return bool(joy.get_button(i)) if i < n_buttons else False
 
-    # Common layouts: 0/1 left stick, 2/3 right stick (Xbox / many DS4 via pygame)
-    lx, ly = ax(0), ax(1)
-    rx, ry = ax(2), ax(3)
-    # Some DS4 expose triggers as axes 4/5
-    l2 = clamp((ax(4) + 1.0) * 0.5, 0.0, 1.0) if n_axes > 4 else (1.0 if btn(6) else 0.0)
-    r2 = clamp((ax(5) + 1.0) * 0.5, 0.0, 1.0) if n_axes > 5 else (1.0 if btn(7) else 0.0)
+    def trigger01(axis_i: int) -> float:
+        if axis_i >= n_axes:
+            return 0.0
+        return clamp((raw_ax(axis_i) + 1.0) * 0.5, 0.0, 1.0)
 
-    # Button indices vary; these match many Xbox / DualShock pygame mappings
+    ps = l3 = r3 = touch = False
+    dx = dy = 0.0
+
+    if layout == "xbox":
+        lx = axis_deadzone(raw_ax(0))
+        ly = axis_deadzone(raw_ax(1))
+        if n_axes >= 6:
+            rx = axis_deadzone(raw_ax(3))
+            ry = axis_deadzone(raw_ax(4))
+            l2 = trigger01(2)
+            r2 = trigger01(5)
+        else:
+            rx = axis_deadzone(raw_ax(2))
+            ry = axis_deadzone(raw_ax(3))
+            l2 = r2 = 0.0
+        a, b, x, y = btn(0), btn(1), btn(2), btn(3)
+        l1, r1 = btn(4), btn(5)
+        select, start = btn(6), btn(7)
+        ps = btn(8)
+        l3, r3 = btn(9), btn(10)
+        if n_hats > 0:
+            hx, hy = joy.get_hat(0)
+            dx, dy = float(hx), float(-hy)
+
+    elif layout == "ds4_linux":
+        # Linux 标注图：0 LX 1 LY 2 L2 3 RX 4 RY 5 R2 6/7 D-pad
+        # 原始左/上 = +1 → 取反到抽象右/下为正
+        # 键：0✕ 1○ 2△ 3□ 4 L1 5 R1 8 Share 9 Options 10 PS 11 L3 12 R3
+        lx = axis_deadzone(-raw_ax(0))
+        ly = axis_deadzone(-raw_ax(1))
+        rx = axis_deadzone(-raw_ax(3))
+        ry = axis_deadzone(-raw_ax(4))
+        l2 = trigger01(2)
+        r2 = trigger01(5)
+        a, b = btn(0), btn(1)
+        y, x = btn(2), btn(3)
+        l1, r1 = btn(4), btn(5)
+        select, start = btn(8), btn(9)
+        ps, l3, r3 = btn(10), btn(11), btn(12)
+        dx = axis_deadzone(-raw_ax(6)) if n_axes > 6 else 0.0
+        dy = axis_deadzone(-raw_ax(7)) if n_axes > 7 else 0.0
+
+    else:
+        # ds4_sdl — pygame 2 官方「PS4 Controller」表（macOS 实测）
+        # axes: 0/1 左杆 L→R U→D；2/3 右杆；4/5 L2/R2（松开-1 按下+1）
+        # buttons: 0✕ 1○ 2□ 3△ 4 Share 5 PS 6 Options 7 L3 8 R3 9 L1 10 R1
+        #          11↑ 12↓ 13← 14→ 15 Touch
+        # 极性：水平已是右为正；垂直在本机实测与抽象「下为正」相反 → ly/ry 取反
+        lx = axis_deadzone(raw_ax(0))
+        ly = axis_deadzone(-raw_ax(1))
+        rx = axis_deadzone(raw_ax(2))
+        ry = axis_deadzone(-raw_ax(3))
+        l2 = trigger01(4)
+        r2 = trigger01(5)
+        a, b = btn(0), btn(1)
+        x, y = btn(2), btn(3)  # □=x, △=y
+        select, ps, start = btn(4), btn(5), btn(6)
+        l3, r3 = btn(7), btn(8)
+        l1, r1 = btn(9), btn(10)
+        dpad_up, dpad_down = btn(11), btn(12)
+        dpad_left, dpad_right = btn(13), btn(14)
+        touch = btn(15)
+
+    if layout != "ds4_sdl":
+        dpad_up = dy < -0.5
+        dpad_down = dy > 0.5
+        dpad_left = dx < -0.5
+        dpad_right = dx > 0.5
+
     return {
         "connected": True,
         "source": "wifi",
         "axes": {"lx": lx, "ly": ly, "rx": rx, "ry": ry},
         "buttons": {
-            "a": btn(0),
-            "b": btn(1),
-            "x": btn(2),
-            "y": btn(3),
-            "l1": btn(4),
-            "r1": btn(5),
+            "a": a,
+            "b": b,
+            "x": x,
+            "y": y,
+            "l1": l1,
+            "r1": r1,
             "l2": l2,
             "r2": r2,
-            "select": btn(8),
-            "start": btn(9),
+            "select": select,
+            "start": start,
+            "ps": ps,
+            "l3": l3,
+            "r3": r3,
+            "touch": touch,
+            "dpad_up": dpad_up,
+            "dpad_down": dpad_down,
+            "dpad_left": dpad_left,
+            "dpad_right": dpad_right,
         },
         "ts": int(time.time()),
     }
 
 
-def snapshot_equal(a: dict | None, b: dict | None, eps: float = 0.04) -> bool:
+def snapshot_equal(a: dict | None, b: dict | None, eps: float = 0.02) -> bool:
     if a is None or b is None:
         return False
     if a.get("connected") != b.get("connected"):
@@ -118,13 +239,133 @@ def snapshot_equal(a: dict | None, b: dict | None, eps: float = 0.04) -> bool:
         if abs(float(aa.get(k, 0)) - float(ba.get(k, 0))) > eps:
             return False
     ab, bb = a.get("buttons", {}), b.get("buttons", {})
-    for k in ("a", "b", "x", "y", "l1", "r1", "start", "select"):
+    for k in (
+        "a", "b", "x", "y", "l1", "r1", "start", "select", "ps", "l3", "r3", "touch",
+        "dpad_up", "dpad_down", "dpad_left", "dpad_right",
+    ):
         if bool(ab.get(k)) != bool(bb.get(k)):
             return False
     for k in ("l2", "r2"):
         if abs(float(ab.get(k, 0)) - float(bb.get(k, 0))) > eps:
             return False
     return True
+
+
+def empty_buttons() -> dict:
+    return {
+        "a": False,
+        "b": False,
+        "x": False,
+        "y": False,
+        "l1": False,
+        "r1": False,
+        "l2": 0.0,
+        "r2": 0.0,
+        "start": False,
+        "select": False,
+        "ps": False,
+        "l3": False,
+        "r3": False,
+        "touch": False,
+        "dpad_up": False,
+        "dpad_down": False,
+        "dpad_left": False,
+        "dpad_right": False,
+    }
+
+
+def offline_snapshot() -> dict:
+    return {
+        "connected": False,
+        "source": "wifi",
+        "axes": {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0},
+        "buttons": empty_buttons(),
+        "ts": int(time.time()),
+    }
+
+
+def acquire_joystick(preferred_index: int, layout_arg: str, *, hard: bool = False):
+    """Open joystick. hard=True 会 quit/init 子系统（仅在确认掉线后用）。"""
+    if hard:
+        pygame.joystick.quit()
+        pygame.joystick.init()
+        # 丢掉 quit/init 产生的 ADDED/REMOVED，避免自激循环
+        pygame.event.clear()
+    elif not pygame.joystick.get_init():
+        pygame.joystick.init()
+
+    count = pygame.joystick.get_count()
+    if count <= 0:
+        return None, None
+    idx = preferred_index if 0 <= preferred_index < count else 0
+    joy = pygame.joystick.Joystick(idx)
+    joy.init()
+    layout = detect_layout(joy, layout_arg)
+    print(
+        f"[{ts()}] joystick[{idx}] {joy.get_name()} "
+        f"layout={layout} axes={joy.get_numaxes()} buttons={joy.get_numbuttons()}"
+    )
+    pygame.event.clear()
+    return joy, layout
+
+
+def joystick_alive(joy: pygame.joystick.Joystick | None) -> bool:
+    if joy is None:
+        return False
+    try:
+        if not pygame.joystick.get_init() or pygame.joystick.get_count() <= 0:
+            return False
+        _ = joy.get_numaxes()
+        return True
+    except Exception:
+        return False
+
+
+def publish_snap(client, topic: str, snap: dict) -> None:
+    client.publish(topic, json.dumps(snap, separators=(",", ":")), qos=0, retain=False)
+
+
+def probe_joystick(index: int, seconds: float = 20.0) -> int:
+    pygame.init()
+    pygame.joystick.init()
+    if pygame.joystick.get_count() <= 0:
+        print("no joystick", file=sys.stderr)
+        return 1
+    joy = pygame.joystick.Joystick(index)
+    joy.init()
+    layout = detect_layout(joy, "auto")
+    print(
+        f"[{ts()}] probe [{index}] {joy.get_name()} "
+        f"axes={joy.get_numaxes()} buttons={joy.get_numbuttons()} hats={joy.get_numhats()} "
+        f"auto_layout={layout}"
+    )
+    pygame.event.pump()
+    idle = [round(joy.get_axis(i), 3) for i in range(joy.get_numaxes())]
+    print(f"IDLE axes: {idle}")
+    print("Press buttons / move sticks…")
+    prev_btns: set[int] = set()
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        pygame.event.pump()
+        btns = {i for i in range(joy.get_numbuttons()) if joy.get_button(i)}
+        if btns != prev_btns:
+            down = sorted(btns - prev_btns)
+            up = sorted(prev_btns - btns)
+            if down:
+                print(f"  DOWN {down}")
+            if up:
+                print(f"  UP   {up}")
+            prev_btns = btns
+        moving = {
+            i: round(joy.get_axis(i), 2)
+            for i in range(joy.get_numaxes())
+            if abs(joy.get_axis(i)) > 0.35
+        }
+        if moving:
+            print(f"  AXES {moving}")
+        time.sleep(0.05)
+    pygame.quit()
+    return 0
 
 
 def main() -> int:
@@ -137,9 +378,36 @@ def main() -> int:
     ap.add_argument("--username", default=os.environ.get("DEEP_DOG_MQTT_USER", ""))
     ap.add_argument("--password", default=os.environ.get("DEEP_DOG_MQTT_PASS", ""))
     ap.add_argument("--joystick", type=int, default=0, help="pygame joystick index")
-    ap.add_argument("--hz", type=float, default=20.0, help="max publish rate")
+    ap.add_argument(
+        "--layout",
+        choices=LAYOUT_CHOICES,
+        default="auto",
+        help="HID profile; Mac PS4 用 ds4_sdl（auto 会识别）",
+    )
+    ap.add_argument("--hz", type=float, default=40.0, help="max publish rate on change")
+    ap.add_argument(
+        "--heartbeat-ms",
+        type=int,
+        default=150,
+        help="re-publish idle snapshot at least this often (device clears after 500ms silence)",
+    )
+    ap.add_argument(
+        "--reconnect-ms",
+        type=int,
+        default=1000,
+        help="when pad missing, rescan interval (ms)",
+    )
     ap.add_argument("--list-joysticks", action="store_true")
+    ap.add_argument("--probe", action="store_true", help="print raw axes/buttons then exit")
+    ap.add_argument(
+        "--wait-pad",
+        action="store_true",
+        help="if no joystick at start, wait instead of exiting",
+    )
     args = ap.parse_args()
+
+    if args.probe:
+        return probe_joystick(args.joystick)
 
     pygame.init()
     pygame.joystick.init()
@@ -152,16 +420,12 @@ def main() -> int:
             print(f"  [{i}] {j.get_name()} axes={j.get_numaxes()} buttons={j.get_numbuttons()}")
         return 0
 
-    if count <= 0:
-        print("no joystick found; plug in PS4/Xbox (USB or OS bluetooth)", file=sys.stderr)
-        return 1
-    if args.joystick < 0 or args.joystick >= count:
-        print(f"invalid --joystick {args.joystick}; have 0..{count - 1}", file=sys.stderr)
-        return 1
-
-    joy = pygame.joystick.Joystick(args.joystick)
-    joy.init()
-    print(f"[{ts()}] using joystick[{args.joystick}] {joy.get_name()}")
+    joy, layout = acquire_joystick(args.joystick, args.layout)
+    if joy is None:
+        if not args.wait_pad:
+            print("no joystick found; plug in PS4/Xbox (or pass --wait-pad)", file=sys.stderr)
+            return 1
+        print(f"[{ts()}] no joystick yet; waiting (--wait-pad)…")
 
     prefix = f"deepdiary/deep-dog/{args.device_id}"
     input_topic = f"{prefix}/handle/input"
@@ -219,39 +483,109 @@ def main() -> int:
         return 1
 
     interval = 1.0 / max(args.hz, 1.0)
+    heartbeat_s = max(args.heartbeat_ms, 50) / 1000.0
+    reconnect_s = max(args.reconnect_ms, 200) / 1000.0
+    # 硬重扫最短间隔，避免 Mac 上 ADDED 事件风暴
+    hard_rescan_min_s = max(reconnect_s, 2.0)
     last_pub = 0.0
-    last_snap: dict | None = None
+    last_snap = None
+    last_rescan = 0.0
+    pad_online = joy is not None
+    need_hard_rescan = False
+    print(
+        f"[{ts()}] publish on-change @{args.hz:.0f}Hz; heartbeat every {args.heartbeat_ms}ms; "
+        f"auto-reconnect every {args.reconnect_ms}ms when pad lost"
+    )
+
+    joy_added = getattr(pygame, "JOYDEVICEADDED", None)
+    joy_removed = getattr(pygame, "JOYDEVICEREMOVED", None)
+
     try:
         while True:
-            snap = read_snapshot(joy)
             now = time.time()
-            if now - last_pub >= interval and not snapshot_equal(snap, last_snap):
-                payload = json.dumps(snap, separators=(",", ":"))
-                client.publish(input_topic, payload, qos=0, retain=False)
+            for ev in pygame.event.get():
+                if joy_removed is not None and ev.type == joy_removed:
+                    # 已在线时忽略瞬时 REMOVED（Mac 上常与 ADDED 成对刷屏）
+                    if not pad_online or not joystick_alive(joy):
+                        print(f"[{ts()}] JOYDEVICEREMOVED — waiting for pad…")
+                        joy = None
+                        pad_online = False
+                        need_hard_rescan = True
+                        off = offline_snapshot()
+                        publish_snap(client, input_topic, off)
+                        last_pub = now
+                        last_snap = off
+                elif joy_added is not None and ev.type == joy_added:
+                    # 已在线：忽略 ADDED，禁止 quit/init（否则会死循环 rescanning）
+                    if pad_online and joystick_alive(joy):
+                        continue
+                    if now - last_rescan < hard_rescan_min_s:
+                        continue
+                    print(f"[{ts()}] JOYDEVICEADDED — soft open…")
+                    last_rescan = now
+                    joy, layout = acquire_joystick(
+                        args.joystick, args.layout, hard=need_hard_rescan
+                    )
+                    if joy is not None:
+                        pad_online = True
+                        need_hard_rescan = False
+                        last_snap = None
+
+            if not joystick_alive(joy):
+                if pad_online:
+                    print(f"[{ts()}] pad lost/stale — publish connected=false; will rescan")
+                    pad_online = False
+                    need_hard_rescan = True
+                    off = offline_snapshot()
+                    publish_snap(client, input_topic, off)
+                    last_pub = now
+                    last_snap = off
+                    joy = None
+                if now - last_rescan >= reconnect_s:
+                    last_rescan = now
+                    use_hard = need_hard_rescan
+                    joy, layout = acquire_joystick(
+                        args.joystick, args.layout, hard=use_hard
+                    )
+                    if joy is None and use_hard:
+                        # 硬扫也失败：下次再试
+                        pass
+                    elif joy is None:
+                        # 软开失败，下次硬扫
+                        need_hard_rescan = True
+                    else:
+                        print(
+                            f"[{ts()}] pad reconnected"
+                            + (" (hard)" if use_hard else "")
+                        )
+                        pad_online = True
+                        need_hard_rescan = False
+                        last_snap = None
+                time.sleep(0.05)
+                continue
+
+            try:
+                snap = read_snapshot(joy, layout=layout or "ds4_sdl")
+            except Exception as e:
+                print(f"[{ts()}] read_snapshot failed: {e}; treating as disconnect")
+                joy = None
+                pad_online = False
+                need_hard_rescan = True
+                continue
+
+            pad_online = True
+            changed = not snapshot_equal(snap, last_snap)
+            due_change = changed and (now - last_pub >= interval)
+            due_heartbeat = (now - last_pub) >= heartbeat_s
+            if due_change or due_heartbeat:
+                snap = {**snap, "ts": int(now)}
+                publish_snap(client, input_topic, snap)
                 last_pub = now
                 last_snap = snap
             time.sleep(0.01)
     except KeyboardInterrupt:
         print(f"[{ts()}] stopping; publish connected=false")
-        off = {
-            "connected": False,
-            "source": "wifi",
-            "axes": {"lx": 0, "ly": 0, "rx": 0, "ry": 0},
-            "buttons": {
-                "a": False,
-                "b": False,
-                "x": False,
-                "y": False,
-                "l1": False,
-                "r1": False,
-                "l2": 0,
-                "r2": 0,
-                "start": False,
-                "select": False,
-            },
-            "ts": int(time.time()),
-        }
-        client.publish(input_topic, json.dumps(off), qos=0, retain=False)
+        publish_snap(client, input_topic, offline_snapshot())
         time.sleep(0.2)
     finally:
         client.loop_stop()

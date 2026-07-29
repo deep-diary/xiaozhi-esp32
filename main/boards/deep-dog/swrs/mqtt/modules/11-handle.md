@@ -35,24 +35,31 @@
 
 ## 样例 JSON
 
-### status / input（同构）
+完整三段报文（桥 input / 设备 status / 超时清零）与 Xbox·PS4 异同见：
+
+→ **[input/I05-mqtt-message-examples.md](../../input/I05-mqtt-message-examples.md)**
+
+### status / input（核心字段；同构）
 
 ```json
 {
   "connected": true,
-  "source": "bt",
-  "axes": { "lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0 },
+  "source": "wifi",
+  "axes": { "lx": 0.0, "ly": -0.4, "rx": 0.0, "ry": 0.0 },
   "buttons": {
     "a": false, "b": false, "x": false, "y": false,
     "l1": false, "r1": false, "l2": 0.0, "r2": 0.0,
-    "start": false, "select": false
+    "start": false, "select": false,
+    "ps": false, "l3": false, "r3": false, "touch": false,
+    "dpad_up": false, "dpad_down": false, "dpad_left": false, "dpad_right": false
   },
-  "raw": {},
   "ts": 1710000000
 }
 ```
 
-PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]；l2/r2 ∈ [0,1]。
+PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2/r2 ∈ [0,1]。  
+`ps`/`touch`/`dpad_*`/`l3`/`r3` 为可选扩展。触控板 **仅点击、无坐标**（见 I05）；XY 扩展见 [I06](../../input/I06-touchpad-xy.md)。  
+抽象键位 ↔ PS4/Xbox 见 [input/I01](../../input/I01-architecture.md) · [I03](../../input/I03-source-pc-mqtt-bridge.md)。
 
 ### cmd
 

@@ -49,6 +49,15 @@ struct HandleButtons {
     float r2 = 0.f;
     bool start = false;
     bool select = false;
+    /** 可选扩展（PC 桥 / 前端示意；无则 false） */
+    bool ps = false;
+    bool l3 = false;
+    bool r3 = false;
+    bool touch = false;
+    bool dpad_up = false;
+    bool dpad_down = false;
+    bool dpad_left = false;
+    bool dpad_right = false;
 };
 
 struct HandleAxes {

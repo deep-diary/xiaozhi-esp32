@@ -5,7 +5,8 @@
 | source | `wifi` |
 | 典型硬件 | 电脑已连接的 **PS4 DualShock 4** 或 Xbox（USB / 系统蓝牙均可） |
 | 路径 | PC 读 HID → 归一化 → 发布 `handle/input` → 设备 Hub |
-| 本轮 | **仅需求**；脚本可后置 `scripts/` 或 `tools/` |
+| 脚本 | [`scripts/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog_handle_bridge.py) |
+| 实测图 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png)（Linux 标注；pygame 0-based） |
 
 ## 为何现实
 
@@ -16,8 +17,8 @@
 ## 数据流
 
 ```text
-PS4/Xbox ──(OS HID)──► Python 桥
-                         │  publish QoS0/1
+PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
+                         │  publish QoS0
                          ▼
               …/handle/input  (downlink)
                          │
@@ -27,20 +28,73 @@ PS4/Xbox ──(OS HID)──► Python 桥
               handle/status ↑（合并后给网页）
 ```
 
+前端 **只订** `handle/status`，不订 `handle/input`。
+
+## PS4 DualShock 4 · pygame / Linux HID 对照（定稿）
+
+图注数字为 **0-based** 按钮下标；轴标签 `axes N` 若为 1-based 则 pygame 下标 = N−1。下列表统一 **pygame 0-based**。
+
+### 按钮 → 抽象字段
+
+| pygame `button` | 物理键 | 抽象 `buttons.*` |
+|-----------------|--------|------------------|
+| 0 | ✕ Cross | `a` |
+| 1 | ○ Circle | `b` |
+| 2 | △ Triangle | `y` |
+| 3 | □ Square | `x` |
+| 4 | L1 | `l1` |
+| 5 | R1 | `r1` |
+| 6 | L2（数字沿） | （优先用轴；作扳机轴缺失时的后备） |
+| 7 | R2（数字沿） | 同上 |
+| 8 | Share | `select` |
+| 9 | Options | `start` |
+| 10 | PS | 可选 `ps`（`ds4_linux`） |
+| 11 / 12 | L3 / R3 | 可选 `l3`/`r3` |
+
+> **常见错误**：把 `button` 下标 0..3 直接当成 `a,b,x,y`。正确是 `a,b,y,x`（△→`y`，□→`x`）。
+
+### 轴 → 抽象字段
+
+| pygame `axis` | 物理 | 原始极性（实测） | 抽象字段与处理 |
+|---------------|------|------------------|----------------|
+| 0 | 左杆水平 | 左 = +1，右 = −1 | `lx = −raw`（右为正） |
+| 1 | 左杆垂直 | 上 = +1，下 = −1 | `ly = −raw`（下为正；前推 `ly<0`） |
+| 2 | L2 | 按下 = +1，松开 = −1 | `l2 = (raw+1)/2` ∈ [0,1] |
+| 3 | 右杆水平 | 左 = +1，右 = −1 | `rx = −raw` |
+| 4 | 右杆垂直 | 上 = +1，下 = −1 | `ry = −raw` |
+| 5 | R2 | 按下 = +1，松开 = −1 | `r2 = (raw+1)/2` ∈ [0,1] |
+| 6 / 7 | 十字键 H/V | 同左/上为正 | v0.1 不上报（可选扩展） |
+
+### 操作系统差异（重要）
+
+同一 PS4，**Linux HID 标注图 ≠ macOS pygame2「PS4 Controller」表**：
+
+| | `ds4_linux` | `ds4_sdl`（Mac 实测） |
+|--|-------------|----------------------|
+| 右杆 | axis 3/4 | axis 2/3 |
+| L2/R2 | axis 2/5 | axis 4/5 |
+| □ / △ | btn 3 / 2 | btn 2 / 3 |
+| Share / L1 / Options | 8 / 4 / 9 | 4 / 9 / 6 |
+| D-pad | axis 6/7 | btn 11–14 |
+| 摇杆极性 | 左/上 = +1（需取反） | 右为正；**上/下与抽象相反，ly/ry 取反** |
+
+桥 `--layout auto` 按空闲轴启发式选择；Mac 请确认日志里 `layout=ds4_sdl`。
+
+误用 `ds4_linux` 在 Mac 上的典型症状：右杆静置 `ry≈1`、L2≈0.5、Share 亮成 L1、左右摇杆对调。
+
 ## 桥职责（需求）
 
 | 项 | 要求 |
 |----|------|
-| 读入 | pygame / hidapi / inputs 等读轴与键 |
-| 映射 | 索尼键位 → 抽象 `a/b/x/y/...`（实现时钉死对照表） |
-| 发布 | Topic：`deepdiary/deep-dog/{device_id}/handle/input` |
-| 节流 | 建议 on_change 或 ≤20～30 Hz；避免打满 Broker |
-| 断线 | 手柄断开发 `connected:false` 一帧；或停发并由设备超时清零（实现选一，默认：**超时 500ms 无包则视为断开并清零轴**） |
-| 凭证 | Broker 用户密码走环境变量，禁止写入仓库 |
+| 读入 | pygame（当前） |
+| 映射 | 上表；`--layout auto\|ds4\|xbox` |
+| 发布 | `deepdiary/deep-dog/{device_id}/handle/input` |
+| 节流 | on_change 或 ≤20～30 Hz |
+| 断线 | 桥发心跳；手柄休眠/拔出发 `connected:false`；**唤醒后自动 rescan 重连，无需重启脚本**；停发后设备超时 500ms 清零 |
+| 触控 XY | planned：[I06](./I06-touchpad-xy.md)（hidapi）；当前仅 `buttons.touch` 点击 |
+| 凭证 | 环境变量，禁止写入仓库 |
 
 ## 样例 payload
-
-与 [11-handle](../mqtt/modules/11-handle.md) / YAML 一致：
 
 ```json
 {
@@ -56,29 +110,21 @@ PS4/Xbox ──(OS HID)──► Python 桥
 }
 ```
 
-## 与板载 BT 并列
-
-- 两源均为 v0.1 一等公民；**后到覆盖**（见 I01）。
-- PC 桥可在 **未扩 Flash / 未接 Bluepad32** 时先联调狗控与网页 status。
-- 网页也可发 `handle/input` 做虚拟摇杆调试（同 Topic）。
-
-## 用法（脚本）
+## 用法
 
 ```bash
 pip3 install paho-mqtt pygame
-# 局域网（默认）
-/usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --device-id dev
-# 列出手柄
-/usr/bin/python3 scripts/deep_dog_handle_bridge.py --list-joysticks
-# 外网 WSS
-export DEEP_DOG_MQTT_USER=... DEEP_DOG_MQTT_PASS=...
-/usr/bin/python3 scripts/deep_dog_handle_bridge.py --via web
+# Mac PS4（auto → ds4_sdl）；支持休眠后自动重连
+/usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --device-id dev --layout ds4_sdl
+# 启动时无手柄则等待
+/usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
+# 原始下标探测
+/usr/bin/python3 scripts/deep_dog_handle_bridge.py --probe
 ```
-
-脚本路径：仓库根目录 [`scripts/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog_handle_bridge.py)。
 
 ## 验收（本源）
 
 - [x] 文档与 YAML 含 `handle/input`
-- [ ] （实现）PC 脚本推轴，设备 `handle/status` 同步且 `source=wifi`
-- [ ] （实现）断流 / `connected:false` 后狗控停止或轴归零
+- [x] PS4 HID ↔ 抽象对照表定稿（含极性）
+- [x] PC 脚本按表归一化；设备透传 `handle/status`
+- [ ] 断流 / `connected:false` 后狗控停止或轴归零（联调勾选）

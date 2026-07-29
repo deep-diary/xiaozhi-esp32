@@ -48,6 +48,10 @@ DeepDogHandleMqtt::DeepDogHandleMqtt(DeepDogMqttClient* client) : client_(client
 
 DeepDogHandleMqtt::~DeepDogHandleMqtt() {
     Stop();
+    if (status_flush_timer_) {
+        esp_timer_delete(status_flush_timer_);
+        status_flush_timer_ = nullptr;
+    }
     if (timeout_timer_) {
         esp_timer_delete(timeout_timer_);
         timeout_timer_ = nullptr;
@@ -70,10 +74,33 @@ void DeepDogHandleMqtt::EnsureTimeoutTimer() {
     }
 }
 
+void DeepDogHandleMqtt::EnsureStatusFlushTimer() {
+    if (status_flush_timer_) {
+        return;
+    }
+    esp_timer_create_args_t args = {
+        .callback = &DeepDogHandleMqtt::StatusFlushTimerCb,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "handle_st_flush",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&args, &status_flush_timer_) != ESP_OK) {
+        ESP_LOGE(TAG, "status flush timer create failed");
+    }
+}
+
 void DeepDogHandleMqtt::TimeoutTimerCb(void* arg) {
     auto* self = static_cast<DeepDogHandleMqtt*>(arg);
     if (self) {
         self->OnInputTimeout();
+    }
+}
+
+void DeepDogHandleMqtt::StatusFlushTimerCb(void* arg) {
+    auto* self = static_cast<DeepDogHandleMqtt*>(arg);
+    if (self) {
+        self->OnStatusFlush();
     }
 }
 
@@ -89,6 +116,15 @@ void DeepDogHandleMqtt::ArmInputTimeout() {
 #endif
 }
 
+void DeepDogHandleMqtt::ArmStatusFlush(int64_t delay_us) {
+    EnsureStatusFlushTimer();
+    if (!status_flush_timer_ || delay_us <= 0) {
+        return;
+    }
+    esp_timer_stop(status_flush_timer_);
+    esp_timer_start_once(status_flush_timer_, static_cast<uint64_t>(delay_us));
+}
+
 void DeepDogHandleMqtt::OnInputTimeout() {
     if (!hub_) {
         return;
@@ -99,6 +135,14 @@ void DeepDogHandleMqtt::OnInputTimeout() {
     clear.ts_us = esp_timer_get_time();
     ESP_LOGW(TAG, "handle/input timeout -> clear axes");
     hub_->Push(clear);
+}
+
+void DeepDogHandleMqtt::OnStatusFlush() {
+    if (!status_pending_) {
+        return;
+    }
+    status_pending_ = false;
+    PublishStatus();
 }
 
 void DeepDogHandleMqtt::OnConnected() {
@@ -115,6 +159,10 @@ void DeepDogHandleMqtt::OnConnected() {
 
 void DeepDogHandleMqtt::OnDisconnected() {
     connected_ = false;
+    status_pending_ = false;
+    if (status_flush_timer_) {
+        esp_timer_stop(status_flush_timer_);
+    }
     if (timeout_timer_) {
         esp_timer_stop(timeout_timer_);
     }
@@ -128,12 +176,19 @@ void DeepDogHandleMqtt::OnSnapshot(const HandleSnapshot& snap) {
     if (!enabled_ || !connected_) {
         return;
     }
+    (void)snap;
     const int64_t now = esp_timer_get_time();
     const int64_t min_us = static_cast<int64_t>(DEEP_DOG_HANDLE_STATUS_MIN_INTERVAL_MS) * 1000LL;
     if (last_publish_us_ != 0 && (now - last_publish_us_) < min_us) {
+        // 节流窗口内不丢最终态：到期后再发一次 Hub 最新快照
+        status_pending_ = true;
+        ArmStatusFlush(min_us - (now - last_publish_us_));
         return;
     }
-    (void)snap;
+    status_pending_ = false;
+    if (status_flush_timer_) {
+        esp_timer_stop(status_flush_timer_);
+    }
     PublishStatus();
 }
 
@@ -203,6 +258,14 @@ bool DeepDogHandleMqtt::ParseSnapshotJson(const std::string& payload, HandleSnap
         s.buttons.select = getb("select");
         s.buttons.l2 = getf("l2");
         s.buttons.r2 = getf("r2");
+        s.buttons.ps = getb("ps");
+        s.buttons.l3 = getb("l3");
+        s.buttons.r3 = getb("r3");
+        s.buttons.touch = getb("touch");
+        s.buttons.dpad_up = getb("dpad_up");
+        s.buttons.dpad_down = getb("dpad_down");
+        s.buttons.dpad_left = getb("dpad_left");
+        s.buttons.dpad_right = getb("dpad_right");
     }
 
     s.ts_us = esp_timer_get_time();
@@ -319,6 +382,14 @@ bool DeepDogHandleMqtt::PublishStatus() {
     cJSON_AddNumberToObject(buttons, "r2", snap.buttons.r2);
     cJSON_AddBoolToObject(buttons, "start", snap.buttons.start);
     cJSON_AddBoolToObject(buttons, "select", snap.buttons.select);
+    cJSON_AddBoolToObject(buttons, "ps", snap.buttons.ps);
+    cJSON_AddBoolToObject(buttons, "l3", snap.buttons.l3);
+    cJSON_AddBoolToObject(buttons, "r3", snap.buttons.r3);
+    cJSON_AddBoolToObject(buttons, "touch", snap.buttons.touch);
+    cJSON_AddBoolToObject(buttons, "dpad_up", snap.buttons.dpad_up);
+    cJSON_AddBoolToObject(buttons, "dpad_down", snap.buttons.dpad_down);
+    cJSON_AddBoolToObject(buttons, "dpad_left", snap.buttons.dpad_left);
+    cJSON_AddBoolToObject(buttons, "dpad_right", snap.buttons.dpad_right);
     cJSON_AddItemToObject(root, "buttons", buttons);
 
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));

@@ -30,9 +30,13 @@ public:
 
 private:
     static void TimeoutTimerCb(void* arg);
+    static void StatusFlushTimerCb(void* arg);
     void EnsureTimeoutTimer();
+    void EnsureStatusFlushTimer();
     void ArmInputTimeout();
+    void ArmStatusFlush(int64_t delay_us);
     void OnInputTimeout();
+    void OnStatusFlush();
     void HandleCmd(const std::string& payload);
     void HandleInput(const std::string& payload);
     bool ParseSnapshotJson(const std::string& payload, HandleSnapshot* out);
@@ -40,7 +44,9 @@ private:
     DeepDogMqttClient* client_;
     HandleEventHub* hub_ = nullptr;
     esp_timer_handle_t timeout_timer_ = nullptr;
+    esp_timer_handle_t status_flush_timer_ = nullptr;
     bool enabled_ = false;
     bool connected_ = false;
+    bool status_pending_ = false;
     int64_t last_publish_us_ = 0;
 };
