@@ -91,7 +91,7 @@ PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
 | 发布 | `deepdiary/deep-dog/{device_id}/handle/input` |
 | 节流 | on_change 或 ≤20～30 Hz |
 | 断线 | 桥发心跳；手柄休眠/拔出发 `connected:false`；**唤醒后自动 rescan 重连，无需重启脚本**；停发后设备超时 500ms 清零 |
-| 触控 XY | planned：[I06](./I06-touchpad-xy.md)（hidapi）；当前仅 `buttons.touch` 点击 |
+| 触控 XY | **`--touchpad-xy`**：hidapi 全量读（macOS+DS4 USB）；默认仅 `buttons.touch` 点击；探测见 `scripts/deep_dog_ds4_touchpad_probe.py`；规格 [I06](./I06-touchpad-xy.md) |
 | 凭证 | 环境变量，禁止写入仓库 |
 
 ## 样例 payload
@@ -116,6 +116,9 @@ PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
 pip3 install paho-mqtt pygame
 # Mac PS4（auto → ds4_sdl）；支持休眠后自动重连
 /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --device-id dev --layout ds4_sdl
+# 触控板 XY（需 hidapi；与 pygame 路径互斥，全量 HID 读）
+pip3 install hidapi
+python3 scripts/deep_dog_handle_bridge.py --via lan --device-id dev --touchpad-xy
 # 启动时无手柄则等待
 /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
 # 原始下标探测

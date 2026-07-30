@@ -6,6 +6,8 @@ normalized snapshots to deepdiary/deep-dog/{device_id}/handle/input.
 
 Dependencies:
   pip3 install paho-mqtt pygame
+  # optional, only for --touchpad-xy (DS4 HID full read):
+  pip3 install hidapi
 
 Credentials (do not commit):
   export DEEP_DOG_MQTT_USER=...
@@ -14,6 +16,7 @@ Credentials (do not commit):
 Examples:
   /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --layout auto
   /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --layout ds4_sdl
+  python3 scripts/deep_dog_handle_bridge.py --via lan --touchpad-xy
   /usr/bin/python3 scripts/deep_dog_handle_bridge.py --list-joysticks
   /usr/bin/python3 scripts/deep_dog_handle_bridge.py --probe
   /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
@@ -24,7 +27,13 @@ Profiles:
   xbox      — 常见 XInput
   auto      — 按名称 / 空闲轴启发式选择
 
+--touchpad-xy (default off):
+  macOS + DS4 USB → hidapi 全量读同一份 report（按键+摇杆+touchpad XY）。
+  关闭时行为与现网一致（仅 pygame + buttons.touch）。
+  探测脚本：scripts/deep_dog_ds4_touchpad_probe.py
+
 抽象极性（I01）：lx/rx 右为正；ly/ry 下为正（前推 ly<0）。
+Touchpad（I06）：x 左→右、y 上→下，归一化 [0,1]。
 """
 
 from __future__ import annotations
@@ -38,17 +47,32 @@ import time
 from datetime import datetime
 from urllib.parse import urlparse
 
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
 try:
     import paho.mqtt.client as mqtt
 except ImportError:
     print("missing dependency: pip3 install paho-mqtt", file=sys.stderr)
     sys.exit(2)
 
-try:
-    import pygame
-except ImportError:
-    print("missing dependency: pip3 install pygame", file=sys.stderr)
-    sys.exit(2)
+pygame = None  # type: ignore
+
+
+def require_pygame():
+    """Lazy-import pygame (not needed for --touchpad-xy HID path)."""
+    global pygame
+    if pygame is not None:
+        return pygame
+    try:
+        import pygame as _pygame
+    except ImportError:
+        print("missing dependency: pip3 install pygame", file=sys.stderr)
+        sys.exit(2)
+    pygame = _pygame
+    return pygame
+
 
 WEB_WSS_DEFAULT = "wss://mqtt-ws.deep-diary.com/mqtt"
 LAN_HOST_DEFAULT = "192.168.31.25"
@@ -80,8 +104,9 @@ def axis_deadzone(v: float, dz: float = 0.08) -> float:
     return 0.0 if abs(v) < dz else clamp(v, -1.0, 1.0)
 
 
-def detect_layout(joy: pygame.joystick.Joystick, explicit: str = "auto") -> str:
+def detect_layout(joy, explicit: str = "auto") -> str:
     """Pick HID profile. `ds4` is alias for ds4_sdl (pygame2 官方表)."""
+    require_pygame()
     if explicit == "ds4":
         return "ds4_sdl"
     if explicit in ("ds4_sdl", "ds4_linux", "xbox"):
@@ -114,8 +139,9 @@ def detect_layout(joy: pygame.joystick.Joystick, explicit: str = "auto") -> str:
     return "ds4_sdl"
 
 
-def read_snapshot(joy: pygame.joystick.Joystick, layout: str) -> dict:
+def read_snapshot(joy, layout: str) -> dict:
     """Map pygame joystick → deep-dog abstract snapshot."""
+    require_pygame()
     pygame.event.pump()
     n_axes = joy.get_numaxes()
     n_buttons = joy.get_numbuttons()
@@ -248,6 +274,18 @@ def snapshot_equal(a: dict | None, b: dict | None, eps: float = 0.02) -> bool:
     for k in ("l2", "r2"):
         if abs(float(ab.get(k, 0)) - float(bb.get(k, 0))) > eps:
             return False
+    at, bt = a.get("touchpad"), b.get("touchpad")
+    if (at is None) != (bt is None):
+        return False
+    if at is not None and bt is not None:
+        if bool(at.get("active")) != bool(bt.get("active")):
+            return False
+        if abs(float(at.get("x", 0)) - float(bt.get("x", 0))) > eps:
+            return False
+        if abs(float(at.get("y", 0)) - float(bt.get("y", 0))) > eps:
+            return False
+        if int(at.get("fingers", 0)) != int(bt.get("fingers", 0)):
+            return False
     return True
 
 
@@ -274,18 +312,29 @@ def empty_buttons() -> dict:
     }
 
 
-def offline_snapshot() -> dict:
-    return {
+def offline_snapshot(*, with_touchpad: bool = False) -> dict:
+    snap = {
         "connected": False,
         "source": "wifi",
         "axes": {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0},
         "buttons": empty_buttons(),
         "ts": int(time.time()),
     }
+    if with_touchpad:
+        snap["touchpad"] = {"active": False, "x": 0.0, "y": 0.0, "fingers": 0}
+    return snap
+
+
+def public_snapshot(snap: dict) -> dict:
+    """Strip internal/debug keys before MQTT publish."""
+    allowed = {"connected", "source", "axes", "buttons", "touchpad", "ts"}
+    out = {k: v for k, v in snap.items() if k in allowed}
+    return out
 
 
 def acquire_joystick(preferred_index: int, layout_arg: str, *, hard: bool = False):
     """Open joystick. hard=True 会 quit/init 子系统（仅在确认掉线后用）。"""
+    require_pygame()
     if hard:
         pygame.joystick.quit()
         pygame.joystick.init()
@@ -309,9 +358,10 @@ def acquire_joystick(preferred_index: int, layout_arg: str, *, hard: bool = Fals
     return joy, layout
 
 
-def joystick_alive(joy: pygame.joystick.Joystick | None) -> bool:
+def joystick_alive(joy) -> bool:
     if joy is None:
         return False
+    require_pygame()
     try:
         if not pygame.joystick.get_init() or pygame.joystick.get_count() <= 0:
             return False
@@ -322,10 +372,155 @@ def joystick_alive(joy: pygame.joystick.Joystick | None) -> bool:
 
 
 def publish_snap(client, topic: str, snap: dict) -> None:
-    client.publish(topic, json.dumps(snap, separators=(",", ":")), qos=0, retain=False)
+    client.publish(
+        topic,
+        json.dumps(public_snapshot(snap), separators=(",", ":")),
+        qos=0,
+        retain=False,
+    )
+
+
+def try_import_hid():
+    try:
+        import hid  # type: ignore
+
+        return hid
+    except ImportError:
+        return None
+
+
+def acquire_ds4_hid(hid_mod, path: bytes | None = None):
+    """Open DS4 via hidapi for --touchpad-xy. Returns (dev, info) or (None, None)."""
+    from deep_dog_ds4_hid import open_ds4_device
+
+    return open_ds4_device(hid_mod, path=path)
+
+
+def read_hid_snapshot(dev) -> dict | None:
+    from deep_dog_ds4_hid import parse_ds4_usb_report, read_ds4_report
+
+    data = read_ds4_report(dev)
+    if not data:
+        return None
+    return parse_ds4_usb_report(data)
+
+
+def run_touchpad_xy_loop(
+    client,
+    input_topic: str,
+    *,
+    hz: float,
+    heartbeat_ms: int,
+    reconnect_ms: int,
+    wait_pad: bool,
+    hid_path: str | None,
+) -> int:
+    """HID-only bridge path: buttons + axes + touchpad from one DS4 report."""
+    hid_mod = try_import_hid()
+    if hid_mod is None:
+        print(
+            "missing dependency for --touchpad-xy: pip3 install hidapi "
+            f"(interpreter={sys.executable})",
+            file=sys.stderr,
+        )
+        return 2
+
+    path = hid_path.encode("utf-8") if hid_path else None
+    interval = 1.0 / max(1.0, hz)
+    heartbeat_s = max(0.05, heartbeat_ms / 1000.0)
+    reconnect_s = max(0.2, reconnect_ms / 1000.0)
+
+    dev, info = acquire_ds4_hid(hid_mod, path=path)
+    if dev is None:
+        if not wait_pad:
+            print(
+                "no DS4 found for --touchpad-xy; plug USB DualShock 4 "
+                "(or pass --wait-pad)",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"[{ts()}] --touchpad-xy: no DS4 yet; waiting…")
+
+    last_snap = None
+    last_pub = 0.0
+    last_rescan = 0.0
+    pad_online = False
+    stale_reads = 0
+    STALE_LIMIT = 200  # ~ nonblocking empty reads before treat as disconnect
+
+    if info is not None:
+        pid = int(info.get("product_id") or 0)
+        print(
+            f"[{ts()}] --touchpad-xy HID mode pid=0x{pid:04X} "
+            f"product={info.get('product_string')!r}"
+        )
+        pad_online = True
+
+    try:
+        while True:
+            now = time.time()
+            if not pad_online or dev is None:
+                if now - last_rescan >= reconnect_s:
+                    last_rescan = now
+                    if dev is not None:
+                        try:
+                            dev.close()
+                        except Exception:
+                            pass
+                        dev = None
+                    dev, info = acquire_ds4_hid(hid_mod, path=path)
+                    if dev is not None:
+                        print(f"[{ts()}] DS4 reconnected (HID)")
+                        pad_online = True
+                        last_snap = None
+                        stale_reads = 0
+                time.sleep(0.05)
+                continue
+
+            snap = read_hid_snapshot(dev)
+            if snap is None:
+                stale_reads += 1
+                if stale_reads >= STALE_LIMIT:
+                    print(f"[{ts()}] HID stale — publish connected=false; will rescan")
+                    pad_online = False
+                    off = offline_snapshot(with_touchpad=True)
+                    publish_snap(client, input_topic, off)
+                    last_pub = now
+                    last_snap = off
+                    try:
+                        dev.close()
+                    except Exception:
+                        pass
+                    dev = None
+                time.sleep(0.001)
+                continue
+
+            stale_reads = 0
+            pad_online = True
+            changed = not snapshot_equal(snap, last_snap)
+            due_change = changed and (now - last_pub >= interval)
+            due_heartbeat = (now - last_pub) >= heartbeat_s
+            if due_change or due_heartbeat:
+                snap = {**snap, "ts": int(now)}
+                publish_snap(client, input_topic, snap)
+                last_pub = now
+                last_snap = snap
+            time.sleep(0.001)
+    except KeyboardInterrupt:
+        print(f"[{ts()}] stopping; publish connected=false")
+        publish_snap(client, input_topic, offline_snapshot(with_touchpad=True))
+        time.sleep(0.2)
+    finally:
+        if dev is not None:
+            try:
+                dev.close()
+            except Exception:
+                pass
+    return 0
 
 
 def probe_joystick(index: int, seconds: float = 20.0) -> int:
+    require_pygame()
     pygame.init()
     pygame.joystick.init()
     if pygame.joystick.get_count() <= 0:
@@ -404,28 +599,65 @@ def main() -> int:
         action="store_true",
         help="if no joystick at start, wait instead of exiting",
     )
+    ap.add_argument(
+        "--touchpad-xy",
+        action="store_true",
+        help="DS4 hidapi full-read: buttons+axes+touchpad XY (default off; needs hidapi)",
+    )
+    ap.add_argument(
+        "--hid-path",
+        default=None,
+        help="optional hidapi path for --touchpad-xy (from probe --list)",
+    )
     args = ap.parse_args()
 
     if args.probe:
         return probe_joystick(args.joystick)
 
-    pygame.init()
-    pygame.joystick.init()
-    count = pygame.joystick.get_count()
-    if args.list_joysticks:
-        print(f"joysticks: {count}")
-        for i in range(count):
-            j = pygame.joystick.Joystick(i)
-            j.init()
-            print(f"  [{i}] {j.get_name()} axes={j.get_numaxes()} buttons={j.get_numbuttons()}")
-        return 0
+    joy, layout = None, None
+    if args.touchpad_xy:
+        if args.list_joysticks:
+            hid_mod = try_import_hid()
+            if hid_mod is None:
+                print("pip3 install hidapi", file=sys.stderr)
+                return 2
+            from deep_dog_ds4_hid import is_ds4, list_sony_devices
 
-    joy, layout = acquire_joystick(args.joystick, args.layout)
-    if joy is None:
-        if not args.wait_pad:
-            print("no joystick found; plug in PS4/Xbox (or pass --wait-pad)", file=sys.stderr)
-            return 1
-        print(f"[{ts()}] no joystick yet; waiting (--wait-pad)…")
+            devices = list_sony_devices(hid_mod)
+            print(f"Sony HID devices: {len(devices)}")
+            for i, d in enumerate(devices):
+                mark = "DS4" if is_ds4(d) else "other"
+                print(
+                    f"  [{i}] {mark} pid=0x{int(d.get('product_id') or 0):04X} "
+                    f"product={d.get('product_string')!r}"
+                )
+            return 0
+        layout = "ds4_hid"
+    else:
+        require_pygame()
+        pygame.init()
+        pygame.joystick.init()
+        count = pygame.joystick.get_count()
+        if args.list_joysticks:
+            print(f"joysticks: {count}")
+            for i in range(count):
+                j = pygame.joystick.Joystick(i)
+                j.init()
+                print(
+                    f"  [{i}] {j.get_name()} axes={j.get_numaxes()} "
+                    f"buttons={j.get_numbuttons()}"
+                )
+            return 0
+
+        joy, layout = acquire_joystick(args.joystick, args.layout)
+        if joy is None:
+            if not args.wait_pad:
+                print(
+                    "no joystick found; plug in PS4/Xbox (or pass --wait-pad)",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"[{ts()}] no joystick yet; waiting (--wait-pad)…")
 
     prefix = f"deepdiary/deep-dog/{args.device_id}"
     input_topic = f"{prefix}/handle/input"
@@ -447,8 +679,28 @@ def main() -> int:
 
     def on_message(client, userdata, msg):
         payload = msg.payload.decode("utf-8", errors="replace")
-        preview = payload if len(payload) <= 200 else payload[:200] + "..."
-        print(f"[{ts()}] STATUS {preview}")
+        summary = ""
+        try:
+            o = json.loads(payload)
+            tp = o.get("touchpad")
+            bt = (o.get("buttons") or {}).get("touch")
+            ax = o.get("axes") or {}
+            if isinstance(tp, dict):
+                summary = (
+                    f" touchpad={{active:{1 if tp.get('active') else 0} "
+                    f"x:{float(tp.get('x', 0)):.2f} y:{float(tp.get('y', 0)):.2f} "
+                    f"fingers:{int(tp.get('fingers', 0))}}}"
+                )
+            else:
+                summary = " touchpad=<absent>"
+            summary += (
+                f" touch_btn={1 if bt else 0}"
+                f" lx={float(ax.get('lx', 0)):.2f} ly={float(ax.get('ly', 0)):.2f}"
+            )
+        except Exception:
+            summary = ""
+        preview = payload if len(payload) <= 160 else payload[:160] + "..."
+        print(f"[{ts()}] STATUS{summary} | {preview}")
 
     client = make_client(client_id, transport)
     if args.username:
@@ -481,6 +733,25 @@ def main() -> int:
         print("MQTT connect timeout", file=sys.stderr)
         client.loop_stop()
         return 1
+
+    if args.touchpad_xy:
+        print(
+            f"[{ts()}] --touchpad-xy HID full-read; "
+            f"on-change @{args.hz:.0f}Hz; heartbeat every {args.heartbeat_ms}ms"
+        )
+        try:
+            return run_touchpad_xy_loop(
+                client,
+                input_topic,
+                hz=args.hz,
+                heartbeat_ms=args.heartbeat_ms,
+                reconnect_ms=args.reconnect_ms,
+                wait_pad=args.wait_pad,
+                hid_path=args.hid_path,
+            )
+        finally:
+            client.loop_stop()
+            client.disconnect()
 
     interval = 1.0 / max(args.hz, 1.0)
     heartbeat_s = max(args.heartbeat_ms, 50) / 1000.0

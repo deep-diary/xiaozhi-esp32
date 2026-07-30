@@ -53,12 +53,20 @@
     "ps": false, "l3": false, "r3": false, "touch": false,
     "dpad_up": false, "dpad_down": false, "dpad_left": false, "dpad_right": false
   },
+  "touchpad": {
+    "active": true,
+    "x": 0.42,
+    "y": 0.55,
+    "fingers": 1
+  },
   "ts": 1710000000
 }
 ```
 
 PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2/r2 ∈ [0,1]。  
-`ps`/`touch`/`dpad_*`/`l3`/`r3` 为可选扩展。触控板 **仅点击、无坐标**（见 I05）；XY 扩展见 [I06](../../input/I06-touchpad-xy.md)。  
+`ps`/`touch`/`dpad_*`/`l3`/`r3` 为可选扩展。  
+`touchpad` 为可选（I06）：桥 `--touchpad-xy`（hidapi 全量读）时上报；缺省=不支持或未开 flag。  
+`touchpad.x` 左→右、`y` 上→下，∈ [0,1]；`buttons.touch` 仍表示点击。  
 抽象键位 ↔ PS4/Xbox 见 [input/I01](../../input/I01-architecture.md) · [I03](../../input/I03-source-pc-mqtt-bridge.md)。
 
 ### cmd

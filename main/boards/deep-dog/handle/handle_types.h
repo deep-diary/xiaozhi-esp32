@@ -67,11 +67,21 @@ struct HandleAxes {
     float ry = 0.f;
 };
 
+/** 可选触控板坐标（I06）；present=false 表示 JSON 未带 touchpad */
+struct HandleTouchpad {
+    bool present = false;
+    bool active = false;
+    float x = 0.f;
+    float y = 0.f;
+    int fingers = 0;
+};
+
 /** 与 YAML handle/status|input 对齐的控制快照 */
 struct HandleSnapshot {
     bool connected = false;
     HandleSource source = HandleSource::kNone;
     HandleAxes axes{};
     HandleButtons buttons{};
+    HandleTouchpad touchpad{};
     int64_t ts_us = 0;
 };

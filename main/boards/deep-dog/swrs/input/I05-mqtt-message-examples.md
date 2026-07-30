@@ -67,12 +67,12 @@ button 15 == Touch Pad Click   → 映射为 buttons.touch (bool)
 | 层级 | 触控板 XY | 触控板点击 |
 |------|-----------|------------|
 | DS4 HID report（硬件→OS） | **有** | 有 |
-| pygame.Joystick（桥当前路径） | **无** | 有（btn 15） |
-| MQTT `handle/input\|status` | **无**（契约未定义） | 可选 `buttons.touch` |
-| 前端 | 无坐标 UI | TOUCH 高亮 |
+| pygame.Joystick（桥默认路径） | **无** | 有（btn 15） |
+| 桥 `--touchpad-xy`（hidapi 全量读） | **有** | 有（HID 派生） |
+| MQTT `handle/input\|status` | 可选 `touchpad` | 可选 `buttons.touch` |
+| 前端 | 有 `touchpad` 画触点 | TOUCH 高亮 |
 
-结论：不是「手柄没发出 XY」，而是 **当前桥没走能读到 XY 的 API，契约也未传**。  
-扩展规格（hidapi + 可选 `touchpad` 字段 + 前端触点）见 **[I06-touchpad-xy](./I06-touchpad-xy.md)**（planned）。
+结论：默认路径仍是 pygame（仅点击）；开 `--touchpad-xy` 后走 hidapi，从同一份 report 同时解析按键与 XY。规格见 **[I06-touchpad-xy](./I06-touchpad-xy.md)**。
 
 ### 0.3 桥内 Normalize 后的逻辑快照（②，非 MQTT）
 
@@ -123,6 +123,31 @@ QoS 0 · retain false · `source` 固定 `"wifi"`
 }
 ```
 
+### 触控板 XY 样例（`--touchpad-xy`；可选字段）
+
+```json
+{
+  "connected": true,
+  "source": "wifi",
+  "axes": { "lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0 },
+  "buttons": {
+    "a": false, "b": false, "x": false, "y": false,
+    "l1": false, "r1": false,
+    "l2": 0.0, "r2": 0.0,
+    "start": false, "select": false,
+    "ps": false, "l3": false, "r3": false, "touch": true,
+    "dpad_up": false, "dpad_down": false, "dpad_left": false, "dpad_right": false
+  },
+  "touchpad": {
+    "active": true,
+    "x": 0.42,
+    "y": 0.55,
+    "fingers": 1
+  },
+  "ts": 1785364525
+}
+```
+
 字段约定：
 
 | 字段 | 范围 / 含义 |
@@ -130,6 +155,7 @@ QoS 0 · retain false · `source` 固定 `"wifi"`
 | `axes.*` | [-1,1]；**右 / 下为正**；前推左杆 → `ly < 0` |
 | `l2`/`r2` | [0,1] |
 | `ps`/`l3`/`r3`/`touch`/`dpad_*` | **可选**；桥有则带，固件透传到 status |
+| `touchpad` | **可选**（I06）；`x` 左→右、`y` 上→下 ∈ [0,1]；缺省=未启用 |
 
 ## 2. 设备 → 前端：`handle/status`
 

@@ -268,6 +268,28 @@ bool DeepDogHandleMqtt::ParseSnapshotJson(const std::string& payload, HandleSnap
         s.buttons.dpad_right = getb("dpad_right");
     }
 
+    const cJSON* touchpad = cJSON_GetObjectItem(root, "touchpad");
+    if (cJSON_IsObject(touchpad)) {
+        s.touchpad.present = true;
+        const cJSON* active = cJSON_GetObjectItem(touchpad, "active");
+        s.touchpad.active = cJSON_IsTrue(active);
+        const cJSON* x = cJSON_GetObjectItem(touchpad, "x");
+        const cJSON* y = cJSON_GetObjectItem(touchpad, "y");
+        const cJSON* fingers = cJSON_GetObjectItem(touchpad, "fingers");
+        if (cJSON_IsNumber(x)) {
+            s.touchpad.x = Clamp01(static_cast<float>(x->valuedouble));
+        }
+        if (cJSON_IsNumber(y)) {
+            s.touchpad.y = Clamp01(static_cast<float>(y->valuedouble));
+        }
+        if (cJSON_IsNumber(fingers)) {
+            s.touchpad.fingers = fingers->valueint;
+            if (s.touchpad.fingers < 0) {
+                s.touchpad.fingers = 0;
+            }
+        }
+    }
+
     s.ts_us = esp_timer_get_time();
     cJSON_Delete(root);
     *out = s;
@@ -391,6 +413,15 @@ bool DeepDogHandleMqtt::PublishStatus() {
     cJSON_AddBoolToObject(buttons, "dpad_left", snap.buttons.dpad_left);
     cJSON_AddBoolToObject(buttons, "dpad_right", snap.buttons.dpad_right);
     cJSON_AddItemToObject(root, "buttons", buttons);
+
+    if (snap.touchpad.present) {
+        cJSON* touchpad = cJSON_CreateObject();
+        cJSON_AddBoolToObject(touchpad, "active", snap.touchpad.active);
+        cJSON_AddNumberToObject(touchpad, "x", snap.touchpad.x);
+        cJSON_AddNumberToObject(touchpad, "y", snap.touchpad.y);
+        cJSON_AddNumberToObject(touchpad, "fingers", snap.touchpad.fingers);
+        cJSON_AddItemToObject(root, "touchpad", touchpad);
+    }
 
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 

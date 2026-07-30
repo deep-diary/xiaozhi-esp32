@@ -550,6 +550,17 @@ topics:
           r2: { type: float, range: [0, 1] }
           start: { type: bool }
           select: { type: bool }
+      touchpad:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 touchpad (I06). Absent = source unsupported / flag off.
+          x left→right, y top→bottom, both [0,1].
+        fields:
+          active: { type: bool }
+          x: { type: float, range: [0, 1] }
+          y: { type: float, range: [0, 1] }
+          fingers: { type: int, optional: true }
       raw: { type: object, optional: true }
       ts: { type: int }
 
@@ -585,6 +596,17 @@ topics:
           r2: { type: float, range: [0, 1] }
           start: { type: bool }
           select: { type: bool }
+      touchpad:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 touchpad passthrough (I06). Absent when input omitted it.
+          x left→right, y top→bottom, both [0,1].
+        fields:
+          active: { type: bool }
+          x: { type: float, range: [0, 1] }
+          y: { type: float, range: [0, 1] }
+          fingers: { type: int, optional: true }
       raw: { type: object, optional: true }
       ts: { type: int }
 
