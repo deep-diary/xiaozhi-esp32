@@ -142,7 +142,19 @@ QoS 0 · retain false · `source` 固定 `"wifi"`
     "active": true,
     "x": 0.42,
     "y": 0.55,
-    "fingers": 1
+    "fingers": 2,
+    "contacts": [
+      { "active": true, "x": 0.42, "y": 0.55 },
+      { "active": true, "x": 0.71, "y": 0.48 }
+    ]
+  },
+  "motion": {
+    "gyro_x": 0.0,
+    "gyro_y": 0.0,
+    "gyro_z": 0.0,
+    "accel_x": 0.02,
+    "accel_y": 0.21,
+    "accel_z": -0.98
   },
   "ts": 1785364525
 }
@@ -155,7 +167,8 @@ QoS 0 · retain false · `source` 固定 `"wifi"`
 | `axes.*` | [-1,1]；**右 / 下为正**；前推左杆 → `ly < 0` |
 | `l2`/`r2` | [0,1] |
 | `ps`/`l3`/`r3`/`touch`/`dpad_*` | **可选**；桥有则带，固件透传到 status |
-| `touchpad` | **可选**（I06）；`x` 左→右、`y` 上→下 ∈ [0,1]；缺省=未启用 |
+| `touchpad` | **可选**（I06）；`x/y` 主触点兼容；`contacts` 最多 2 指 |
+| `motion` | **可选**（I07）；机体系 **+X 右 / +Y 前 / +Z 上**；平放面朝上 → `accel_z ≈ -1 g`；gyro dps、accel g；≠ 板载 `imu/status` |
 
 ## 2. 设备 → 前端：`handle/status`
 

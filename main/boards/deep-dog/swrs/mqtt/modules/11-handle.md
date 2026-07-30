@@ -57,7 +57,19 @@
     "active": true,
     "x": 0.42,
     "y": 0.55,
-    "fingers": 1
+    "fingers": 2,
+    "contacts": [
+      { "active": true, "x": 0.42, "y": 0.55 },
+      { "active": true, "x": 0.71, "y": 0.48 }
+    ]
+  },
+  "motion": {
+    "gyro_x": 0.0,
+    "gyro_y": 0.0,
+    "gyro_z": 0.0,
+    "accel_x": 0.02,
+    "accel_y": 0.21,
+    "accel_z": -0.98
   },
   "ts": 1710000000
 }
@@ -65,8 +77,8 @@
 
 PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2/r2 ∈ [0,1]。  
 `ps`/`touch`/`dpad_*`/`l3`/`r3` 为可选扩展。  
-`touchpad` 为可选（I06）：桥 `--touchpad-xy`（hidapi 全量读）时上报；缺省=不支持或未开 flag。  
-`touchpad.x` 左→右、`y` 上→下，∈ [0,1]；`buttons.touch` 仍表示点击。  
+`touchpad` 可选（I06）：`--touchpad-xy` 时上报；`x/y` 主触点兼容；`contacts` 最多 2 指。  
+`motion` 可选（I07）：同 HID 路径上报手柄 gyro（dps）/ accel（g）；机体系 **+X 右 / +Y 前 / +Z 上**，平放面朝上 `accel_z ≈ -1 g`；≠ 板载 `imu/status`。  
 抽象键位 ↔ PS4/Xbox 见 [input/I01](../../input/I01-architecture.md) · [I03](../../input/I03-source-pc-mqtt-bridge.md)。
 
 ### cmd

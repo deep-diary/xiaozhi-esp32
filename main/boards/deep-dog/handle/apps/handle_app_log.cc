@@ -25,9 +25,30 @@ bool MeaningfulChange(const HandleSnapshot& a, const HandleSnapshot& b) {
     }
     if (a.touchpad.present != b.touchpad.present || a.touchpad.active != b.touchpad.active ||
         a.touchpad.fingers != b.touchpad.fingers ||
+        a.touchpad.contact_count != b.touchpad.contact_count ||
         std::fabs(a.touchpad.x - b.touchpad.x) > 0.02f ||
         std::fabs(a.touchpad.y - b.touchpad.y) > 0.02f) {
         return true;
+    }
+    for (int i = 0; i < a.touchpad.contact_count && i < 2; ++i) {
+        if (a.touchpad.contacts[i].active != b.touchpad.contacts[i].active ||
+            std::fabs(a.touchpad.contacts[i].x - b.touchpad.contacts[i].x) > 0.02f ||
+            std::fabs(a.touchpad.contacts[i].y - b.touchpad.contacts[i].y) > 0.02f) {
+            return true;
+        }
+    }
+    if (a.motion.present != b.motion.present) {
+        return true;
+    }
+    if (a.motion.present) {
+        if (std::fabs(a.motion.gyro_x - b.motion.gyro_x) > 2.f ||
+            std::fabs(a.motion.gyro_y - b.motion.gyro_y) > 2.f ||
+            std::fabs(a.motion.gyro_z - b.motion.gyro_z) > 2.f ||
+            std::fabs(a.motion.accel_x - b.motion.accel_x) > 0.05f ||
+            std::fabs(a.motion.accel_y - b.motion.accel_y) > 0.05f ||
+            std::fabs(a.motion.accel_z - b.motion.accel_z) > 0.05f) {
+            return true;
+        }
     }
     return std::fabs(a.axes.lx - b.axes.lx) > 0.08f || std::fabs(a.axes.ly - b.axes.ly) > 0.08f ||
            std::fabs(a.axes.rx - b.axes.rx) > 0.08f || std::fabs(a.axes.ry - b.axes.ry) > 0.08f;
@@ -47,7 +68,8 @@ void HandleAppLog::OnSnapshot(const HandleSnapshot& snap) {
         ESP_LOGI(TAG,
                  "conn=%d src=%s lx=%.2f ly=%.2f rx=%.2f ry=%.2f "
                  "a=%d b=%d x=%d y=%d l1=%d r1=%d start=%d select=%d touch=%d "
-                 "tp={active=%d x=%.2f y=%.2f fingers=%d}",
+                 "tp={active=%d x=%.2f y=%.2f fingers=%d contacts=%d} "
+                 "motion=%d gx=%.1f gy=%.1f gz=%.1f",
                  snap.connected ? 1 : 0,
                  src ? src : "-",
                  snap.axes.lx,
@@ -66,7 +88,12 @@ void HandleAppLog::OnSnapshot(const HandleSnapshot& snap) {
                  snap.touchpad.active ? 1 : 0,
                  snap.touchpad.x,
                  snap.touchpad.y,
-                 snap.touchpad.fingers);
+                 snap.touchpad.fingers,
+                 snap.touchpad.contact_count,
+                 snap.motion.present ? 1 : 0,
+                 snap.motion.gyro_x,
+                 snap.motion.gyro_y,
+                 snap.motion.gyro_z);
         return;
     }
     ESP_LOGI(TAG,

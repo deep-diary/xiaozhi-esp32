@@ -27,7 +27,8 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | [I03-source-pc-mqtt-bridge](./I03-source-pc-mqtt-bridge.md) | PC→MQTT 桥；**PS4 HID 对照表 + 极性** |
 | [I04-apps-mapping](./I04-apps-mapping.md) | App 启用与键位映射 |
 | [I05-mqtt-message-examples](./I05-mqtt-message-examples.md) | **三段报文展开** · 触控板说明 · Xbox/PS4 异同 |
-| [I06-touchpad-xy](./I06-touchpad-xy.md) | **触控板 XY 扩展（planned）**：hidapi + 契约 + 前端 |
+| [I06-touchpad-xy](./I06-touchpad-xy.md) | 触控板 XY + **双点 contacts** |
+| [I07-motion-gyro](./I07-motion-gyro.md) | DS4 手柄 gyro/accel（可选 `motion`） |
 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png) | DualShock 4 实测标注（Linux） |
 
 ## 边界

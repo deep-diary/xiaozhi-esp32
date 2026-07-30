@@ -288,6 +288,63 @@ bool DeepDogHandleMqtt::ParseSnapshotJson(const std::string& payload, HandleSnap
                 s.touchpad.fingers = 0;
             }
         }
+        const cJSON* contacts = cJSON_GetObjectItem(touchpad, "contacts");
+        if (cJSON_IsArray(contacts)) {
+            const int n = cJSON_GetArraySize(contacts);
+            s.touchpad.contact_count = 0;
+            for (int i = 0; i < n && s.touchpad.contact_count < 2; ++i) {
+                const cJSON* item = cJSON_GetArrayItem(contacts, i);
+                if (!cJSON_IsObject(item)) {
+                    continue;
+                }
+                HandleTouchContact& c = s.touchpad.contacts[s.touchpad.contact_count++];
+                const cJSON* ca = cJSON_GetObjectItem(item, "active");
+                c.active = cJSON_IsTrue(ca);
+                const cJSON* cx = cJSON_GetObjectItem(item, "x");
+                const cJSON* cy = cJSON_GetObjectItem(item, "y");
+                if (cJSON_IsNumber(cx)) {
+                    c.x = Clamp01(static_cast<float>(cx->valuedouble));
+                }
+                if (cJSON_IsNumber(cy)) {
+                    c.y = Clamp01(static_cast<float>(cy->valuedouble));
+                }
+            }
+            // 无主 x/y 时用 contacts[0] 回填
+            if ((!cJSON_IsNumber(x) || !cJSON_IsNumber(y)) && s.touchpad.contact_count > 0) {
+                for (int i = 0; i < s.touchpad.contact_count; ++i) {
+                    if (s.touchpad.contacts[i].active) {
+                        s.touchpad.x = s.touchpad.contacts[i].x;
+                        s.touchpad.y = s.touchpad.contacts[i].y;
+                        s.touchpad.active = true;
+                        break;
+                    }
+                }
+            }
+            if (!cJSON_IsNumber(fingers)) {
+                int n_active = 0;
+                for (int i = 0; i < s.touchpad.contact_count; ++i) {
+                    if (s.touchpad.contacts[i].active) {
+                        ++n_active;
+                    }
+                }
+                s.touchpad.fingers = n_active;
+            }
+        }
+    }
+
+    const cJSON* motion = cJSON_GetObjectItem(root, "motion");
+    if (cJSON_IsObject(motion)) {
+        s.motion.present = true;
+        auto getmf = [&](const char* key) -> float {
+            const cJSON* v = cJSON_GetObjectItem(motion, key);
+            return cJSON_IsNumber(v) ? static_cast<float>(v->valuedouble) : 0.f;
+        };
+        s.motion.gyro_x = getmf("gyro_x");
+        s.motion.gyro_y = getmf("gyro_y");
+        s.motion.gyro_z = getmf("gyro_z");
+        s.motion.accel_x = getmf("accel_x");
+        s.motion.accel_y = getmf("accel_y");
+        s.motion.accel_z = getmf("accel_z");
     }
 
     s.ts_us = esp_timer_get_time();
@@ -420,7 +477,29 @@ bool DeepDogHandleMqtt::PublishStatus() {
         cJSON_AddNumberToObject(touchpad, "x", snap.touchpad.x);
         cJSON_AddNumberToObject(touchpad, "y", snap.touchpad.y);
         cJSON_AddNumberToObject(touchpad, "fingers", snap.touchpad.fingers);
+        if (snap.touchpad.contact_count > 0) {
+            cJSON* contacts = cJSON_CreateArray();
+            for (int i = 0; i < snap.touchpad.contact_count; ++i) {
+                cJSON* item = cJSON_CreateObject();
+                cJSON_AddBoolToObject(item, "active", snap.touchpad.contacts[i].active);
+                cJSON_AddNumberToObject(item, "x", snap.touchpad.contacts[i].x);
+                cJSON_AddNumberToObject(item, "y", snap.touchpad.contacts[i].y);
+                cJSON_AddItemToArray(contacts, item);
+            }
+            cJSON_AddItemToObject(touchpad, "contacts", contacts);
+        }
         cJSON_AddItemToObject(root, "touchpad", touchpad);
+    }
+
+    if (snap.motion.present) {
+        cJSON* motion = cJSON_CreateObject();
+        cJSON_AddNumberToObject(motion, "gyro_x", snap.motion.gyro_x);
+        cJSON_AddNumberToObject(motion, "gyro_y", snap.motion.gyro_y);
+        cJSON_AddNumberToObject(motion, "gyro_z", snap.motion.gyro_z);
+        cJSON_AddNumberToObject(motion, "accel_x", snap.motion.accel_x);
+        cJSON_AddNumberToObject(motion, "accel_y", snap.motion.accel_y);
+        cJSON_AddNumberToObject(motion, "accel_z", snap.motion.accel_z);
+        cJSON_AddItemToObject(root, "motion", motion);
     }
 
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));

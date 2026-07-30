@@ -30,6 +30,8 @@ PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
 
 前端 **只订** `handle/status`，不订 `handle/input`。
 
+`--touchpad-xy` 时附带可选 `motion`（I07）：accel 重映射 `(-x,z,-y)`；gyro 用 ` (x,-z,y)` 保持右手系。平放 `accel_z≈-1`；右侧朝下 `accel_x≈+1`。对着 +轴看：**逆时针 gyro 正、顺时针负**。
+
 ## PS4 DualShock 4 · pygame / Linux HID 对照（定稿）
 
 图注数字为 **0-based** 按钮下标；轴标签 `axes N` 若为 1-based 则 pygame 下标 = N−1。下列表统一 **pygame 0-based**。

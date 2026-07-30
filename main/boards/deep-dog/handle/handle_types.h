@@ -68,12 +68,32 @@ struct HandleAxes {
 };
 
 /** 可选触控板坐标（I06）；present=false 表示 JSON 未带 touchpad */
+struct HandleTouchContact {
+    bool active = false;
+    float x = 0.f;
+    float y = 0.f;
+};
+
 struct HandleTouchpad {
     bool present = false;
     bool active = false;
     float x = 0.f;
     float y = 0.f;
     int fingers = 0;
+    /** 0～2；contact_count=0 表示未带 contacts（仅用 x/y） */
+    int contact_count = 0;
+    HandleTouchContact contacts[2]{};
+};
+
+/** 可选手柄 IMU（I07）；present=false 表示 JSON 未带 motion */
+struct HandleMotion {
+    bool present = false;
+    float gyro_x = 0.f;
+    float gyro_y = 0.f;
+    float gyro_z = 0.f;
+    float accel_x = 0.f;
+    float accel_y = 0.f;
+    float accel_z = 0.f;
 };
 
 /** 与 YAML handle/status|input 对齐的控制快照 */
@@ -83,5 +103,6 @@ struct HandleSnapshot {
     HandleAxes axes{};
     HandleButtons buttons{};
     HandleTouchpad touchpad{};
+    HandleMotion motion{};
     int64_t ts_us = 0;
 };

@@ -28,12 +28,13 @@ Profiles:
   auto      — 按名称 / 空闲轴启发式选择
 
 --touchpad-xy (default off):
-  macOS + DS4 USB → hidapi 全量读同一份 report（按键+摇杆+touchpad XY）。
+  macOS + DS4 USB → hidapi 全量读同一份 report（按键+摇杆+触控双点+motion）。
   关闭时行为与现网一致（仅 pygame + buttons.touch）。
   探测脚本：scripts/deep_dog_ds4_touchpad_probe.py
 
 抽象极性（I01）：lx/rx 右为正；ly/ry 下为正（前推 ly<0）。
-Touchpad（I06）：x 左→右、y 上→下，归一化 [0,1]。
+Touchpad（I06）：x/y 主触点 + contacts[0..2]；坐标 [0,1]。
+Motion（I07）：可选 gyro(dps)/accel(g)；仅 HID 全量读时带上。
 """
 
 from __future__ import annotations
@@ -286,6 +287,35 @@ def snapshot_equal(a: dict | None, b: dict | None, eps: float = 0.02) -> bool:
             return False
         if int(at.get("fingers", 0)) != int(bt.get("fingers", 0)):
             return False
+        ac, bc = at.get("contacts"), bt.get("contacts")
+        if isinstance(ac, list) or isinstance(bc, list):
+            ac = ac if isinstance(ac, list) else []
+            bc = bc if isinstance(bc, list) else []
+            if len(ac) != len(bc):
+                return False
+            for ca, cb in zip(ac, bc):
+                if bool(ca.get("active")) != bool(cb.get("active")):
+                    return False
+                if abs(float(ca.get("x", 0)) - float(cb.get("x", 0))) > eps:
+                    return False
+                if abs(float(ca.get("y", 0)) - float(cb.get("y", 0))) > eps:
+                    return False
+    am, bm = a.get("motion"), b.get("motion")
+    if (am is None) != (bm is None):
+        return False
+    if isinstance(am, dict) and isinstance(bm, dict):
+        # IMU is noisy; do NOT let tiny gyro jitter force 40Hz MQTT.
+        # Still detect real shakes; rest/noise stays "equal" so heartbeat carries motion.
+        for k, e in (
+            ("gyro_x", 25.0),
+            ("gyro_y", 25.0),
+            ("gyro_z", 25.0),
+            ("accel_x", 0.15),
+            ("accel_y", 0.15),
+            ("accel_z", 0.15),
+        ):
+            if abs(float(am.get(k, 0)) - float(bm.get(k, 0))) > e:
+                return False
     return True
 
 
@@ -321,13 +351,19 @@ def offline_snapshot(*, with_touchpad: bool = False) -> dict:
         "ts": int(time.time()),
     }
     if with_touchpad:
-        snap["touchpad"] = {"active": False, "x": 0.0, "y": 0.0, "fingers": 0}
+        snap["touchpad"] = {
+            "active": False,
+            "x": 0.0,
+            "y": 0.0,
+            "fingers": 0,
+            "contacts": [],
+        }
     return snap
 
 
 def public_snapshot(snap: dict) -> dict:
     """Strip internal/debug keys before MQTT publish."""
-    allowed = {"connected", "source", "axes", "buttons", "touchpad", "ts"}
+    allowed = {"connected", "source", "axes", "buttons", "touchpad", "motion", "ts"}
     out = {k: v for k, v in snap.items() if k in allowed}
     return out
 
@@ -399,7 +435,8 @@ def acquire_ds4_hid(hid_mod, path: bytes | None = None):
 def read_hid_snapshot(dev) -> dict | None:
     from deep_dog_ds4_hid import parse_ds4_usb_report, read_ds4_report
 
-    data = read_ds4_report(dev)
+    # OSError propagates: bridge treats it as disconnect and rescans.
+    data = read_ds4_report(dev, wait_ms=20.0, allow_short=True)
     if not data:
         return None
     return parse_ds4_usb_report(data)
@@ -416,6 +453,8 @@ def run_touchpad_xy_loop(
     hid_path: str | None,
 ) -> int:
     """HID-only bridge path: buttons + axes + touchpad from one DS4 report."""
+    from deep_dog_ds4_hid import wake_ds4_full_reports
+
     hid_mod = try_import_hid()
     if hid_mod is None:
         print(
@@ -429,6 +468,8 @@ def run_touchpad_xy_loop(
     interval = 1.0 / max(1.0, hz)
     heartbeat_s = max(0.05, heartbeat_ms / 1000.0)
     reconnect_s = max(0.2, reconnect_ms / 1000.0)
+    # Wall-clock disconnect: empty nonblocking reads are normal between reports.
+    stale_s = 2.0
 
     dev, info = acquire_ds4_hid(hid_mod, path=path)
     if dev is None:
@@ -444,9 +485,10 @@ def run_touchpad_xy_loop(
     last_snap = None
     last_pub = 0.0
     last_rescan = 0.0
+    last_good = 0.0
+    last_wake = 0.0
     pad_online = False
-    stale_reads = 0
-    STALE_LIMIT = 200  # ~ nonblocking empty reads before treat as disconnect
+    warned_short = False
 
     if info is not None:
         pid = int(info.get("product_id") or 0)
@@ -455,6 +497,7 @@ def run_touchpad_xy_loop(
             f"product={info.get('product_string')!r}"
         )
         pad_online = True
+        last_good = time.time()
 
     try:
         while True:
@@ -473,14 +516,21 @@ def run_touchpad_xy_loop(
                         print(f"[{ts()}] DS4 reconnected (HID)")
                         pad_online = True
                         last_snap = None
-                        stale_reads = 0
+                        last_good = now
+                        warned_short = False
                 time.sleep(0.05)
                 continue
 
-            snap = read_hid_snapshot(dev)
+            try:
+                snap = read_hid_snapshot(dev)
+            except OSError as e:
+                print(f"[{ts()}] HID read error ({e}); will rescan")
+                last_good = now - stale_s
+                snap = None
             if snap is None:
-                stale_reads += 1
-                if stale_reads >= STALE_LIMIT:
+                # Distinguish idle gap vs hard IO failure: if last_good is fresh,
+                # just wait; after stale_s, close and rescan (also covers OSError).
+                if last_good > 0 and (now - last_good) >= stale_s:
                     print(f"[{ts()}] HID stale — publish connected=false; will rescan")
                     pad_online = False
                     off = offline_snapshot(with_touchpad=True)
@@ -488,14 +538,34 @@ def run_touchpad_xy_loop(
                     last_pub = now
                     last_snap = off
                     try:
-                        dev.close()
+                        if dev is not None:
+                            dev.close()
                     except Exception:
                         pass
                     dev = None
-                time.sleep(0.001)
+                elif now - last_wake >= 0.5:
+                    last_wake = now
+                    try:
+                        if dev is not None:
+                            wake_ds4_full_reports(dev, force=True)
+                    except Exception:
+                        # write/read failure → force rescan next stale window
+                        last_good = min(last_good, now - stale_s) if last_good else now - stale_s
+                time.sleep(0.002)
                 continue
 
-            stale_reads = 0
+            last_good = now
+            report_len = int(snap.get("_len") or 0)
+            if report_len and report_len < 64 and not warned_short:
+                warned_short = True
+                print(
+                    f"[{ts()}] HID short reports ({report_len}B) — "
+                    "axes/buttons ok; touchpad/motion may be unavailable"
+                )
+            elif report_len >= 64 and warned_short:
+                warned_short = False
+                print(f"[{ts()}] HID full reports restored ({report_len}B)")
+
             pad_online = True
             changed = not snapshot_equal(snap, last_snap)
             due_change = changed and (now - last_pub >= interval)
@@ -505,6 +575,12 @@ def run_touchpad_xy_loop(
                 publish_snap(client, input_topic, snap)
                 last_pub = now
                 last_snap = snap
+            if now - last_wake >= 1.0:
+                last_wake = now
+                try:
+                    wake_ds4_full_reports(dev)
+                except Exception:
+                    pass
             time.sleep(0.001)
     except KeyboardInterrupt:
         print(f"[{ts()}] stopping; publish connected=false")
@@ -602,7 +678,7 @@ def main() -> int:
     ap.add_argument(
         "--touchpad-xy",
         action="store_true",
-        help="DS4 hidapi full-read: buttons+axes+touchpad XY (default off; needs hidapi)",
+        help="DS4 hidapi full-read: buttons+axes+touchpad contacts+motion (default off; needs hidapi)",
     )
     ap.add_argument(
         "--hid-path",
@@ -686,13 +762,24 @@ def main() -> int:
             bt = (o.get("buttons") or {}).get("touch")
             ax = o.get("axes") or {}
             if isinstance(tp, dict):
+                n_c = len(tp.get("contacts") or []) if isinstance(tp.get("contacts"), list) else 0
                 summary = (
                     f" touchpad={{active:{1 if tp.get('active') else 0} "
                     f"x:{float(tp.get('x', 0)):.2f} y:{float(tp.get('y', 0)):.2f} "
-                    f"fingers:{int(tp.get('fingers', 0))}}}"
+                    f"fingers:{int(tp.get('fingers', 0))} contacts:{n_c}}}"
                 )
             else:
                 summary = " touchpad=<absent>"
+            mo = o.get("motion")
+            if isinstance(mo, dict):
+                summary += (
+                    f" motion={{gx:{float(mo.get('gyro_x', 0)):.1f} "
+                    f"gy:{float(mo.get('gyro_y', 0)):.1f} "
+                    f"gz:{float(mo.get('gyro_z', 0)):.1f} "
+                    f"ax:{float(mo.get('accel_x', 0)):.2f} "
+                    f"ay:{float(mo.get('accel_y', 0)):.2f} "
+                    f"az:{float(mo.get('accel_z', 0)):.2f}}}"
+                )
             summary += (
                 f" touch_btn={1 if bt else 0}"
                 f" lx={float(ax.get('lx', 0)):.2f} ly={float(ax.get('ly', 0)):.2f}"

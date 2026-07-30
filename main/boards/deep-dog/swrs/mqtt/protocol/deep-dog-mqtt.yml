@@ -555,12 +555,35 @@ topics:
         optional: true
         note: >
           Optional DS4 touchpad (I06). Absent = source unsupported / flag off.
-          x left→right, y top→bottom, both [0,1].
+          x/y = primary contact (compat). contacts[] up to 2 fingers (I06 dual).
         fields:
           active: { type: bool }
           x: { type: float, range: [0, 1] }
           y: { type: float, range: [0, 1] }
           fingers: { type: int, optional: true }
+          contacts:
+            type: array
+            optional: true
+            note: "0..2 items; each {active,x,y}"
+            item:
+              active: { type: bool }
+              x: { type: float, range: [0, 1] }
+              y: { type: float, range: [0, 1] }
+      motion:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 onboard IMU (I07). Absent without HID full report.
+          Body frame: +X right, +Y forward (light bar), +Z up;
+          flat face-up => accel_z ≈ -1 g. gyro_* dps; accel_* g.
+          Not board imu/status. See I07.
+        fields:
+          gyro_x: { type: float }
+          gyro_y: { type: float }
+          gyro_z: { type: float }
+          accel_x: { type: float }
+          accel_y: { type: float }
+          accel_z: { type: float }
       raw: { type: object, optional: true }
       ts: { type: int }
 
@@ -601,12 +624,32 @@ topics:
         optional: true
         note: >
           Optional DS4 touchpad passthrough (I06). Absent when input omitted it.
-          x left→right, y top→bottom, both [0,1].
+          x/y primary; contacts[] up to 2.
         fields:
           active: { type: bool }
           x: { type: float, range: [0, 1] }
           y: { type: float, range: [0, 1] }
           fingers: { type: int, optional: true }
+          contacts:
+            type: array
+            optional: true
+            item:
+              active: { type: bool }
+              x: { type: float, range: [0, 1] }
+              y: { type: float, range: [0, 1] }
+      motion:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 IMU passthrough (I07). Body frame +X right/+Y forward/+Z up;
+          flat face-up => accel_z ≈ -1 g. gyro dps, accel g.
+        fields:
+          gyro_x: { type: float }
+          gyro_y: { type: float }
+          gyro_z: { type: float }
+          accel_x: { type: float }
+          accel_y: { type: float }
+          accel_z: { type: float }
       raw: { type: object, optional: true }
       ts: { type: int }
 

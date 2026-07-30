@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared DualShock 4 HID report parser for deep-dog (I06).
+"""Shared DualShock 4 HID report parser for deep-dog (I06 touchpad + I07 motion).
 
 Used by deep_dog_ds4_touchpad_probe.py and deep_dog_handle_bridge.py --touchpad-xy.
 """
@@ -21,6 +21,10 @@ def clamp(v: float, lo: float, hi: float) -> float:
 
 def axis_deadzone(v: float, dz: float = 0.08) -> float:
     return 0.0 if abs(v) < dz else clamp(v, -1.0, 1.0)
+
+
+def trigger_deadzone(v: float, dz: float = 0.12) -> float:
+    return 0.0 if v < dz else v
 
 
 def u8_to_axis(b: int) -> float:
@@ -66,6 +70,51 @@ def parse_touch_finger(data: bytes, offset: int) -> tuple[bool, int, int]:
     return active, raw_x, raw_y
 
 
+def _i16le(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 2], "little", signed=True)
+
+
+def parse_motion(payload: bytes, gyro_off: int) -> dict | None:
+    """DS4 IMU → deep-dog body frame. Units: dps (/16), g (/8192).
+
+    HID report order is sensor-native. Accel remaps to body frame
+    (+X right, +Y forward, +Z up):
+
+        a_body = R @ a_hid
+        R: (x, y, z) → (-x, z, -y)   # det(R) = -1
+
+    Flat face-up → accel_z ≈ -1 g; right side down → accel_x ≈ +1 g.
+
+    Gyro is an axial vector: under improper R, ω_body = det(R) * R @ ω_hid
+    so that the body frame stays right-handed (I07).
+    """
+    if gyro_off < 0 or len(payload) < gyro_off + 12:
+        return None
+    gx = _i16le(payload, gyro_off)
+    gy = _i16le(payload, gyro_off + 2)
+    gz = _i16le(payload, gyro_off + 4)
+    ax = _i16le(payload, gyro_off + 6)
+    ay = _i16le(payload, gyro_off + 8)
+    az = _i16le(payload, gyro_off + 10)
+    # Accel: R @ a = (-x, z, -y)
+    # Gyro:  det(R) R @ ω = -(-x, z, -y) = (x, -z, y)
+    return {
+        "gyro_x": round(gx / 16.0, 3),
+        "gyro_y": round(-gz / 16.0, 3),
+        "gyro_z": round(gy / 16.0, 3),
+        "accel_x": round(-ax / 8192.0, 4),
+        "accel_y": round(az / 8192.0, 4),
+        "accel_z": round(-ay / 8192.0, 4),
+    }
+
+
+def _norm_tp(raw_x: int, raw_y: int) -> tuple[float, float]:
+    return (
+        clamp(raw_x / float(TP_X_MAX), 0.0, 1.0),
+        clamp(raw_y / float(TP_Y_MAX), 0.0, 1.0),
+    )
+
+
 def _finger_coords_ok(active: bool, x: int, y: int) -> bool:
     """Inactive DS4 fingers often sit at 0x7FF sentinel — do not reject those."""
     if not active:
@@ -94,53 +143,64 @@ def pick_touch_counter_offset(
 
 
 def parse_ds4_usb_report(data: bytes) -> dict | None:
-    """Parse DS4 report → abstract handle snapshot (+ touchpad).
+    """Parse DS4 report → abstract handle snapshot (+ touchpad contacts + motion).
 
-    USB (report 0x01, ~64B): [1]LX..[4]RY [5]L2 [6]R2 [7..9]buttons; touch @35
-    BT  (report 0x11, ~78B): skip 0x11 0xC0 0x00 → sticks; buttons then L2/R2;
-                             touch counter @36 (payload@33).
+    Full reports (USB 0x01 / BT 0x11) share Linux ``dualshock4_input_report_common``:
 
-    macOS may briefly emit 10B GamePad reports — caller should drop those
-    (see read_ds4_report); they have no touchpad and mis-map L2.
+        x,y,rx,ry | buttons[3] | z,rz(L2/R2) | timestamp | temp | gyro[3] | accel[3] | …
+
+    - USB: strip 1-byte report-id → common at payload[0]
+    - BT:  strip 0x11 + 2 reserved → common at payload[0]
+    - gyro starts at payload offset **12** (NOT 16 — 16 was mis-aligned and
+      produced gz≈500 garbage, flooding MQTT via motion on-change)
+
+    Short macOS GamePad frames (~10B, still report-id 0x01) are sticks-only
+    best-effort; no reliable IMU/touch.
 
     Stick polarity: right/down positive (I01).
-    Touchpad: x left→right, y top→bottom, [0,1].
+    Touchpad: x left→right, y top→bottom, [0,1]; contacts up to 2 (I06).
+    Motion: gyro dps, accel g (I07).
     """
     if not data or len(data) < 10:
         return None
 
     report_id = data[0]
-    touch_default = 34
-    if report_id == 0x01:
-        # USB: strip report-id only
-        payload = data[1:]
-        btn_i, trig_i = 6, 4
-        touch_default = 34
-    elif report_id == 0x11:
-        # BT: strip report-id + 0xC0 + 0x00; buttons precede analog triggers
+    full = len(data) >= 64
+    # Common-struct offsets (full report). Short GamePad keeps legacy trig@4.
+    if report_id == 0x11:
         if len(data) < 12:
             return None
         payload = data[3:]
-        btn_i, trig_i = 4, 7
-        touch_default = 33
+        touch_default = 33  # num_touch_reports @32, first finger @33
+    elif report_id == 0x01:
+        payload = data[1:]
+        touch_default = 34
     elif report_id in (0x00,) or report_id > 0x20:
-        # Some stacks omit report-id; treat as USB payload
         payload = data
         report_id = 0
-        btn_i, trig_i = 6, 4
+        touch_default = 34
     else:
         payload = data[1:]
-        btn_i, trig_i = 6, 4
+        touch_default = 34
+
+    if full:
+        btn_i, trig_i, gyro_off = 4, 7, 12
+    else:
+        # macOS 10B: sticks + hat-ish; treat like old USB packing
+        btn_i, trig_i, gyro_off = 6, 4, -1
 
     if len(payload) < max(btn_i + 3, trig_i + 2, 9):
         return None
 
     lx = axis_deadzone(u8_to_axis(payload[0]))
-    ly = axis_deadzone(u8_to_axis(payload[1]))
+    # DS4 HID Y：0=物理上推；抽象约定「下为正 / 前推 ly<0」与 pygame ds4_sdl 一致，垂直取反
+    ly = axis_deadzone(-u8_to_axis(payload[1]))
     rx = axis_deadzone(u8_to_axis(payload[2]))
-    ry = axis_deadzone(u8_to_axis(payload[3]))
-    l2 = u8_to_trigger(payload[trig_i])
-    r2 = u8_to_trigger(payload[trig_i + 1])
+    ry = axis_deadzone(-u8_to_axis(payload[3]))
+    # macOS 10B GamePad often has L2 idle noise (~0x08); deadzone short frames more.
+    trig_dz = 0.12 if not full else 0.04
+    l2 = trigger_deadzone(u8_to_trigger(payload[trig_i]), trig_dz)
+    r2 = trigger_deadzone(u8_to_trigger(payload[trig_i + 1]), trig_dz)
 
     buttons1 = payload[btn_i]
     buttons2 = payload[btn_i + 1]
@@ -174,22 +234,23 @@ def parse_ds4_usb_report(data: bytes) -> dict | None:
     fingers = 0
     tx = ty = 0.0
     active = False
+    contacts: list[dict] = []
     if touch_off is not None and touch_off + 8 < len(payload):
         a0, x0, y0 = parse_touch_finger(payload, touch_off + 1)
         a1, x1, y1 = parse_touch_finger(payload, touch_off + 5)
-        if a0 and _finger_coords_ok(True, x0, y0):
-            fingers += 1
-            active = True
-            tx = clamp(x0 / float(TP_X_MAX), 0.0, 1.0)
-            ty = clamp(y0 / float(TP_Y_MAX), 0.0, 1.0)
-        if a1 and _finger_coords_ok(True, x1, y1):
-            fingers += 1
-            active = True
-            if not a0:
-                tx = clamp(x1 / float(TP_X_MAX), 0.0, 1.0)
-                ty = clamp(y1 / float(TP_Y_MAX), 0.0, 1.0)
+        for a, x, y in ((a0, x0, y0), (a1, x1, y1)):
+            ok = bool(a and _finger_coords_ok(True, x, y))
+            nx, ny = _norm_tp(x, y) if ok else (0.0, 0.0)
+            contacts.append({"active": ok, "x": round(nx, 4), "y": round(ny, 4)})
+            if ok:
+                fingers += 1
+                if not active:
+                    active = True
+                    tx, ty = nx, ny
 
-    return {
+    motion = parse_motion(payload, gyro_off) if gyro_off >= 0 else None
+
+    out: dict = {
         "connected": True,
         "source": "wifi",
         "report_id": report_id,
@@ -219,12 +280,16 @@ def parse_ds4_usb_report(data: bytes) -> dict | None:
             "x": round(tx, 4),
             "y": round(ty, 4),
             "fingers": fingers,
+            "contacts": contacts,
         },
         "ts": int(time.time()),
         "_touch_off": touch_off,
         "_len": len(data),
         "_pay_len": len(payload),
     }
+    if motion is not None:
+        out["motion"] = motion
+    return out
 
 
 _last_ds4_wake = 0.0
@@ -244,6 +309,12 @@ def wake_ds4_full_reports(dev, *, force: bool = False) -> None:
         dev.write(pkt)
     except Exception:
         pass
+    # Feature 0x02 (calibration) / 0x12 often flips macOS BT from 10B → 0x11 78B.
+    for rid, size in ((0x02, 37), (0x12, 16)):
+        try:
+            dev.get_feature_report(rid, size)
+        except Exception:
+            pass
 
 
 def open_ds4_device(hid, path: bytes | None = None):
@@ -261,32 +332,51 @@ def open_ds4_device(hid, path: bytes | None = None):
     except Exception:
         pass
     wake_ds4_full_reports(dev, force=True)
-    # Drain any leftover short reports after mode switch
+    # Give the stack a moment to switch report mode, then confirm full size.
+    time.sleep(0.05)
     try:
-        for _ in range(40):
+        for _ in range(30):
             chunk = dev.read(78)
             if not chunk:
                 break
             if len(chunk) >= 64:
+                wake_ds4_full_reports(dev, force=True)
                 break
+            wake_ds4_full_reports(dev)
     except Exception:
         pass
+    time.sleep(0.02)
     return dev, info
 
 
-def read_ds4_report(dev, *, min_len: int = 64) -> bytes | None:
-    """Read one full input report (USB ~64 or BT ~78). Drops short GamePad frames."""
-    # A few quick retries: macOS may interleave 10B GamePad frames after wake.
-    for attempt in range(8):
-        data = dev.read(78)
-        if not data:
-            if attempt == 0:
-                return None
-            time.sleep(0.001)
-            continue
-        data = bytes(data)
-        if len(data) >= min_len:
-            return data
-        wake_ds4_full_reports(dev)
+def read_ds4_report(
+    dev, *, min_len: int = 64, wait_ms: float = 25.0, allow_short: bool = True
+) -> bytes | None:
+    """Read one input report (prefer USB~64 / BT~78; optional 10B GamePad fallback).
+
+    Non-blocking empty reads are retried until wait_ms — do NOT treat the first
+    empty as disconnect (that caused reconnect storms on macOS BT).
+    Raises OSError only if the caller wants to handle device loss; transient
+    read errors return None so the bridge can soft-reconnect.
+    """
+    deadline = time.time() + max(0.0, wait_ms) / 1000.0
+    best_short: bytes | None = None
+    while True:
+        try:
+            data = dev.read(78)
+        except OSError:
+            # macOS BT often surfaces disconnect / IO failure as read error
+            raise
+        if data:
+            data = bytes(data)
+            if len(data) >= min_len:
+                return data
+            if len(data) >= 10:
+                best_short = data
+                wake_ds4_full_reports(dev)
+        if time.time() >= deadline:
+            break
         time.sleep(0.001)
+    if allow_short and best_short is not None:
+        return best_short
     return None
