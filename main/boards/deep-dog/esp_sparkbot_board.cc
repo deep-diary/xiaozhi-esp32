@@ -775,6 +775,15 @@ public:
     }
 
     void StartNetwork() override {
+#if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
+        // HCI 需要连续 INTERNAL|DMA；WiFi 连上后再启常 NO_MEM。
+        // 先起 Bluepad32/BTstack，再连 WiFi（扫描与 STA 共存）。
+        if (!HandleBtStart(&handle_hub_)) {
+            ESP_LOGE(TAG, "HandleBtStart failed (before WiFi)");
+        } else {
+            ESP_LOGI(TAG, "Handle BT up before WiFi; will scan while STA connects");
+        }
+#endif
         WifiBoard::StartNetwork();
 #if DEEP_DOG_WIFI_USE_STATIC_IP
         if (s_deep_dog_sta_connected_hook == nullptr) {
@@ -806,15 +815,6 @@ public:
                 ESP_LOGI(TAG, "WiFi IP=%s，启动 face/hub/http/mqtt/imu", ip.c_str());
             }
         }
-#if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
-        // WiFi/IP 已就绪 → 启 BT 扫描；须在人脸/HTTP/MQTT 之前，否则 HCI 常 NO_MEM
-        vTaskDelay(pdMS_TO_TICKS(100));
-        if (!HandleBtStart(&handle_hub_)) {
-            ESP_LOGE(TAG, "HandleBtStart failed (after WiFi)");
-        } else {
-            ESP_LOGI(TAG, "Handle BT up after WiFi; scanning before face/mqtt");
-        }
-#endif
 #if DEEP_DOG_IMU_ENABLE
         InitializeImu();
 #endif

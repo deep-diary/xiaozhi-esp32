@@ -193,10 +193,10 @@ def parse_ds4_usb_report(data: bytes) -> dict | None:
         return None
 
     lx = axis_deadzone(u8_to_axis(payload[0]))
-    # DS4 HID Y：0=物理上推；抽象约定「下为正 / 前推 ly<0」与 pygame ds4_sdl 一致，垂直取反
-    ly = axis_deadzone(-u8_to_axis(payload[1]))
+    # DS4 HID Y：0=物理上推 → u8_to_axis≈-1，已与 I01「下为正 / 前推 ly<0」一致，勿再取反
+    ly = axis_deadzone(u8_to_axis(payload[1]))
     rx = axis_deadzone(u8_to_axis(payload[2]))
-    ry = axis_deadzone(-u8_to_axis(payload[3]))
+    ry = axis_deadzone(u8_to_axis(payload[3]))
     # macOS 10B GamePad often has L2 idle noise (~0x08); deadzone short frames more.
     trig_dz = 0.12 if not full else 0.04
     l2 = trigger_deadzone(u8_to_trigger(payload[trig_i]), trig_dz)

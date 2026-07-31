@@ -78,7 +78,11 @@ PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
 | □ / △ | btn 3 / 2 | btn 2 / 3 |
 | Share / L1 / Options | 8 / 4 / 9 | 4 / 9 / 6 |
 | D-pad | axis 6/7 | btn 11–14 |
-| 摇杆极性 | 左/上 = +1（需取反） | 右为正；**上/下与抽象相反，ly/ry 取反** |
+| 摇杆极性 | 左/上 = +1（需取反） | 右为正；pygame 垂直上=+1 → **`ly/ry = −raw`** 对齐 I01 |
+
+**HID `--touchpad-xy`**：DS4 report Y 字节上推→负，**已是 I01**，桥端**不要**再对 `ly/ry` 取反（曾为迁就前端圆点反号而误取反）。
+
+前端圆点：`py = ly * travel`（CSS Y 向下为正）；前推 `ly<0` → 圆点上移。勿再对 `ly` 乘 −1。
 
 桥 `--layout auto` 按空闲轴启发式选择；Mac 请确认日志里 `layout=ds4_sdl`。
 

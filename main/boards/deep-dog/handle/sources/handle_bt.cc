@@ -91,7 +91,8 @@ HandleSnapshot Normalize(const uni_gamepad_t& gp, bool connected) {
         return snap;
     }
 
-    // Bluepad32: axis 右/下为正，与 I01 契约一致
+    // Bluepad32: axis_y 上推为负、下推为正，与 I01「右/下为正」一致；勿取反。
+    // 前端若圆点上下反，改显示层（stickStyle），不要改本归一化。
     snap.axes.lx = NormAxis(gp.axis_x);
     snap.axes.ly = NormAxis(gp.axis_y);
     snap.axes.rx = NormAxis(gp.axis_rx);

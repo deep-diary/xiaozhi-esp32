@@ -4,6 +4,8 @@
 # Bluepad32 custom platform (required by handle_bt.cc)
 CONFIG_BLUEPAD32_PLATFORM_CUSTOM=y
 CONFIG_BLUEPAD32_MAX_DEVICES=1
+# 与小智 UART 监控互斥；开着会在 HCI 失败时 ESP_ERROR_CHECK abort 重启
+# CONFIG_BLUEPAD32_USB_CONSOLE_ENABLE is not set
 
 # ESP32-S3: BLE controller; Host = Controller only (BTstack is host)
 CONFIG_BT_ENABLED=y
