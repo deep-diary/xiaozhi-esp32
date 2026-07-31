@@ -64,7 +64,7 @@ modules:
     status: defined
     required: false
     note: >
-      Dual-source v0.1: onboard Bluepad32+Xbox BLE (source=bt) and PC MQTT
+      Dual-source v0.1: onboard Bluepad32+BTstack Xbox BLE (source=bt) and PC MQTT
       bridge (source=wifi, handle/input). Hub+App layering in swrs/input/;
       firmware planned (needs OTA partition headroom for BLE).
     ref: main/boards/deep-dog/swrs/input/
@@ -513,9 +513,31 @@ topics:
     dir: downlink
     qos: 1
     retain: false
-    note: "enable/disable gate local HandleApps; pair is onboard BT only"
+    note: >
+      enable/disable gate local HandleApps; pair onboard BT;
+      rumble = board BT Xbox (I02); output = PC-bridge DS4 LED+rumble (I09).
+      Device may also PUBLISH output (alerts); bridge SUB and writes HID.
     payload:
-      action: { type: enum, values: [enable, disable, pair] }
+      action: { type: enum, values: [enable, disable, pair, rumble, output] }
+      duration_ms: { type: int, optional: true, note: "rumble or output; ms; cap ~2000" }
+      weak: { type: int, optional: true, note: "BT rumble weak 0-255" }
+      strong: { type: int, optional: true, note: "BT rumble strong 0-255" }
+      delay_ms: { type: int, optional: true, note: "BT rumble delay ms" }
+      led:
+        type: object
+        optional: true
+        note: "output only; DS4 lightbar"
+        fields:
+          r: { type: int, range: [0, 255] }
+          g: { type: int, range: [0, 255] }
+          b: { type: int, range: [0, 255] }
+      rumble:
+        type: object
+        optional: true
+        note: "output only; normalized motors (PC bridge)"
+        fields:
+          strong: { type: float, range: [0, 1], note: "large motor" }
+          weak: { type: float, range: [0, 1], note: "small motor" }
       ts: { type: int }
 
   handle/input:

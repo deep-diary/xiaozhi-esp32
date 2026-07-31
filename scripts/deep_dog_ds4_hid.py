@@ -294,6 +294,90 @@ def parse_ds4_usb_report(data: bytes) -> dict | None:
 
 _last_ds4_wake = 0.0
 
+# Last applied lightbar / motors (sparse MQTT + wake must not clobber)
+_ds4_led_rgb = (0, 0, 64)
+_ds4_rumble = (0.0, 0.0)  # weak, strong
+
+
+def clamp_u8(v: float | int) -> int:
+    iv = int(round(float(v)))
+    return 0 if iv < 0 else 255 if iv > 255 else iv
+
+
+def build_ds4_output_report(
+    *,
+    rumble_weak: float = 0.0,
+    rumble_strong: float = 0.0,
+    r: int = 0,
+    g: int = 0,
+    b: int = 64,
+    flash_on: int = 0,
+    flash_off: int = 0,
+) -> bytes:
+    """DS4 USB/BT output report 0x05 (32 bytes incl. report id).
+
+    Byte layout (common community map):
+      [0]=0x05 [1]=0xFF [2]=0x04 [3]=0x00
+      [4]=weak(right/small) [5]=strong(left/large) 0..255
+      [6]=R [7]=G [8]=B
+      [9]=flash_on [10]=flash_off (0=steady)
+    """
+    weak = clamp_u8(max(0.0, min(1.0, float(rumble_weak))) * 255.0)
+    strong = clamp_u8(max(0.0, min(1.0, float(rumble_strong))) * 255.0)
+    pkt = bytearray(32)
+    pkt[0] = 0x05
+    pkt[1] = 0xFF
+    pkt[2] = 0x04
+    pkt[3] = 0x00
+    pkt[4] = weak
+    pkt[5] = strong
+    pkt[6] = clamp_u8(r)
+    pkt[7] = clamp_u8(g)
+    pkt[8] = clamp_u8(b)
+    pkt[9] = clamp_u8(flash_on)
+    pkt[10] = clamp_u8(flash_off)
+    return bytes(pkt)
+
+
+def apply_ds4_output(
+    dev,
+    *,
+    rumble_weak: float = 0.0,
+    rumble_strong: float = 0.0,
+    r: int | None = None,
+    g: int | None = None,
+    b: int | None = None,
+    flash_on: int = 0,
+    flash_off: int = 0,
+    remember_led: bool = True,
+) -> bool:
+    """Write lightbar + rumble. None led channels keep last remembered color."""
+    global _ds4_led_rgb, _ds4_rumble
+    lr, lg, lb = _ds4_led_rgb
+    rr = lr if r is None else clamp_u8(r)
+    gg = lg if g is None else clamp_u8(g)
+    bb = lb if b is None else clamp_u8(b)
+    if remember_led:
+        _ds4_led_rgb = (rr, gg, bb)
+    _ds4_rumble = (
+        max(0.0, min(1.0, float(rumble_weak))),
+        max(0.0, min(1.0, float(rumble_strong))),
+    )
+    pkt = build_ds4_output_report(
+        rumble_weak=_ds4_rumble[0],
+        rumble_strong=_ds4_rumble[1],
+        r=rr,
+        g=gg,
+        b=bb,
+        flash_on=flash_on,
+        flash_off=flash_off,
+    )
+    try:
+        dev.write(pkt)
+        return True
+    except Exception:
+        return False
+
 
 def wake_ds4_full_reports(dev, *, force: bool = False) -> None:
     """Ask DS4 for full HID stream (64/78B with touchpad), not macOS 10B GamePad."""
@@ -302,13 +386,13 @@ def wake_ds4_full_reports(dev, *, force: bool = False) -> None:
     if not force and (now - _last_ds4_wake) < 0.5:
         return
     _last_ds4_wake = now
-    # 32-byte 0x05 output is required on macOS BT; shorter writes often leave
-    # the stack on Apple's stripped 10-byte reports (no touchpad, L2 noise).
-    pkt = bytes([0x05, 0xFF, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] + [0] * 23)
-    try:
-        dev.write(pkt)
-    except Exception:
-        pass
+    # Keep current rumble/LED while refreshing report mode (do not zero motors).
+    apply_ds4_output(
+        dev,
+        rumble_weak=_ds4_rumble[0],
+        rumble_strong=_ds4_rumble[1],
+        remember_led=True,
+    )
     # Feature 0x02 (calibration) / 0x12 often flips macOS BT from 10B → 0x11 78B.
     for rid, size in ((0x02, 37), (0x12, 16)):
         try:

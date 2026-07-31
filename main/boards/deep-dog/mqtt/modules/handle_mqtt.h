@@ -28,6 +28,13 @@ public:
 
     bool PublishStatus();
 
+    /**
+     * 发布 handle/cmd action=output（I09）。PC 桥订同一 Topic 写 DS4 灯/震。
+     * led_* <0 表示省略该通道；rumble ∈ [0,1]；duration_ms<=0 表示不带时长字段。
+     */
+    bool PublishOutput(int led_r, int led_g, int led_b, float rumble_strong, float rumble_weak,
+                       int duration_ms);
+
 private:
     static void TimeoutTimerCb(void* arg);
     static void StatusFlushTimerCb(void* arg);

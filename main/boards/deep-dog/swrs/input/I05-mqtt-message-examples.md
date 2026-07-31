@@ -72,7 +72,7 @@ button 15 == Touch Pad Click   → 映射为 buttons.touch (bool)
 | MQTT `handle/input\|status` | 可选 `touchpad` | 可选 `buttons.touch` |
 | 前端 | 有 `touchpad` 画触点 | TOUCH 高亮 |
 
-结论：默认路径仍是 pygame（仅点击）；开 `--touchpad-xy` 后走 hidapi，从同一份 report 同时解析按键与 XY。规格见 **[I06-touchpad-xy](./I06-touchpad-xy.md)**。
+结论：桥 **默认 HID 全量读**（触控/motion/灯震）；`--no-touchpad-xy` 回退 pygame（仅点击）。规格见 **[I06](./I06-touchpad-xy.md)** · **[I09](./I09-ds4-output-feedback.md)**。
 
 ### 0.3 桥内 Normalize 后的逻辑快照（②，非 MQTT）
 
@@ -217,6 +217,23 @@ STATUS {"connected":true,"source":"wifi","axes":{"lx":0,"ly":0,"rx":0,"ry":0},"b
   "ts": 1785364526
 }
 ```
+
+## 2.1 告警 / 调试 → 桥：`handle/cmd` `output`（I09）
+
+Topic：`deepdiary/deep-dog/dev/handle/cmd`（QoS1）  
+设备或云 PUBLISH；**PC 桥 SUB** 后写 DS4 HID；设备下行收到 `output` 忽略。
+
+```json
+{
+  "action": "output",
+  "led": { "r": 200, "g": 40, "b": 0 },
+  "rumble": { "strong": 0.4, "weak": 0.2 },
+  "duration_ms": 200,
+  "ts": 1710000000
+}
+```
+
+板载 BT Xbox 短震仍用 `action: rumble`（见 I02），与 `output` 并存。
 
 ## 3. 前端侧
 

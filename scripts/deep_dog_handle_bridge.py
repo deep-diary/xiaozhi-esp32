@@ -1,40 +1,27 @@
 #!/usr/bin/env python3
 """PC gamepad → MQTT handle/input bridge for deep-dog.
 
-Reads a local controller (PS4 / Xbox / generic via pygame) and publishes
-normalized snapshots to deepdiary/deep-dog/{device_id}/handle/input.
+Default: DS4 hidapi full-read (axes/buttons/touchpad/motion) + subscribe
+handle/cmd for lightbar/rumble feedback (I09).
+Fallback: --no-touchpad-xy → pygame (no contacts/motion/LED/rumble).
 
 Dependencies:
-  pip3 install paho-mqtt pygame
-  # optional, only for --touchpad-xy (DS4 HID full read):
-  pip3 install hidapi
+  pip3 install paho-mqtt hidapi
+  # only for --no-touchpad-xy:
+  pip3 install pygame
 
 Credentials (do not commit):
   export DEEP_DOG_MQTT_USER=...
   export DEEP_DOG_MQTT_PASS=...
 
 Examples:
-  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --layout auto
-  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --layout ds4_sdl
-  python3 scripts/deep_dog_handle_bridge.py --via lan --touchpad-xy
-  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --list-joysticks
-  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --probe
-  /usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
-
-Profiles:
-  ds4_sdl   — pygame 2.x「PS4 Controller」(macOS/Windows 常见)：轴 0-3 摇杆、4-5 扳机
-  ds4_linux — Linux HID 标注图（L2 在 axis2；面键 △=2 □=3）
-  xbox      — 常见 XInput
-  auto      — 按名称 / 空闲轴启发式选择
-
---touchpad-xy (default off):
-  macOS + DS4 USB → hidapi 全量读同一份 report（按键+摇杆+触控双点+motion）。
-  关闭时行为与现网一致（仅 pygame + buttons.touch）。
-  探测脚本：scripts/deep_dog_ds4_touchpad_probe.py
+  python3 scripts/deep_dog_handle_bridge.py --via lan
+  python3 scripts/deep_dog_handle_bridge.py --via lan --no-touchpad-xy --layout ds4_sdl
+  python3 scripts/deep_dog_handle_bridge.py --probe-output
+  python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
 
 抽象极性（I01）：lx/rx 右为正；ly/ry 下为正（前推 ly<0）。
-Touchpad（I06）：x/y 主触点 + contacts[0..2]；坐标 [0,1]。
-Motion（I07）：可选 gyro(dps)/accel(g)；仅 HID 全量读时带上。
+Touchpad（I06）/ Motion（I07）/ Output（I09）：默认 HID 路径。
 """
 
 from __future__ import annotations
@@ -44,6 +31,7 @@ import json
 import os
 import ssl
 import sys
+import threading
 import time
 from datetime import datetime
 from urllib.parse import urlparse
@@ -426,10 +414,110 @@ def try_import_hid():
 
 
 def acquire_ds4_hid(hid_mod, path: bytes | None = None):
-    """Open DS4 via hidapi for --touchpad-xy. Returns (dev, info) or (None, None)."""
+    """Open DS4 via hidapi. Returns (dev, info) or (None, None)."""
     from deep_dog_ds4_hid import open_ds4_device
 
     return open_ds4_device(hid_mod, path=path)
+
+
+class Ds4OutputCtl:
+    """Thread-safe DS4 lightbar/rumble writer for MQTT handle/cmd action=output."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._dev = None
+        self._timer: threading.Timer | None = None
+
+    def set_dev(self, dev) -> None:
+        with self._lock:
+            self._dev = dev
+
+    def _cancel_timer_locked(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    def clear_rumble(self) -> None:
+        from deep_dog_ds4_hid import apply_ds4_output
+
+        with self._lock:
+            self._cancel_timer_locked()
+            dev = self._dev
+        if dev is None:
+            return
+        apply_ds4_output(dev, rumble_weak=0.0, rumble_strong=0.0)
+
+    def apply_output_cmd(self, obj: dict) -> bool:
+        from deep_dog_ds4_hid import apply_ds4_output
+
+        led = obj.get("led") if isinstance(obj.get("led"), dict) else None
+        rumble = obj.get("rumble") if isinstance(obj.get("rumble"), dict) else None
+        r = g = b = None
+        if led is not None:
+            if "r" in led:
+                r = int(led.get("r", 0))
+            if "g" in led:
+                g = int(led.get("g", 0))
+            if "b" in led:
+                b = int(led.get("b", 0))
+        weak = float(rumble.get("weak", 0) if rumble else 0)
+        strong = float(rumble.get("strong", 0) if rumble else 0)
+        duration_ms = obj.get("duration_ms")
+        try:
+            duration_ms = int(duration_ms) if duration_ms is not None else None
+        except (TypeError, ValueError):
+            duration_ms = None
+        if duration_ms is not None:
+            duration_ms = max(0, min(5000, duration_ms))
+
+        with self._lock:
+            self._cancel_timer_locked()
+            dev = self._dev
+            if dev is None:
+                return False
+            ok = apply_ds4_output(
+                dev,
+                rumble_weak=weak,
+                rumble_strong=strong,
+                r=r,
+                g=g,
+                b=b,
+            )
+            if ok and duration_ms and (weak > 0 or strong > 0):
+                t = threading.Timer(duration_ms / 1000.0, self.clear_rumble)
+                t.daemon = True
+                self._timer = t
+                t.start()
+            return ok
+
+
+def probe_ds4_output() -> int:
+    """Local LED/rumble smoke test without MQTT."""
+    from deep_dog_ds4_hid import apply_ds4_output
+
+    hid_mod = try_import_hid()
+    if hid_mod is None:
+        print("pip3 install hidapi", file=sys.stderr)
+        return 2
+    dev, info = acquire_ds4_hid(hid_mod)
+    if dev is None:
+        print("no DS4 found", file=sys.stderr)
+        return 1
+    print(f"[{ts()}] probe-output product={info.get('product_string')!r}")
+    try:
+        apply_ds4_output(dev, rumble_weak=0.0, rumble_strong=0.0, r=0, g=80, b=255)
+        time.sleep(0.4)
+        apply_ds4_output(dev, rumble_weak=0.3, rumble_strong=0.5, r=200, g=40, b=0)
+        time.sleep(0.5)
+        apply_ds4_output(dev, rumble_weak=0.0, rumble_strong=0.0, r=0, g=0, b=64)
+        print(f"[{ts()}] probe-output done")
+        return 0
+    finally:
+        try:
+            apply_ds4_output(dev, rumble_weak=0.0, rumble_strong=0.0)
+            dev.close()
+        except Exception:
+            pass
 
 
 def read_hid_snapshot(dev) -> dict | None:
@@ -451,14 +539,15 @@ def run_touchpad_xy_loop(
     reconnect_ms: int,
     wait_pad: bool,
     hid_path: str | None,
+    output_ctl: "Ds4OutputCtl | None" = None,
 ) -> int:
-    """HID-only bridge path: buttons + axes + touchpad from one DS4 report."""
+    """HID-only bridge path: buttons + axes + touchpad + motion; optional output."""
     from deep_dog_ds4_hid import wake_ds4_full_reports
 
     hid_mod = try_import_hid()
     if hid_mod is None:
         print(
-            "missing dependency for --touchpad-xy: pip3 install hidapi "
+            "missing dependency for HID mode: pip3 install hidapi "
             f"(interpreter={sys.executable})",
             file=sys.stderr,
         )
@@ -471,16 +560,21 @@ def run_touchpad_xy_loop(
     # Wall-clock disconnect: empty nonblocking reads are normal between reports.
     stale_s = 2.0
 
+    def bind_dev(d):
+        if output_ctl is not None:
+            output_ctl.set_dev(d)
+
     dev, info = acquire_ds4_hid(hid_mod, path=path)
+    bind_dev(dev)
     if dev is None:
         if not wait_pad:
             print(
-                "no DS4 found for --touchpad-xy; plug USB DualShock 4 "
-                "(or pass --wait-pad)",
+                "no DS4 found for HID mode; plug USB DualShock 4 "
+                "(or pass --wait-pad / --no-touchpad-xy)",
                 file=sys.stderr,
             )
             return 1
-        print(f"[{ts()}] --touchpad-xy: no DS4 yet; waiting…")
+        print(f"[{ts()}] HID mode: no DS4 yet; waiting…")
 
     last_snap = None
     last_pub = 0.0
@@ -493,7 +587,7 @@ def run_touchpad_xy_loop(
     if info is not None:
         pid = int(info.get("product_id") or 0)
         print(
-            f"[{ts()}] --touchpad-xy HID mode pid=0x{pid:04X} "
+            f"[{ts()}] HID mode pid=0x{pid:04X} "
             f"product={info.get('product_string')!r}"
         )
         pad_online = True
@@ -511,7 +605,9 @@ def run_touchpad_xy_loop(
                         except Exception:
                             pass
                         dev = None
+                        bind_dev(None)
                     dev, info = acquire_ds4_hid(hid_mod, path=path)
+                    bind_dev(dev)
                     if dev is not None:
                         print(f"[{ts()}] DS4 reconnected (HID)")
                         pad_online = True
@@ -543,6 +639,7 @@ def run_touchpad_xy_loop(
                     except Exception:
                         pass
                     dev = None
+                    bind_dev(None)
                 elif now - last_wake >= 0.5:
                     last_wake = now
                     try:
@@ -587,6 +684,9 @@ def run_touchpad_xy_loop(
         publish_snap(client, input_topic, offline_snapshot(with_touchpad=True))
         time.sleep(0.2)
     finally:
+        if output_ctl is not None:
+            output_ctl.clear_rumble()
+            output_ctl.set_dev(None)
         if dev is not None:
             try:
                 dev.close()
@@ -677,15 +777,31 @@ def main() -> int:
     )
     ap.add_argument(
         "--touchpad-xy",
+        dest="touchpad_xy",
         action="store_true",
-        help="DS4 hidapi full-read: buttons+axes+touchpad contacts+motion (default off; needs hidapi)",
+        default=True,
+        help="DS4 hidapi full-read + handle/cmd output (default on)",
+    )
+    ap.add_argument(
+        "--no-touchpad-xy",
+        dest="touchpad_xy",
+        action="store_false",
+        help="fallback pygame path (no contacts/motion/LED/rumble)",
     )
     ap.add_argument(
         "--hid-path",
         default=None,
-        help="optional hidapi path for --touchpad-xy (from probe --list)",
+        help="optional hidapi path for HID mode (from probe --list)",
+    )
+    ap.add_argument(
+        "--probe-output",
+        action="store_true",
+        help="local DS4 LED/rumble smoke test then exit (no MQTT)",
     )
     args = ap.parse_args()
+
+    if args.probe_output:
+        return probe_ds4_output()
 
     if args.probe:
         return probe_joystick(args.joystick)
@@ -738,11 +854,13 @@ def main() -> int:
     prefix = f"deepdiary/deep-dog/{args.device_id}"
     input_topic = f"{prefix}/handle/input"
     status_topic = f"{prefix}/handle/status"
+    cmd_topic = f"{prefix}/handle/cmd"
 
     use_ws = args.via == "web"
     transport = "websockets" if use_ws else "tcp"
     client_id = f"deep-dog-handle-bridge-{int(time.time())}"
     connected = {"ok": False}
+    output_ctl = Ds4OutputCtl() if args.touchpad_xy else None
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         rc = reason_code if isinstance(reason_code, int) else getattr(reason_code, "value", reason_code)
@@ -751,10 +869,34 @@ def main() -> int:
             return
         connected["ok"] = True
         client.subscribe(status_topic, qos=0)
-        print(f"[{ts()}] CONNECTED; PUB {input_topic}; SUB {status_topic}")
+        if output_ctl is not None:
+            client.subscribe(cmd_topic, qos=1)
+            print(
+                f"[{ts()}] CONNECTED; PUB {input_topic}; "
+                f"SUB {status_topic} + {cmd_topic}"
+            )
+        else:
+            print(f"[{ts()}] CONNECTED; PUB {input_topic}; SUB {status_topic}")
 
     def on_message(client, userdata, msg):
         payload = msg.payload.decode("utf-8", errors="replace")
+        topic = msg.topic
+        if output_ctl is not None and topic == cmd_topic:
+            try:
+                o = json.loads(payload)
+            except Exception:
+                print(f"[{ts()}] CMD bad json | {payload[:120]}")
+                return
+            if o.get("action") != "output":
+                return
+            ok = output_ctl.apply_output_cmd(o)
+            led = o.get("led") or {}
+            rum = o.get("rumble") or {}
+            print(
+                f"[{ts()}] CMD output ok={1 if ok else 0} "
+                f"led={led} rumble={rum} duration_ms={o.get('duration_ms')}"
+            )
+            return
         summary = ""
         try:
             o = json.loads(payload)
@@ -823,7 +965,7 @@ def main() -> int:
 
     if args.touchpad_xy:
         print(
-            f"[{ts()}] --touchpad-xy HID full-read; "
+            f"[{ts()}] HID full-read + cmd/output feedback; "
             f"on-change @{args.hz:.0f}Hz; heartbeat every {args.heartbeat_ms}ms"
         )
         try:
@@ -835,11 +977,16 @@ def main() -> int:
                 reconnect_ms=args.reconnect_ms,
                 wait_pad=args.wait_pad,
                 hid_path=args.hid_path,
+                output_ctl=output_ctl,
             )
         finally:
             client.loop_stop()
             client.disconnect()
 
+    print(
+        f"[{ts()}] pygame path (--no-touchpad-xy); "
+        f"output feedback disabled — use default HID mode for LED/rumble"
+    )
     interval = 1.0 / max(args.hz, 1.0)
     heartbeat_s = max(args.heartbeat_ms, 50) / 1000.0
     reconnect_s = max(args.reconnect_ms, 200) / 1000.0

@@ -2,12 +2,14 @@
 
 #include "mqtt/mqtt_client.h"
 #include "handle/handle_config.h"
+#include "handle/sources/handle_bt.h"
 
 #include <cJSON.h>
 #include <cstring>
 #include <esp_log.h>
 #include <esp_timer.h>
 
+#include <algorithm>
 #include <ctime>
 
 #define TAG "dog_mqtt_handle"
@@ -389,6 +391,11 @@ void DeepDogHandleMqtt::HandleCmd(const std::string& payload) {
         return;
     }
     const char* a = action->valuestring;
+    if (strcmp(a, "output") == 0) {
+        // 设备也可能是发布方；下行回环 / 云端直发均忽略本地执行（I09 → PC 桥）
+        cJSON_Delete(root);
+        return;
+    }
     if (strcmp(a, "enable") == 0) {
         if (hub_) {
             hub_->SetAppsEnabled(true);
@@ -399,17 +406,82 @@ void DeepDogHandleMqtt::HandleCmd(const std::string& payload) {
             hub_->SetAppsEnabled(false);
         }
         ESP_LOGI(TAG, "handle apps disabled");
+        // 联调钩：disable → 弱震 + 微红（I09）；桥在线时手柄应震一下
+        (void)PublishOutput(200, 40, 0, 0.35f, 0.15f, 200);
     } else if (strcmp(a, "pair") == 0) {
-#if DEEP_DOG_HANDLE_BT_ENABLE
-        ESP_LOGI(TAG, "pair requested (BT path)");
-#else
-        ESP_LOGW(TAG, "pair ignored (HANDLE_BT disabled)");
-#endif
+        HandleBtStartPairing();
+    } else if (strcmp(a, "rumble") == 0) {
+        int duration_ms = 250;
+        int weak = 128;
+        int strong = 64;
+        int delay_ms = 0;
+        const cJSON* j = cJSON_GetObjectItem(root, "duration_ms");
+        if (cJSON_IsNumber(j)) {
+            duration_ms = j->valueint;
+        }
+        j = cJSON_GetObjectItem(root, "weak");
+        if (cJSON_IsNumber(j)) {
+            weak = j->valueint;
+        }
+        j = cJSON_GetObjectItem(root, "strong");
+        if (cJSON_IsNumber(j)) {
+            strong = j->valueint;
+        }
+        j = cJSON_GetObjectItem(root, "delay_ms");
+        if (cJSON_IsNumber(j)) {
+            delay_ms = j->valueint;
+        }
+        duration_ms = std::clamp(duration_ms, 0, 2000);
+        weak = std::clamp(weak, 0, 255);
+        strong = std::clamp(strong, 0, 255);
+        delay_ms = std::clamp(delay_ms, 0, 2000);
+        HandleBtRumble(static_cast<uint16_t>(delay_ms), static_cast<uint16_t>(duration_ms),
+                       static_cast<uint8_t>(weak), static_cast<uint8_t>(strong));
+        ESP_LOGI(TAG, "rumble delay=%d dur=%d weak=%d strong=%d", delay_ms, duration_ms, weak, strong);
     } else {
         ESP_LOGW(TAG, "unknown handle/cmd action=%s", a);
     }
     cJSON_Delete(root);
     PublishStatus();
+}
+
+bool DeepDogHandleMqtt::PublishOutput(int led_r, int led_g, int led_b, float rumble_strong,
+                                      float rumble_weak, int duration_ms) {
+    if (!enabled_ || !connected_ || !client_) {
+        return false;
+    }
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "action", "output");
+    if (led_r >= 0 || led_g >= 0 || led_b >= 0) {
+        cJSON* led = cJSON_CreateObject();
+        cJSON_AddNumberToObject(led, "r", led_r >= 0 ? led_r : 0);
+        cJSON_AddNumberToObject(led, "g", led_g >= 0 ? led_g : 0);
+        cJSON_AddNumberToObject(led, "b", led_b >= 0 ? led_b : 0);
+        cJSON_AddItemToObject(root, "led", led);
+    }
+    cJSON* rumble = cJSON_CreateObject();
+    const float s = rumble_strong < 0.f ? 0.f : (rumble_strong > 1.f ? 1.f : rumble_strong);
+    const float w = rumble_weak < 0.f ? 0.f : (rumble_weak > 1.f ? 1.f : rumble_weak);
+    cJSON_AddNumberToObject(rumble, "strong", s);
+    cJSON_AddNumberToObject(rumble, "weak", w);
+    cJSON_AddItemToObject(root, "rumble", rumble);
+    if (duration_ms > 0) {
+        cJSON_AddNumberToObject(root, "duration_ms", duration_ms > 5000 ? 5000 : duration_ms);
+    }
+    cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+
+    char* printed = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!printed) {
+        return false;
+    }
+    const bool ok = client_->Publish("handle/cmd", printed, 1, false);
+    cJSON_free(printed);
+    if (ok) {
+        ESP_LOGI(TAG, "published handle/cmd output rumble=%.2f/%.2f duration=%d", s, w,
+                 duration_ms);
+    }
+    return ok;
 }
 
 void DeepDogHandleMqtt::OnMessage(const std::string& topic, const std::string& payload) {

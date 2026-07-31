@@ -6,7 +6,7 @@
 #define DEEP_DOG_HANDLE_ENABLE 1
 #endif
 
-/** 板载 Bluepad32/BLE（本轮默认关；需扩 Flash + NimBLE） */
+/** 板载 Bluepad32 + BTstack（默认关；与 NimBLE/BluFi 互斥，见 I02） */
 #ifndef DEEP_DOG_HANDLE_BT_ENABLE
 #define DEEP_DOG_HANDLE_BT_ENABLE 0
 #endif

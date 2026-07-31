@@ -5,7 +5,7 @@
 | module_id | `handle` |
 | capabilities | `handle` |
 | 路由建议 | `/device/:deviceId/modules/handle` |
-| 契约 | **扩展 ready**；固件 planned（双源 + Hub/App） |
+| 契约 | **扩展 ready**；固件 wifi 源已实现；板载 BT planned |
 | YAML | `handle/status`、`handle/input`、`handle/cmd` |
 | 架构 | [swrs/input/](../../input/) |
 
@@ -18,7 +18,7 @@
 
 展示合并后的 `axes` / `buttons` / `connected` / `source`；可选：
 
-- `handle/cmd`：enable / disable / pair  
+- `handle/cmd`：enable / disable / pair / rumble（板载 BT）/ **output**（PC 桥 DS4 灯震）  
 - 调试：网页或脚本发 `handle/input`（虚拟摇杆 / PC 桥）
 
 **不含**狗动作名；业务映射见 [I04](../../input/I04-apps-mapping.md)。
@@ -31,7 +31,7 @@
 | `handle/input` | ↓ | 0 | false |
 | `handle/cmd` | ↓ | 1 | false |
 
-双源：板载 Bluepad32+Xbox（`source=bt`）与 PC/网页注入（`source=wifi`）并列；Hub **后到覆盖**。详见 [I01](../../input/I01-architecture.md)。
+双源：板载 Bluepad32+BTstack+Xbox BLE（`source=bt`）与 PC/网页注入（`source=wifi`）并列；Hub **后到覆盖**。详见 [I01](../../input/I01-architecture.md) · [I02](../../input/I02-source-bluepad32-xbox.md)。
 
 ## 样例 JSON
 
@@ -77,7 +77,7 @@
 
 PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2/r2 ∈ [0,1]。  
 `ps`/`touch`/`dpad_*`/`l3`/`r3` 为可选扩展。  
-`touchpad` 可选（I06）：`--touchpad-xy` 时上报；`x/y` 主触点兼容；`contacts` 最多 2 指。  
+`touchpad` 可选（I06）：桥 **默认 HID** 上报；`x/y` 主触点兼容；`contacts` 最多 2 指。  
 `motion` 可选（I07）：同 HID 路径上报手柄 gyro（dps）/ accel（g）；机体系 **+X 右 / +Y 前 / +Z 上**，平放面朝上 `accel_z ≈ -1 g`；≠ 板载 `imu/status`。  
 抽象键位 ↔ PS4/Xbox 见 [input/I01](../../input/I01-architecture.md) · [I03](../../input/I03-source-pc-mqtt-bridge.md)。
 
@@ -87,22 +87,48 @@ PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2
 { "action": "enable", "ts": 1710000000 }
 ```
 
-`action` ∈ `enable` \| `disable` \| `pair`（`pair` 仅板载 BT）。
+`action` ∈ `enable` \| `disable` \| `pair` \| `rumble` \| `output`。
 
-以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
+| action | 说明 |
+|--------|------|
+| `enable` / `disable` | 门控本地 HandleApps；status 仍可更新 |
+| `pair` | 仅板载 BT：启动扫描/自动连接 |
+| `rumble` | 仅板载 BT：双马达短震（I02） |
+| `output` | **PC 桥 DS4**：灯条 + 震动（I09）；设备也可 PUBLISH 作告警 |
+
+#### rumble 样例（板载 BT）
+
+```json
+{ "action": "rumble", "duration_ms": 250, "weak": 128, "strong": 64, "ts": 1710000000 }
+```
+
+#### output 样例（PC 桥 DS4）
+
+```json
+{
+  "action": "output",
+  "led": { "r": 200, "g": 40, "b": 0 },
+  "rumble": { "strong": 0.4, "weak": 0.2 },
+  "duration_ms": 200,
+  "ts": 1710000000
+}
+```
+
+以 [YAML](../protocol/deep-dog-mqtt.yml) 为准；板载 rumble 见 [I02](../../input/I02-source-bluepad32-xbox.md)；桥 output 见 [I09](../../input/I09-ds4-output-feedback.md)。
 
 ## Steps（前端）
 
 1. 校验 `capabilities.handle`。  
 2. 订阅 `handle/status`；可视化摇杆/按键与 `source`。  
-3. 可选发 `handle/cmd`；调试可发 `handle/input`。  
-4. unmount 退订 status。  
+3. 可选发 `handle/cmd`（`output` 测灯震；`rumble` 仅板载 BT）。  
+4. 调试可发 `handle/input`。  
+5. unmount 退订 status。  
 
 ## 固件实现
 
-- planned：`HandleEventHub` + Dispatcher + `HandleApp*`；见 [input/](../../input/)。  
-- 板载 BT 前置：扩 OTA 分区 + NimBLE/Bluepad32（[I02](../../input/I02-source-bluepad32-xbox.md)）。  
-- PC 桥可不改 Flash 先通 `handle/input`（[I03](../../input/I03-source-pc-mqtt-bridge.md)）。  
+- wifi 源：`HandleEventHub` + Dispatcher + `HandleApp*` 已落地；见 [input/](../../input/)。  
+- 板载 BT：[`handle/sources/handle_bt`](../../../handle/sources/handle_bt.h) + Bluepad32/**BTstack**；默认关；启用见 [I02](../../input/I02-source-bluepad32-xbox.md) / [`sources/README`](../../../handle/sources/README.md)。  
+- PC 桥：`handle/input`（[I03](../../input/I03-source-pc-mqtt-bridge.md)）。  
 - 协议层不绑死狗/臂。
 
 ## 前端同步

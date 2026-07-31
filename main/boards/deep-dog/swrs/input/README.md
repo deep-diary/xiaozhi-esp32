@@ -8,12 +8,12 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | MQTT 契约 | [modules/11-handle](../mqtt/modules/11-handle.md) · [YAML](../mqtt/protocol/deep-dog-mqtt.yml) |
 | 固件 | [`handle/`](../../handle/) + [`handle_mqtt`](../../mqtt/modules/handle_mqtt.h) |
 | 镜像分层 | [touch_btn](../../touch_btn/)（Hub + Dispatcher + App） |
-| 本轮状态 | **wifi 源 + PC 桥已实现**；板载 Bluepad32/BLE **planned** |
+| 本轮状态 | **wifi 源 + PC 桥已实现**；板载 BT 适配已落地（宏/`-DDEEP_DOG_HANDLE_BT` 默认关） |
 
 ## 目标
 
 - **双源并列（v0.1）**
-  - 板载：**Bluepad32 + Xbox**（BLE，`source: bt`）— 固件宏 `DEEP_DOG_HANDLE_BT_ENABLE` 默认关
+  - 板载：**Bluepad32 + BTstack + Xbox BLE**（`source: bt`）— 固件宏 `DEEP_DOG_HANDLE_BT_ENABLE` 默认关
   - 远端：PC Python 读 **PS4 / Xbox** → MQTT `handle/input`（`source: wifi`）— **已实现**
 - 驱动 / 桥只产出统一快照（axes / buttons / connected / source），**不含**狗 / 舵机语义。
 - 业务经 `HandleApp*` 拆分。
@@ -23,12 +23,13 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | 文档 | 内容 |
 |------|------|
 | [I01-architecture](./I01-architecture.md) | Hub / Dispatcher / App；与 touch 对照 |
-| [I02-source-bluepad32-xbox](./I02-source-bluepad32-xbox.md) | 板载 Xbox；Flash/RAM；分区（已扩 OTA） |
+| [I02-source-bluepad32-xbox](./I02-source-bluepad32-xbox.md) | 板载 Xbox；BTstack；输入矩阵；震动；分区 |
 | [I03-source-pc-mqtt-bridge](./I03-source-pc-mqtt-bridge.md) | PC→MQTT 桥；**PS4 HID 对照表 + 极性** |
 | [I04-apps-mapping](./I04-apps-mapping.md) | App 启用与键位映射 |
 | [I05-mqtt-message-examples](./I05-mqtt-message-examples.md) | **三段报文展开** · 触控板说明 · Xbox/PS4 异同 |
 | [I06-touchpad-xy](./I06-touchpad-xy.md) | 触控板 XY + **双点 contacts** |
 | [I07-motion-gyro](./I07-motion-gyro.md) | DS4 手柄 gyro/accel（可选 `motion`） |
+| [I09-ds4-output-feedback](./I09-ds4-output-feedback.md) | DS4 灯条/震动：`handle/cmd` `output` |
 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png) | DualShock 4 实测标注（Linux） |
 
 ## 边界
@@ -44,7 +45,7 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 
 - ESP32-S3 上索尼 PS4/PS5 **无线直连**。
 - USB HID Host（仅保留 `source: usb` 枚举）。
-- 本轮不开 `CONFIG_BT_ENABLED` / Bluepad32。
+- 默认不开 Bluepad32/BTstack（`DEEP_DOG_HANDLE_BT_ENABLE=0`）。
 
 ## 前端同步
 

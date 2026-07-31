@@ -28,6 +28,7 @@
 #if DEEP_DOG_HANDLE_ENABLE
 #include "handle/handle_event_hub.h"
 #include "handle/handle_app_dispatcher.h"
+#include "handle/sources/handle_bt.h"
 #if DEEP_DOG_HANDLE_APP_LOG_ENABLE
 #include "handle/apps/handle_app_log.h"
 #endif
@@ -525,6 +526,11 @@ private:
         if (!handle_dispatcher_.StartPeriodic(DEEP_DOG_HANDLE_DISPATCH_INTERVAL_US)) {
             ESP_LOGE(TAG, "HandleAppDispatcher timer start failed");
         }
+#if DEEP_DOG_HANDLE_BT_ENABLE
+        if (!HandleBtStart(&handle_hub_)) {
+            ESP_LOGE(TAG, "HandleBtStart failed");
+        }
+#endif
         ESP_LOGI(TAG, "Handle input ready (BT=%d mqtt_input=%d)",
                  DEEP_DOG_HANDLE_BT_ENABLE, DEEP_DOG_HANDLE_MQTT_INPUT_ENABLE);
     }
