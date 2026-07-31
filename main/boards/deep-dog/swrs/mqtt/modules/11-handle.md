@@ -6,8 +6,8 @@
 | capabilities | `handle` |
 | 路由建议 | `/device/:deviceId/modules/handle` |
 | 契约 | **扩展 ready**；固件 wifi 源已实现；板载 BT planned |
-| YAML | `handle/status`、`handle/input`、`handle/cmd` |
-| 架构 | [swrs/input/](../../input/) |
+| YAML | `handle/status`、`handle/input`、`handle/cmd`、**`handle/keymap`**（I08a） |
+| 架构 | [swrs/input/](../../input/) · keymap [I08a](../../input/I08a-keymap-mqtt-contract-draft.md) |
 
 ## 入口卡文案
 
@@ -19,9 +19,10 @@
 展示合并后的 `axes` / `buttons` / `connected` / `source`；可选：
 
 - `handle/cmd`：enable / disable / pair / rumble（板载 BT）/ **output**（PC 桥 DS4 灯震）  
+- **keymap（I08a）**：订 retain `handle/keymap`；`set_profile` 切 App 类（灯带演示 / 运控 / 关闭）；`set_keymap` 改按键→灯效并 NVS 固化  
 - 调试：网页或脚本发 `handle/input`（虚拟摇杆 / PC 桥）
 
-**不含**狗动作名；业务映射见 [I04](../../input/I04-apps-mapping.md)。
+**不含**狗动作名；编译期业务映射见 [I04](../../input/I04-apps-mapping.md)；运行时灯带映射见 [I08a](../../input/I08a-keymap-mqtt-contract-draft.md)。
 
 ## Topic
 
@@ -30,6 +31,7 @@
 | `handle/status` | ↑ | 0 | false |
 | `handle/input` | ↓ | 0 | false |
 | `handle/cmd` | ↓ | 1 | false |
+| `handle/keymap` | ↑ | 0 | **true** |
 
 双源：板载 Bluepad32+BTstack+Xbox BLE（`source=bt`）与 PC/网页注入（`source=wifi`）并列；Hub **后到覆盖**。详见 [I01](../../input/I01-architecture.md) · [I02](../../input/I02-source-bluepad32-xbox.md)。
 
@@ -87,14 +89,16 @@ PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2
 { "action": "enable", "ts": 1710000000 }
 ```
 
-`action` ∈ `enable` \| `disable` \| `pair` \| `rumble` \| `output`。
+`action` ∈ `enable` \| `disable` \| `pair` \| `rumble` \| `output` \| `set_keymap` \| `get_keymap` \| `reset_keymap` \| `set_profile`。
 
 | action | 说明 |
 |--------|------|
-| `enable` / `disable` | 门控本地 HandleApps；status 仍可更新 |
+| `enable` / `disable` | 门控本地 HandleApps；status 仍可更新；`disable` 优先于 profile |
 | `pair` | 仅板载 BT：启动扫描/自动连接 |
 | `rumble` | 仅板载 BT：双马达短震（I02） |
 | `output` | **PC 桥 DS4**：灯条 + 震动（I09）；设备也可 PUBLISH 作告警 |
+| `set_keymap` / `get_keymap` / `reset_keymap` | 运行时按键→灯效表（I08a）；写/读/恢复；可选 NVS |
+| `set_profile` | 切换 App 类剖面：`led_demo`（灯带 keymap，dog 整停）/ `dog` / `off` |
 
 #### rumble 样例（板载 BT）
 
@@ -116,19 +120,43 @@ PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2
 
 以 [YAML](../protocol/deep-dog-mqtt.yml) 为准；板载 rumble 见 [I02](../../input/I02-source-bluepad32-xbox.md)；桥 output 见 [I09](../../input/I09-ds4-output-feedback.md)。
 
+### keymap（I08a · 拍板）
+
+`profile` = **哪一类 HandleApp 驱动执行器**（灯带类 / 运控类 / 关闭），与 I04 App 概念同构。字段、样例、出厂默认见：
+
+→ **[input/I08a-keymap-mqtt-contract-draft.md](../../input/I08a-keymap-mqtt-contract-draft.md)**
+
+```json
+{ "action": "set_profile", "profile": "led_demo", "persist": true }
+```
+
+```json
+{
+  "action": "set_keymap",
+  "merge": true,
+  "persist": true,
+  "bindings": {
+    "a": { "id": "led.static", "r": 255, "g": 0, "b": 0, "brightness": 64 },
+    "b": { "id": "led.static", "r": 0, "g": 0, "b": 255, "brightness": 64 }
+  }
+}
+```
+
 ## Steps（前端）
 
 1. 校验 `capabilities.handle`。  
 2. 订阅 `handle/status`；可视化摇杆/按键与 `source`。  
-3. 可选发 `handle/cmd`（`output` 测灯震；`rumble` 仅板载 BT）。  
-4. 调试可发 `handle/input`。  
-5. unmount 退订 status。  
+3. 可选订 retain `handle/keymap`；展示/编辑 profile 与六键绑定（需 `capabilities.led` 时更完整）。  
+4. 可选发 `handle/cmd`（`output` / `rumble` / `set_profile` / `set_keymap`）。  
+5. 调试可发 `handle/input`。  
+6. unmount 退订 status（及 keymap）。  
 
 ## 固件实现
 
 - wifi 源：`HandleEventHub` + Dispatcher + `HandleApp*` 已落地；见 [input/](../../input/)。  
 - 板载 BT：[`handle/sources/handle_bt`](../../../handle/sources/handle_bt.h) + Bluepad32/**BTstack**；默认关；启用见 [I02](../../input/I02-source-bluepad32-xbox.md) / [`sources/README`](../../../handle/sources/README.md)。  
 - PC 桥：`handle/input`（[I03](../../input/I03-source-pc-mqtt-bridge.md)）。  
+- **keymap**：`HandleAppLedMap` + NVS `h_keymap` + `handle/keymap` — **planned**（契约 [I08a](../../input/I08a-keymap-mqtt-contract-draft.md)）。  
 - 协议层不绑死狗/臂。
 
 ## 前端同步
@@ -143,6 +171,8 @@ PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2
 
 - [x] YAML 含 `handle/input`；与 status 同构  
 - [x] 双源与 App 分层写入 [input/](../../input/)  
+- [x] YAML 含 keymap cmd + `handle/keymap`（I08a 拍板）  
 - [ ] 无 capability 隐藏入口卡（固件开 `handle` 后）  
 - [ ] 板载 Xbox 或 PC 桥任一源可驱动 status 更新  
 - [ ] disable 后 App 不执行运控  
+- [ ] keymap：对换 A/B + NVS + `led_demo` 下 dog 整停（固件落地后勾）

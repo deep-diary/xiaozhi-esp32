@@ -3,7 +3,7 @@
 
 protocol:
   id: deep-dog-mqtt
-  version: "0.1.1"
+  version: "0.1.2"
   product: deep-dog
   description: >
     Modular full-feature board MQTT contract. Topics are split by module;
@@ -66,7 +66,7 @@ modules:
     note: >
       Dual-source v0.1: onboard Bluepad32+BTstack Xbox BLE (source=bt) and PC MQTT
       bridge (source=wifi, handle/input). Hub+App layering in swrs/input/;
-      firmware planned (needs OTA partition headroom for BLE).
+      keymap+profile (I08a) selects HandleApp class; firmware HandleAppLedMap planned.
     ref: main/boards/deep-dog/swrs/input/
     impl: modules/11-handle
   touch:
@@ -517,8 +517,21 @@ topics:
       enable/disable gate local HandleApps; pair onboard BT;
       rumble = board BT Xbox (I02); output = PC-bridge DS4 LED+rumble (I09).
       Device may also PUBLISH output (alerts); bridge SUB and writes HID.
+      Keymap (I08a): set_keymap/get_keymap/reset_keymap/set_profile;
+      profile selects which HandleApp class drives actuators (led_demo|dog|off).
     payload:
-      action: { type: enum, values: [enable, disable, pair, rumble, output] }
+      action:
+        type: enum
+        values:
+          - enable
+          - disable
+          - pair
+          - rumble
+          - output
+          - set_keymap
+          - get_keymap
+          - reset_keymap
+          - set_profile
       duration_ms: { type: int, optional: true, note: "rumble or output; ms; cap ~2000" }
       weak: { type: int, optional: true, note: "BT rumble weak 0-255" }
       strong: { type: int, optional: true, note: "BT rumble strong 0-255" }
@@ -538,6 +551,47 @@ topics:
         fields:
           strong: { type: float, range: [0, 1], note: "large motor" }
           weak: { type: float, range: [0, 1], note: "small motor" }
+      merge: { type: bool, optional: true, note: "set_keymap; default true" }
+      persist: { type: bool, optional: true, note: "keymap/profile; default true" }
+      profile:
+        type: enum
+        values: [led_demo, dog, off]
+        optional: true
+        note: "set_profile; App-class slice (I08a §0)"
+      bindings:
+        type: object
+        optional: true
+        note: >
+          set_keymap; keys a|b|x|y|l1|r1 (v0); value = binding
+          {id: led.*|none, optional led/cmd-aligned color fields}
+      ts: { type: int }
+
+  handle/keymap:
+    module: handle
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_change_or_reconnect_or_get
+    note: >
+      I08a: active key→action table + profile (HandleApp class).
+      Firmware planned (HandleAppLedMap + NVS h_keymap).
+    payload:
+      schema_ver: { type: int }
+      ok: { type: bool }
+      profile: { type: enum, values: [led_demo, dog, off] }
+      persist: { type: bool }
+      source: { type: enum, values: [nvs, default, mqtt] }
+      bindings:
+        type: object
+        note: "at least a,b,x,y,l1,r1; each {id, optional params}"
+      catalog:
+        type: array
+        item: { type: string }
+        note: "supported action ids; always present for UI dropdown"
+      warnings:
+        type: array
+        item: { type: string }
+        optional: true
       ts: { type: int }
 
   handle/input:

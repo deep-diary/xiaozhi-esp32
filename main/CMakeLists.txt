@@ -1136,7 +1136,10 @@ if(BOARD_TYPE STREQUAL "deep-dog")
     # [deep-dog] 合入说明: 板载 Xbox BLE 需链接 Bluepad32/BTstack（可选）
     # 背景: 仅 DEEP_DOG_HANDLE_BT=ON 时引入；默认构建不含 BT 主机栈
     if(DEEP_DOG_HANDLE_BT)
-        list(APPEND MAIN_PRIV_REQUIRES_EXTRA bluepad32 btstack)
+        message(STATUS "[deep-dog] PRIV_REQUIRES += bluepad32 btstack (DEEP_DOG_HANDLE_BT=${DEEP_DOG_HANDLE_BT})")
+        list(APPEND MAIN_PRIV_REQUIRES_EXTRA bluepad32 btstack cmd_nvs cmd_system)
+    else()
+        message(STATUS "[deep-dog] Bluepad32 not linked (DEEP_DOG_HANDLE_BT=${DEEP_DOG_HANDLE_BT})")
     endif()
 endif()
 
@@ -1170,8 +1173,11 @@ idf_component_register(SRCS ${SOURCES}
                     )
 
 # [deep-dog] 合入说明: 用 CMake 开关覆盖 handle_config.h 默认宏
+# 背景: WHOLE_ARCHIVE + component_requirements.py 会丢掉 PRIV_REQUIRES 中的
+# bluepad32/btstack，需显式 link 才能拿到头文件与库
 if(BOARD_TYPE STREQUAL "deep-dog" AND DEEP_DOG_HANDLE_BT)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEEP_DOG_HANDLE_BT_ENABLE=1)
+    target_link_libraries(${COMPONENT_LIB} PUBLIC idf::bluepad32 idf::btstack)
 endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

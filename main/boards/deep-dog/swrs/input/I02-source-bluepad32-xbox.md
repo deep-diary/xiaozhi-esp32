@@ -111,6 +111,9 @@ ESP 是 **HID Host**，手柄是 Peripheral。可向下发输出报告；**不�
 ## 与 Wi‑Fi 共存
 
 - deep-dog 常驻 Wi‑Fi（MQTT / 推流）。BLE + Wi‑Fi 共存会抬高内部 RAM 与调度压力。
+- **启动顺序**：先 WiFi 拿 IP → 再 `HandleBtStart`（须在人脸模型之前）→ 再 face/MQTT；见 `StartNetwork`。减轻 WiFi/`HCI` 双边 `NO_MEM`。
+- **扫描**：WiFi 正常后即扫；手柄 `ready` 后停扫；断连再扫（Xbox BLE 重连需要中央扫描）。扫描是**固定开销**，一般不会边扫边无限涨堆。
+- sdkconfig：`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`（WiFi/LWIP 尽量上 PSRAM）；`SPIRAM_MALLOC_RESERVE_INTERNAL` 抬高、`BT_CTRL_BLE_MAX_ACT=3`、关 `BT_CTRL_BLE_ADV`。注意：**BLE controller 与 BTstack 任务栈都必须 INTERNAL**（HCI 会触 flash；PSRAM 栈会 assert），PSRAM 只能间接腾出这块。
 - 建议：人脸高峰 / 高分辨率编码时允许运行时 `disable` 扫描或编译关掉 BT；运控联调时再开。
 
 ## 数据流

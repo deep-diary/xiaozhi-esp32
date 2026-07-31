@@ -36,6 +36,7 @@ bool HandleBtIsReady() {
 
 #include <cstring>
 
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -182,12 +183,17 @@ static void platform_on_device_disconnected(uni_hid_device_t* d) {
         g_ready = false;
         PushDisconnected();
     }
+    // Xbox BLE 重连需要中央设备继续扫描
+    uni_bt_start_scanning_and_autoconnect_safe();
+    logi("deep-dog handle_bt: resume scan after disconnect\n");
 }
 
 static uni_error_t platform_on_device_ready(uni_hid_device_t* d) {
     logi("deep-dog handle_bt: ready %p\n", d);
     g_device = d;
     g_ready = true;
+    // 已连接则停扫：扫描本身是固定开销（非无限涨堆），停扫可降功耗/调度
+    uni_bt_stop_scanning_safe();
     if (d && d->report_parser.play_dual_rumble) {
         d->report_parser.play_dual_rumble(d, 0, 120, 100, 40);
     }
@@ -215,6 +221,7 @@ static void platform_on_oob_event(uni_platform_oob_event_t event, void* data) {
 }
 
 struct uni_platform* get_deep_dog_platform(void) {
+    // Field order must match uni_platform.h (C++ designated-init rule)
     static struct uni_platform plat = {
         .name = "deep-dog",
         .init = platform_init,
@@ -223,9 +230,12 @@ struct uni_platform* get_deep_dog_platform(void) {
         .on_device_connected = platform_on_device_connected,
         .on_device_disconnected = platform_on_device_disconnected,
         .on_device_ready = platform_on_device_ready,
-        .on_oob_event = platform_on_oob_event,
+        .on_gamepad_data = nullptr,
         .on_controller_data = platform_on_controller_data,
         .get_property = platform_get_property,
+        .on_oob_event = platform_on_oob_event,
+        .device_dump = nullptr,
+        .register_console_cmds = nullptr,
     };
     return &plat;
 }
@@ -245,14 +255,23 @@ bool HandleBtStart(HandleEventHub* hub) {
         return true;
     }
     g_hub = hub;
-    // BTstack 占用一核循环；与主业务并行
-    const BaseType_t ok = xTaskCreatePinnedToCore(BtstackTask, "bp32_bt", 8192, nullptr, 5, nullptr, 0);
+    // HCI/controller 必须 INTERNAL|DMA；先打快照便于对照 WiFi 后剩余
+    const size_t dma_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    const size_t dma_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    const size_t int_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "pre-BT heap: internal=%u DMA_free=%u DMA_largest=%u", (unsigned)int_free,
+             (unsigned)dma_free, (unsigned)dma_largest);
+    // 栈必须在内部 RAM：BTstack/HCI 会触 flash（NVS/bond），PSRAM 栈会触发
+    // esp_task_stack_is_sane_cache_disabled assert
+    constexpr uint32_t kBtStackBytes = 6144;
+    const BaseType_t ok =
+        xTaskCreatePinnedToCore(BtstackTask, "bp32_bt", kBtStackBytes, nullptr, 5, nullptr, 0);
     if (ok != pdPASS) {
         ESP_LOGE(TAG, "failed to create BTstack task");
         return false;
     }
     g_started = true;
-    ESP_LOGI(TAG, "Bluepad32/BTstack task started");
+    ESP_LOGI(TAG, "Bluepad32/BTstack task started (scan after HCI up)");
     return true;
 }
 

@@ -71,6 +71,7 @@ deepdiary/deep-dog/{device_id}/
 ├── device/info|status
 ├── stream|face|dog|led|servo|gimbal|handle  …/cmd|status
 ├── handle/input（↓ PC/网页注入快照）
+├── handle/keymap（↑ retain；按键→动作表 + profile，I08a）
 ├── imu/status · touch/status
 ├── can/cmd|status|frames|tx
 ├── person/active (reserved) · track/cmd|status (MQTT ready / actuator=none)

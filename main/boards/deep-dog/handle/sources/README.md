@@ -24,9 +24,20 @@ idf.py -DDEEP_DOG_HANDLE_BT=ON reconfigure build
 
 这会：
 
-- 把 Bluepad32/BTstack 加入 `EXTRA_COMPONENT_DIRS`
-- 给 `main` 定义 `DEEP_DOG_HANDLE_BT_ENABLE=1`
-- `PRIV_REQUIRES`：`bluepad32` `btstack`
+- 把 Bluepad32/BTstack 加入 `EXTRA_COMPONENT_DIRS`（并建议在 `components/` 建同名 symlink）
+- **关闭 `MINIMAL_BUILD`**（否则 WHOLE_ARCHIVE 下会丢掉 bluepad32 依赖）
+- 给 `main` 定义 `DEEP_DOG_HANDLE_BT_ENABLE=1` 并 `target_link_libraries(idf::bluepad32 idf::btstack)`
+- sdkconfig：`CONFIG_BLUEPAD32_PLATFORM_CUSTOM`、`CONFIG_BT_CONTROLLER_ONLY`、关 BluFi
+
+首次拉取后若尚无 symlink，执行：
+
+```bash
+BP=main/boards/deep-dog/handle/third_party/bluepad32/src/components
+ln -sfn "../$BP/bluepad32" components/bluepad32
+ln -sfn "../$BP/btstack" components/btstack
+ln -sfn "../$BP/cmd_nvs" components/cmd_nvs
+ln -sfn "../$BP/cmd_system" components/cmd_system
+```
 
 3. menuconfig（首次启用时核对）：
 

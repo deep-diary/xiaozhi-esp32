@@ -526,12 +526,8 @@ private:
         if (!handle_dispatcher_.StartPeriodic(DEEP_DOG_HANDLE_DISPATCH_INTERVAL_US)) {
             ESP_LOGE(TAG, "HandleAppDispatcher timer start failed");
         }
-#if DEEP_DOG_HANDLE_BT_ENABLE
-        if (!HandleBtStart(&handle_hub_)) {
-            ESP_LOGE(TAG, "HandleBtStart failed");
-        }
-#endif
-        ESP_LOGI(TAG, "Handle input ready (BT=%d mqtt_input=%d)",
+        // BT 延后到 StartNetwork（WiFi/MQTT 就绪后），避免与 WiFi 争内部堆
+        ESP_LOGI(TAG, "Handle input ready (BT=%d mqtt_input=%d; BT starts after WiFi)",
                  DEEP_DOG_HANDLE_BT_ENABLE, DEEP_DOG_HANDLE_MQTT_INPUT_ENABLE);
     }
 #endif
@@ -810,6 +806,15 @@ public:
                 ESP_LOGI(TAG, "WiFi IP=%s，启动 face/hub/http/mqtt/imu", ip.c_str());
             }
         }
+#if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
+        // WiFi/IP 已就绪 → 启 BT 扫描；须在人脸/HTTP/MQTT 之前，否则 HCI 常 NO_MEM
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if (!HandleBtStart(&handle_hub_)) {
+            ESP_LOGE(TAG, "HandleBtStart failed (after WiFi)");
+        } else {
+            ESP_LOGI(TAG, "Handle BT up after WiFi; scanning before face/mqtt");
+        }
+#endif
 #if DEEP_DOG_IMU_ENABLE
         InitializeImu();
 #endif

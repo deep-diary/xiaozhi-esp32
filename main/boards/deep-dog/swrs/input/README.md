@@ -25,10 +25,12 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | [I01-architecture](./I01-architecture.md) | Hub / Dispatcher / App；与 touch 对照 |
 | [I02-source-bluepad32-xbox](./I02-source-bluepad32-xbox.md) | 板载 Xbox；BTstack；输入矩阵；震动；分区 |
 | [I03-source-pc-mqtt-bridge](./I03-source-pc-mqtt-bridge.md) | PC→MQTT 桥；**PS4 HID 对照表 + 极性** |
-| [I04-apps-mapping](./I04-apps-mapping.md) | App 启用与键位映射 |
+| [I04-apps-mapping](./I04-apps-mapping.md) | App 启用与键位映射（编译期） |
 | [I05-mqtt-message-examples](./I05-mqtt-message-examples.md) | **三段报文展开** · 触控板说明 · Xbox/PS4 异同 |
 | [I06-touchpad-xy](./I06-touchpad-xy.md) | 触控板 XY + **双点 contacts** |
 | [I07-motion-gyro](./I07-motion-gyro.md) | DS4 手柄 gyro/accel（可选 `motion`） |
+| [I08-dynamic-key-action-mapping-eval](./I08-dynamic-key-action-mapping-eval.md) | **评估**：运行时按键→动作表 / MQTT+NVS（灯带试点） |
+| [I08a-keymap-mqtt-contract-draft](./I08a-keymap-mqtt-contract-draft.md) | **契约拍板**：`profile`=App 类；keymap + retain `handle/keymap` |
 | [I09-ds4-output-feedback](./I09-ds4-output-feedback.md) | DS4 灯条/震动：`handle/cmd` `output` |
 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png) | DualShock 4 实测标注（Linux） |
 
