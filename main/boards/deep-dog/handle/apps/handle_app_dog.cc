@@ -1,6 +1,7 @@
 #include "handle/apps/handle_app_dog.h"
 
 #include "handle/handle_config.h"
+#include "handle/keymap_store.h"
 
 #include <esp_log.h>
 #include <cmath>
@@ -24,6 +25,15 @@ void HandleAppDog::OnSnapshot(const HandleSnapshot& snap) {
     return;
 #else
     if (!dog_ || !hub_ || !hub_->AppsEnabled()) {
+        return;
+    }
+    if (HandleKeymapProfile() != HANDLE_PROFILE_DOG) {
+        if (move_dir_ != 0) {
+            dog_->stopContinuousLocomotion();
+            move_dir_ = 0;
+        }
+        prev_start_ = snap.buttons.start;
+        prev_b_ = snap.buttons.b;
         return;
     }
     if (!snap.connected) {

@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |----|------|
 | 域 | input / handle |
-| 状态 | 需求 ready；固件 wifi 源已实现；板载 BT planned |
+| 状态 | 需求 ready；固件 wifi 源 + 板载 BT 适配已落地（BT 宏默认关） |
 | 参考实现 | [touch_btn](../../touch_btn/) · PC 桥 [`scripts/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog_handle_bridge.py) |
 
 ## 数据流
@@ -104,4 +104,4 @@ PS4 HID 原始下标与极性见 [I03](./I03-source-pc-mqtt-bridge.md)（实测�
 - [x] 双源汇入同一 Hub，业务仅经 App
 - [x] MQTT status / input 与快照字段同构
 - [x] 抽象键位 ↔ Xbox / PS4 对照表定稿
-- [ ] 板载 BT Normalize 落地（planned）
+- [x] 板载 BT Normalize 落地（`handle/sources/handle_bt`；`-DDEEP_DOG_HANDLE_BT=ON`）

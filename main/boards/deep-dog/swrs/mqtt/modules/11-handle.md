@@ -19,10 +19,10 @@
 展示合并后的 `axes` / `buttons` / `connected` / `source`；可选：
 
 - `handle/cmd`：enable / disable / pair / rumble（板载 BT）/ **output**（PC 桥 DS4 灯震）  
-- **keymap（I08a）**：订 retain `handle/keymap`；`set_profile` 切 App 类（灯带演示 / 运控 / 关闭）；`set_keymap` 改按键→灯效并 NVS 固化  
+- **keymap（I08a）**：订 retain `handle/keymap`；`set_profile` 切 App 类（灯带 / **云台** / 运控 / 关闭）；每键 **press+hold** `set_keymap` 并 NVS 固化  
 - 调试：网页或脚本发 `handle/input`（虚拟摇杆 / PC 桥）
 
-**不含**狗动作名；编译期业务映射见 [I04](../../input/I04-apps-mapping.md)；运行时灯带映射见 [I08a](../../input/I08a-keymap-mqtt-contract-draft.md)。
+**不含**狗动作名；编译期业务映射见 [I04](../../input/I04-apps-mapping.md)；运行时映射见 [I08a](../../input/I08a-keymap-mqtt-contract-draft.md)；云台详见 [09-gimbal](./09-gimbal.md)。
 
 ## Topic
 
@@ -156,7 +156,7 @@ PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2
 - wifi 源：`HandleEventHub` + Dispatcher + `HandleApp*` 已落地；见 [input/](../../input/)。  
 - 板载 BT：[`handle/sources/handle_bt`](../../../handle/sources/handle_bt.h) + Bluepad32/**BTstack**；默认关；启用见 [I02](../../input/I02-source-bluepad32-xbox.md) / [`sources/README`](../../../handle/sources/README.md)。  
 - PC 桥：`handle/input`（[I03](../../input/I03-source-pc-mqtt-bridge.md)）。  
-- **keymap**：`HandleAppLedMap` + NVS `h_keymap` + `handle/keymap` — **planned**（契约 [I08a](../../input/I08a-keymap-mqtt-contract-draft.md)）。  
+- **keymap**：`HandleAppKeyMap` + NVS `h_keymap` + retain `handle/keymap` — **已落地**（契约 [I08a](../../input/I08a-keymap-mqtt-contract-draft.md)；后续 App 绑定表按需扩）。  
 - 协议层不绑死狗/臂。
 
 ## 前端同步
@@ -172,7 +172,8 @@ PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2
 - [x] YAML 含 `handle/input`；与 status 同构  
 - [x] 双源与 App 分层写入 [input/](../../input/)  
 - [x] YAML 含 keymap cmd + `handle/keymap`（I08a 拍板）  
-- [ ] 无 capability 隐藏入口卡（固件开 `handle` 后）  
-- [ ] 板载 Xbox 或 PC 桥任一源可驱动 status 更新  
-- [ ] disable 后 App 不执行运控  
-- [ ] keymap：对换 A/B + NVS + `led_demo` 下 dog 整停（固件落地后勾）
+- [x] 板载 Xbox 可驱动 status / App 快照更新（`source=bt`）  
+- [x] keymap：`set_profile` / `set_keymap` + NVS + `profile` 门控（gimbal 已联调；其它 App 后续）  
+- [ ] PC 桥 DS4 驱动 status + gimbal jog（合入前联调）  
+- [ ] disable 后 App 不执行运控（联调勾选）  
+- [ ] 前端无 capability 隐藏入口卡（deep-trace）

@@ -1,5 +1,7 @@
 #include "handle/apps/handle_app_log.h"
 
+#include "handle/keymap_store.h"
+
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <cmath>
@@ -18,6 +20,8 @@ bool MeaningfulChange(const HandleSnapshot& a, const HandleSnapshot& b) {
     auto btn = [](const HandleButtons& x, const HandleButtons& y) {
         return x.a != y.a || x.b != y.b || x.x != y.x || x.y != y.y || x.l1 != y.l1 || x.r1 != y.r1 ||
                x.start != y.start || x.select != y.select || x.touch != y.touch ||
+               x.dpad_up != y.dpad_up || x.dpad_down != y.dpad_down || x.dpad_left != y.dpad_left ||
+               x.dpad_right != y.dpad_right || x.l3 != y.l3 || x.r3 != y.r3 ||
                std::fabs(x.l2 - y.l2) > 0.05f || std::fabs(x.r2 - y.r2) > 0.05f;
     };
     if (btn(a.buttons, b.buttons)) {
@@ -64,26 +68,39 @@ void HandleAppLog::OnSnapshot(const HandleSnapshot& snap) {
     s_last = snap;
     s_last_log_us = now;
     const char* src = HandleSourceName(snap.source);
+    const char* profile = HandleKeymapProfileName(HandleKeymapProfile());
     if (snap.touchpad.present) {
         ESP_LOGI(TAG,
-                 "conn=%d src=%s lx=%.2f ly=%.2f rx=%.2f ry=%.2f "
-                 "a=%d b=%d x=%d y=%d l1=%d r1=%d start=%d select=%d touch=%d "
-                 "tp={active=%d x=%.2f y=%.2f fingers=%d contacts=%d} "
-                 "motion=%d gx=%.1f gy=%.1f gz=%.1f",
+                 "profile=%s conn=%d src=%s "
+                 "[左摇杆 lx=%.2f ly=%.2f] [右摇杆 rx=%.2f ry=%.2f] "
+                 "[方向键 u=%d d=%d l=%d r=%d] [ABXY a=%d b=%d x=%d y=%d] "
+                 "[肩键 l1=%d r1=%d l3=%d r3=%d] [菜单 start=%d select=%d] "
+                 "[扳机 l2=%.2f r2=%.2f] [touch=%d] "
+                 "[触控板 active=%d x=%.2f y=%.2f fingers=%d contacts=%d] "
+                 "[motion=%d gx=%.1f gy=%.1f gz=%.1f]",
+                 profile ? profile : "-",
                  snap.connected ? 1 : 0,
                  src ? src : "-",
                  snap.axes.lx,
                  snap.axes.ly,
                  snap.axes.rx,
                  snap.axes.ry,
+                 snap.buttons.dpad_up ? 1 : 0,
+                 snap.buttons.dpad_down ? 1 : 0,
+                 snap.buttons.dpad_left ? 1 : 0,
+                 snap.buttons.dpad_right ? 1 : 0,
                  snap.buttons.a ? 1 : 0,
                  snap.buttons.b ? 1 : 0,
                  snap.buttons.x ? 1 : 0,
                  snap.buttons.y ? 1 : 0,
                  snap.buttons.l1 ? 1 : 0,
                  snap.buttons.r1 ? 1 : 0,
+                 snap.buttons.l3 ? 1 : 0,
+                 snap.buttons.r3 ? 1 : 0,
                  snap.buttons.start ? 1 : 0,
                  snap.buttons.select ? 1 : 0,
+                 snap.buttons.l2,
+                 snap.buttons.r2,
                  snap.buttons.touch ? 1 : 0,
                  snap.touchpad.active ? 1 : 0,
                  snap.touchpad.x,
@@ -97,20 +114,32 @@ void HandleAppLog::OnSnapshot(const HandleSnapshot& snap) {
         return;
     }
     ESP_LOGI(TAG,
-             "conn=%d src=%s lx=%.2f ly=%.2f rx=%.2f ry=%.2f "
-             "a=%d b=%d x=%d y=%d l1=%d r1=%d start=%d select=%d",
+             "profile=%s conn=%d src=%s "
+             "[左摇杆 lx=%.2f ly=%.2f] [右摇杆 rx=%.2f ry=%.2f] "
+             "[方向键 u=%d d=%d l=%d r=%d] [ABXY a=%d b=%d x=%d y=%d] "
+             "[肩键 l1=%d r1=%d l3=%d r3=%d] [菜单 start=%d select=%d] "
+             "[扳机 l2=%.2f r2=%.2f]",
+             profile ? profile : "-",
              snap.connected ? 1 : 0,
              src ? src : "-",
              snap.axes.lx,
              snap.axes.ly,
              snap.axes.rx,
              snap.axes.ry,
+             snap.buttons.dpad_up ? 1 : 0,
+             snap.buttons.dpad_down ? 1 : 0,
+             snap.buttons.dpad_left ? 1 : 0,
+             snap.buttons.dpad_right ? 1 : 0,
              snap.buttons.a ? 1 : 0,
              snap.buttons.b ? 1 : 0,
              snap.buttons.x ? 1 : 0,
              snap.buttons.y ? 1 : 0,
              snap.buttons.l1 ? 1 : 0,
              snap.buttons.r1 ? 1 : 0,
+             snap.buttons.l3 ? 1 : 0,
+             snap.buttons.r3 ? 1 : 0,
              snap.buttons.start ? 1 : 0,
-             snap.buttons.select ? 1 : 0);
+             snap.buttons.select ? 1 : 0,
+             snap.buttons.l2,
+             snap.buttons.r2);
 }

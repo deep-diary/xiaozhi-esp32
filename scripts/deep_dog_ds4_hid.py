@@ -6,10 +6,28 @@ Used by deep_dog_ds4_touchpad_probe.py and deep_dog_handle_bridge.py --touchpad-
 
 from __future__ import annotations
 
+import ctypes
+import struct
 import time
+import zlib
+from ctypes import POINTER, c_int, c_size_t, c_ubyte, c_void_p
 
 SONY_VID = 0x054C
 DS4_PIDS = (0x05C4, 0x09CC, 0x0BA0)  # DS4 v1 / v2 / USB wireless adapter
+
+# hidapi bus_type (HID_API_BUS_*)
+BUS_USB = 1
+BUS_BLUETOOTH = 2
+
+DS4_OUTPUT_USB_ID = 0x05
+DS4_OUTPUT_USB_SIZE = 32
+DS4_OUTPUT_BT_ID = 0x11
+DS4_OUTPUT_BT_SIZE = 78
+DS4_OUTPUT_CRC_SEED = 0xA2
+DS4_OUTPUT_HWCTL_CRC32 = 0x40
+DS4_OUTPUT_HWCTL_HID = 0x80
+DS4_OUTPUT_VALID_MOTOR = 0x01
+DS4_OUTPUT_VALID_LED = 0x02
 
 TP_X_MAX = 1919
 TP_Y_MAX = 941
@@ -297,11 +315,29 @@ _last_ds4_wake = 0.0
 # Last applied lightbar / motors (sparse MQTT + wake must not clobber)
 _ds4_led_rgb = (0, 0, 64)
 _ds4_rumble = (0.0, 0.0)  # weak, strong
+_ds4_bus_type = BUS_USB
 
 
 def clamp_u8(v: float | int) -> int:
     iv = int(round(float(v)))
     return 0 if iv < 0 else 255 if iv > 255 else iv
+
+
+def set_ds4_bus_type(bus_type: int | None) -> None:
+    global _ds4_bus_type
+    if bus_type is None:
+        return
+    try:
+        _ds4_bus_type = int(bus_type)
+    except (TypeError, ValueError):
+        pass
+
+
+def ds4_output_crc32(report_without_crc: bytes) -> int:
+    """Linux hid-playstation PS_OUTPUT_CRC32_SEED (0xA2) CRC for BT output."""
+    crc = zlib.crc32(bytes([DS4_OUTPUT_CRC_SEED]), 0xFFFFFFFF) & 0xFFFFFFFF
+    crc = zlib.crc32(report_without_crc, crc) & 0xFFFFFFFF
+    return (~crc) & 0xFFFFFFFF
 
 
 def build_ds4_output_report(
@@ -313,30 +349,165 @@ def build_ds4_output_report(
     b: int = 64,
     flash_on: int = 0,
     flash_off: int = 0,
+    bus_type: int | None = None,
 ) -> bytes:
-    """DS4 USB/BT output report 0x05 (32 bytes incl. report id).
+    """Build DS4 output report for USB (0x05) or Bluetooth (0x11 + CRC).
 
-    Byte layout (common community map):
-      [0]=0x05 [1]=0xFF [2]=0x04 [3]=0x00
-      [4]=weak(right/small) [5]=strong(left/large) 0..255
-      [6]=R [7]=G [8]=B
-      [9]=flash_on [10]=flash_off (0=steady)
+    Common payload (after transport header) matches linux dualshock4_output_report_common:
+      valid_flag0, valid_flag1, reserved,
+      motor_right(weak), motor_left(strong), R, G, B, blink_on, blink_off
     """
     weak = clamp_u8(max(0.0, min(1.0, float(rumble_weak))) * 255.0)
     strong = clamp_u8(max(0.0, min(1.0, float(rumble_strong))) * 255.0)
-    pkt = bytearray(32)
-    pkt[0] = 0x05
-    pkt[1] = 0xFF
-    pkt[2] = 0x04
-    pkt[3] = 0x00
-    pkt[4] = weak
-    pkt[5] = strong
-    pkt[6] = clamp_u8(r)
-    pkt[7] = clamp_u8(g)
-    pkt[8] = clamp_u8(b)
-    pkt[9] = clamp_u8(flash_on)
-    pkt[10] = clamp_u8(flash_off)
+    valid0 = DS4_OUTPUT_VALID_MOTOR | DS4_OUTPUT_VALID_LED
+    common = bytes(
+        [
+            valid0,
+            0x00,
+            0x00,
+            weak,
+            strong,
+            clamp_u8(r),
+            clamp_u8(g),
+            clamp_u8(b),
+            clamp_u8(flash_on),
+            clamp_u8(flash_off),
+        ]
+    )
+    use_bus = _ds4_bus_type if bus_type is None else int(bus_type)
+    if use_bus == BUS_BLUETOOTH:
+        pkt = bytearray(DS4_OUTPUT_BT_SIZE)
+        pkt[0] = DS4_OUTPUT_BT_ID
+        pkt[1] = DS4_OUTPUT_HWCTL_HID | DS4_OUTPUT_HWCTL_CRC32  # 0xC0
+        pkt[2] = 0x00
+        pkt[3:13] = common
+        crc = ds4_output_crc32(bytes(pkt[:-4]))
+        struct.pack_into("<I", pkt, DS4_OUTPUT_BT_SIZE - 4, crc)
+        return bytes(pkt)
+
+    pkt = bytearray(DS4_OUTPUT_USB_SIZE)
+    pkt[0] = DS4_OUTPUT_USB_ID
+    pkt[1:11] = common
     return bytes(pkt)
+
+
+class CtypesHidDevice:
+    """hidapi handle with hid_send_output_report (Python binding omits it).
+
+    macOS Bluetooth DS4 drops interrupt ``write()`` silently; control-path
+    ``hid_send_output_report`` is required for lightbar/rumble (I09).
+    """
+
+    _lib = None
+    _lib_inited = False
+
+    def __init__(self, handle: int):
+        self._h = c_void_p(handle)
+        self._lib = self._load_lib()
+
+    @classmethod
+    def _load_lib(cls):
+        if cls._lib is not None:
+            return cls._lib
+        import hid as hidmod
+
+        lib = ctypes.CDLL(hidmod.__file__)
+        lib.hid_init.restype = c_int
+        lib.hid_exit.restype = None
+        lib.hid_open_path.argtypes = [ctypes.c_char_p]
+        lib.hid_open_path.restype = c_void_p
+        lib.hid_close.argtypes = [c_void_p]
+        lib.hid_close.restype = None
+        lib.hid_set_nonblocking.argtypes = [c_void_p, c_int]
+        lib.hid_set_nonblocking.restype = c_int
+        lib.hid_read.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
+        lib.hid_read.restype = c_int
+        lib.hid_write.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
+        lib.hid_write.restype = c_int
+        lib.hid_send_output_report.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
+        lib.hid_send_output_report.restype = c_int
+        lib.hid_send_feature_report.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
+        lib.hid_send_feature_report.restype = c_int
+        lib.hid_get_feature_report.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
+        lib.hid_get_feature_report.restype = c_int
+        if not cls._lib_inited:
+            lib.hid_init()
+            cls._lib_inited = True
+        cls._lib = lib
+        return lib
+
+    @classmethod
+    def open_path(cls, path: bytes | str):
+        lib = cls._load_lib()
+        raw = path if isinstance(path, (bytes, bytearray)) else str(path).encode()
+        handle = lib.hid_open_path(raw)
+        if not handle:
+            return None
+        return cls(handle)
+
+    def set_nonblocking(self, enable: bool) -> None:
+        self._lib.hid_set_nonblocking(self._h, 1 if enable else 0)
+
+    def read(self, size: int):
+        buf = (c_ubyte * size)()
+        n = self._lib.hid_read(self._h, buf, size)
+        if n < 0:
+            raise OSError("hid_read failed")
+        if n == 0:
+            return []
+        return bytes(buf[:n])
+
+    def write(self, data: bytes) -> int:
+        buf = (c_ubyte * len(data))(*data)
+        return int(self._lib.hid_write(self._h, buf, len(data)))
+
+    def send_output_report(self, data: bytes) -> int:
+        buf = (c_ubyte * len(data))(*data)
+        return int(self._lib.hid_send_output_report(self._h, buf, len(data)))
+
+    def send_feature_report(self, data: bytes) -> int:
+        buf = (c_ubyte * len(data))(*data)
+        return int(self._lib.hid_send_feature_report(self._h, buf, len(data)))
+
+    def get_feature_report(self, report_id: int, size: int):
+        buf = (c_ubyte * size)()
+        buf[0] = report_id & 0xFF
+        n = self._lib.hid_get_feature_report(self._h, buf, size)
+        if n < 0:
+            raise OSError("hid_get_feature_report failed")
+        return bytes(buf[:n])
+
+    def close(self) -> None:
+        if self._h:
+            self._lib.hid_close(self._h)
+            self._h = c_void_p()
+
+
+def _hid_write_output(dev, pkt: bytes) -> bool:
+    """Prefer control-path output when available; fall back to write()."""
+    send_out = getattr(dev, "send_output_report", None)
+    if callable(send_out):
+        try:
+            n = send_out(pkt)
+            if isinstance(n, int) and n > 0:
+                return True
+        except Exception:
+            pass
+    try:
+        n = dev.write(pkt)
+        if isinstance(n, int) and n > 0:
+            return True
+    except Exception:
+        pass
+    send_feat = getattr(dev, "send_feature_report", None)
+    if callable(send_feat):
+        try:
+            n = send_feat(pkt)
+            if isinstance(n, int) and n > 0:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def apply_ds4_output(
@@ -350,6 +521,7 @@ def apply_ds4_output(
     flash_on: int = 0,
     flash_off: int = 0,
     remember_led: bool = True,
+    bus_type: int | None = None,
 ) -> bool:
     """Write lightbar + rumble. None led channels keep last remembered color."""
     global _ds4_led_rgb, _ds4_rumble
@@ -363,6 +535,7 @@ def apply_ds4_output(
         max(0.0, min(1.0, float(rumble_weak))),
         max(0.0, min(1.0, float(rumble_strong))),
     )
+    use_bus = _ds4_bus_type if bus_type is None else int(bus_type)
     pkt = build_ds4_output_report(
         rumble_weak=_ds4_rumble[0],
         rumble_strong=_ds4_rumble[1],
@@ -371,12 +544,9 @@ def apply_ds4_output(
         b=bb,
         flash_on=flash_on,
         flash_off=flash_off,
+        bus_type=use_bus,
     )
-    try:
-        dev.write(pkt)
-        return True
-    except Exception:
-        return False
+    return _hid_write_output(dev, pkt)
 
 
 def wake_ds4_full_reports(dev, *, force: bool = False) -> None:
@@ -406,11 +576,16 @@ def open_ds4_device(hid, path: bytes | None = None):
     info = pick_ds4_device(hid, path=path)
     if not info:
         return None, None
-    dev = hid.device()
-    try:
-        dev.open_path(info["path"])
-    except Exception:
-        return None, None
+    set_ds4_bus_type(info.get("bus_type"))
+    # Prefer ctypes handle so BT output can use hid_send_output_report.
+    dev = CtypesHidDevice.open_path(info["path"])
+    if dev is None:
+        # Fallback: pure Python binding (USB often OK; BT rumble may be silent).
+        try:
+            dev = hid.device()
+            dev.open_path(info["path"])
+        except Exception:
+            return None, None
     try:
         dev.set_nonblocking(True)
     except Exception:

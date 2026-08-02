@@ -892,8 +892,14 @@ def main() -> int:
             ok = output_ctl.apply_output_cmd(o)
             led = o.get("led") or {}
             rum = o.get("rumble") or {}
+            try:
+                from deep_dog_ds4_hid import _ds4_bus_type
+
+                bus = "bt" if int(_ds4_bus_type) == 2 else f"bus={_ds4_bus_type}"
+            except Exception:
+                bus = "?"
             print(
-                f"[{ts()}] CMD output ok={1 if ok else 0} "
+                f"[{ts()}] CMD output ok={1 if ok else 0} bus={bus} "
                 f"led={led} rumble={rum} duration_ms={o.get('duration_ms')}"
             )
             return

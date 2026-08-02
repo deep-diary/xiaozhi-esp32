@@ -8,7 +8,7 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | MQTT 契约 | [modules/11-handle](../mqtt/modules/11-handle.md) · [YAML](../mqtt/protocol/deep-dog-mqtt.yml) |
 | 固件 | [`handle/`](../../handle/) + [`handle_mqtt`](../../mqtt/modules/handle_mqtt.h) |
 | 镜像分层 | [touch_btn](../../touch_btn/)（Hub + Dispatcher + App） |
-| 本轮状态 | **wifi 源 + PC 桥已实现**；板载 BT 适配已落地（宏/`-DDEEP_DOG_HANDLE_BT` 默认关） |
+| 本轮状态 | **wifi 源 + PC 桥 + 板载 BT + keymap(I08a) 已落地**；BT 宏/`-DDEEP_DOG_HANDLE_BT` 默认关；后续 App 绑定按需扩 |
 
 ## 目标
 

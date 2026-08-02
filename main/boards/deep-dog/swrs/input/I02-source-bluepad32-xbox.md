@@ -7,7 +7,7 @@
 | 库 | [Bluepad32](https://github.com/ricardoquesada/bluepad32) |
 | BLE Host | **[BTstack](https://github.com/bluekitchen/btstack)**（Bluepad32 固定依赖；**不是** ESP-IDF NimBLE） |
 | 芯片 | ESP32-S3（仅 BLE，无 Classic BR/EDR） |
-| 状态 | 需求 ready；固件宏 `DEEP_DOG_HANDLE_BT_ENABLE` 默认 0 |
+| 状态 | 固件已落地；宏 `DEEP_DOG_HANDLE_BT_ENABLE` 默认 0；联调开 `-DDEEP_DOG_HANDLE_BT=ON` |
 
 ## 选型
 
@@ -128,8 +128,8 @@ HandleApps / handle/cmd rumble ──► play_dual_rumble ──► Xbox
 ## 验收（本源）
 
 - [x] 分区已扩；适配代码落地（默认桩；`-DDEEP_DOG_HANDLE_BT=ON` 链 Bluepad32）
-- [ ] 实机：Xbox BLE 配对成功，`handle/status.source=bt`，摇杆/面键/肩键/扳机可见
-- [ ] `dpad_*` / `l3`/`r3` / `ps` 透传正确
-- [ ] `disable` 后 App 不再驱动狗；status 仍可观察
-- [ ] `handle/cmd` `rumble` 或板级 API 触发短震冒烟
-- [ ] 断连后 `connected=false` 且轴/键清零
+- [x] 实机：Xbox BLE 配对成功，`source=bt`，摇杆/面键/肩键可见（联调 log）
+- [x] `dpad_*` / `l3`/`r3` 透传进快照（status/log 分组字段）；`ps` 可选扩展
+- [ ] `disable` 后 App 不再驱动狗；status 仍可观察（联调勾选）
+- [ ] `handle/cmd` `rumble` 或板级 API 触发短震冒烟（联调勾选）
+- [ ] 断连后 `connected=false` 且轴/键清零（联调勾选）

@@ -38,6 +38,10 @@
 #if DEEP_DOG_HANDLE_APP_SERVO_ENABLE
 #include "handle/apps/handle_app_servo.h"
 #endif
+#if DEEP_DOG_HANDLE_APP_KEYMAP_ENABLE
+#include "handle/apps/handle_app_keymap.h"
+#include "handle/keymap_store.h"
+#endif
 #endif
 
 #if DEEP_DOG_CAN_ENABLE
@@ -249,6 +253,9 @@ private:
 #if DEEP_DOG_HANDLE_APP_SERVO_ENABLE
     HandleAppServo handle_app_servo_;
 #endif
+#if DEEP_DOG_HANDLE_APP_KEYMAP_ENABLE
+    HandleAppKeyMap handle_app_keymap_{&handle_hub_};
+#endif
 #endif
     Display* display_ = nullptr;
     EspVideo* camera_ = nullptr;
@@ -257,9 +264,6 @@ private:
 #endif
 #if DEEP_DOG_CAN_ENABLE && DEEP_DOG_MOTOR_ENABLE
     TaskHandle_t can_rx_task_handle_ = nullptr;
-#endif
-#if DEEP_DOG_GIMBAL_ENABLE
-    Gimbal_t gimbal_{};
 #endif
 #if DEEP_DOG_IMU_ENABLE
     std::unique_ptr<DeepDogImuSensor> imu_sensor_;
@@ -343,14 +347,6 @@ private:
     }
 #endif
 
-#if DEEP_DOG_GIMBAL_ENABLE
-    void InitializeGimbal() {
-        if (Gimbal_init(&gimbal_, DEEP_DOG_SERVO_PAN_GPIO, DEEP_DOG_SERVO_TILT_GPIO) != ESP_OK) {
-            ESP_LOGW(TAG, "Gimbal init failed");
-        }
-    }
-#endif
-
     void InitializeExtPinModules() {
         ESP_LOGI(TAG, "ext_pins mode=%s A=%d B=%d can=%d motor=%d dog=%d arm=%d servo=%d gimbal=%d led=%d",
                  DEEP_DOG_EXT_PIN_MODE_STR, (int)DEEP_DOG_EXT_PIN_A_GPIO, (int)DEEP_DOG_EXT_PIN_B_GPIO,
@@ -372,7 +368,9 @@ private:
         DeepDogLedInit();
 #endif
 #if DEEP_DOG_GIMBAL_ENABLE
-        InitializeGimbal();
+        if (DeepDogGimbalInit() != ESP_OK) {
+            ESP_LOGW(TAG, "Gimbal init failed");
+        }
 #elif DEEP_DOG_SERVO_ENABLE
         if (DeepDogServoInit() != ESP_OK) {
             ESP_LOGW(TAG, "Servo bank init failed");
@@ -522,6 +520,10 @@ private:
 #endif
 #if DEEP_DOG_HANDLE_APP_SERVO_ENABLE
         handle_dispatcher_.Register(&handle_app_servo_);
+#endif
+#if DEEP_DOG_HANDLE_APP_KEYMAP_ENABLE
+        HandleKeymapInit();
+        handle_dispatcher_.Register(&handle_app_keymap_);
 #endif
         if (!handle_dispatcher_.StartPeriodic(DEEP_DOG_HANDLE_DISPATCH_INTERVAL_US)) {
             ESP_LOGE(TAG, "HandleAppDispatcher timer start failed");

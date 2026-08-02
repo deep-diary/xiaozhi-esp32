@@ -11,6 +11,7 @@
 #include "mqtt/modules/handle_mqtt.h"
 #include "mqtt/modules/led_mqtt.h"
 #include "mqtt/modules/servo_mqtt.h"
+#include "mqtt/modules/gimbal_mqtt.h"
 #include "touch_btn/touch_event_hub.h"
 #include "handle/handle_event_hub.h"
 #include "handle/handle_config.h"
@@ -43,6 +44,7 @@ struct DeepDogMqtt::Impl {
     DeepDogHandleMqtt handle{&client};
     DeepDogLedMqtt led{&client};
     DeepDogServoMqtt servo{&client};
+    DeepDogGimbalMqtt gimbal{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
     TouchEventHub* touch_hub = nullptr;
@@ -70,6 +72,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         handle.OnConnected();
         led.OnConnected();
         servo.OnConnected();
+        gimbal.OnConnected();
     } else {
         device.OnDisconnected();
         stream.OnDisconnected();
@@ -80,6 +83,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         handle.OnDisconnected();
         led.OnDisconnected();
         servo.OnDisconnected();
+        gimbal.OnDisconnected();
     }
 }
 
@@ -91,6 +95,7 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     touch.OnMessage(topic, payload);
     handle.OnMessage(topic, payload);
     servo.OnMessage(topic, payload);
+    gimbal.OnMessage(topic, payload);
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
@@ -305,6 +310,7 @@ bool DeepDogMqtt::Start() {
     impl_->handle.SetHub(impl_->handle_hub);
     impl_->led.SetEnabled(caps.led);
     impl_->servo.SetEnabled(caps.servo);
+    impl_->gimbal.SetEnabled(caps.gimbal);
 
     impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
     impl_->client.SetMessageCallback(
@@ -314,9 +320,10 @@ bool DeepDogMqtt::Start() {
     const bool ok = impl_->client.Start(settings);
     impl_->started = true;
     ESP_LOGI(TAG,
-             "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d servo=%d handle=%d",
+             "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d servo=%d "
+             "gimbal=%d handle=%d",
              ok ? 1 : 0, caps.stream ? 1 : 0, caps.face ? 1 : 0, caps.track ? 1 : 0, caps.imu ? 1 : 0,
-             caps.led ? 1 : 0, caps.servo ? 1 : 0, caps.handle ? 1 : 0);
+             caps.led ? 1 : 0, caps.servo ? 1 : 0, caps.gimbal ? 1 : 0, caps.handle ? 1 : 0);
     return ok;
 }
 
@@ -324,6 +331,7 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
+    impl_->gimbal.Stop();
     impl_->servo.Stop();
     impl_->led.Stop();
     impl_->handle.Stop();

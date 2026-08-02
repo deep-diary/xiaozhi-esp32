@@ -2,6 +2,7 @@
 
 #include "mqtt/mqtt_client.h"
 #include "handle/handle_config.h"
+#include "handle/keymap_store.h"
 #include "handle/sources/handle_bt.h"
 
 #include <cJSON.h>
@@ -152,11 +153,13 @@ void DeepDogHandleMqtt::OnConnected() {
     if (!enabled_ || !client_) {
         return;
     }
+    HandleKeymapInit();
     client_->Subscribe("handle/cmd", 1);
 #if DEEP_DOG_HANDLE_MQTT_INPUT_ENABLE
     client_->Subscribe("handle/input", 0);
 #endif
     PublishStatus();
+    PublishKeymap();
 }
 
 void DeepDogHandleMqtt::OnDisconnected() {
@@ -438,11 +441,79 @@ void DeepDogHandleMqtt::HandleCmd(const std::string& payload) {
         HandleBtRumble(static_cast<uint16_t>(delay_ms), static_cast<uint16_t>(duration_ms),
                        static_cast<uint8_t>(weak), static_cast<uint8_t>(strong));
         ESP_LOGI(TAG, "rumble delay=%d dur=%d weak=%d strong=%d", delay_ms, duration_ms, weak, strong);
+    } else if (strcmp(a, "get_keymap") == 0) {
+        PublishKeymap();
+        cJSON_Delete(root);
+        return;
+    } else if (strcmp(a, "reset_keymap") == 0) {
+        bool persist = true;
+        const cJSON* p = cJSON_GetObjectItem(root, "persist");
+        if (cJSON_IsBool(p)) {
+            persist = cJSON_IsTrue(p);
+        }
+        HandleKeymapReset(persist);
+        PublishKeymap();
+        cJSON_Delete(root);
+        return;
+    } else if (strcmp(a, "set_profile") == 0) {
+        const cJSON* profile_j = cJSON_GetObjectItem(root, "profile");
+        HandleProfile_t profile = HANDLE_PROFILE_OFF;
+        if (!cJSON_IsString(profile_j) || !HandleKeymapParseProfile(profile_j->valuestring, &profile)) {
+            ESP_LOGW(TAG, "set_profile bad profile");
+            cJSON_Delete(root);
+            return;
+        }
+        bool persist = true;
+        const cJSON* p = cJSON_GetObjectItem(root, "persist");
+        if (cJSON_IsBool(p)) {
+            persist = cJSON_IsTrue(p);
+        }
+        HandleKeymapSetProfile(profile, persist);
+        PublishKeymap();
+        cJSON_Delete(root);
+        return;
+    } else if (strcmp(a, "set_keymap") == 0) {
+        const cJSON* bindings = cJSON_GetObjectItem(root, "bindings");
+        bool merge = true;
+        bool persist = true;
+        const cJSON* m = cJSON_GetObjectItem(root, "merge");
+        if (cJSON_IsBool(m)) {
+            merge = cJSON_IsTrue(m);
+        }
+        const cJSON* p = cJSON_GetObjectItem(root, "persist");
+        if (cJSON_IsBool(p)) {
+            persist = cJSON_IsTrue(p);
+        }
+        if (!HandleKeymapSetFromJson(bindings, merge, persist)) {
+            ESP_LOGW(TAG, "set_keymap failed");
+        }
+        PublishKeymap();
+        cJSON_Delete(root);
+        return;
     } else {
         ESP_LOGW(TAG, "unknown handle/cmd action=%s", a);
     }
     cJSON_Delete(root);
     PublishStatus();
+}
+
+bool DeepDogHandleMqtt::PublishKeymap() {
+    if (!enabled_ || !connected_ || !client_) {
+        return false;
+    }
+    HandleKeymapInit();
+    cJSON* root = HandleKeymapBuildJson();
+    if (!root) {
+        return false;
+    }
+    char* printed = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!printed) {
+        return false;
+    }
+    const bool ok = client_->Publish("handle/keymap", printed, 0, true);
+    cJSON_free(printed);
+    return ok;
 }
 
 bool DeepDogHandleMqtt::PublishOutput(int led_r, int led_g, int led_b, float rumble_strong,

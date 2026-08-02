@@ -1,6 +1,9 @@
 #pragma once
 
-#include "board_features.h"
+/* 必须走 config.h：先定义 *_AVAILABLE，再 include board_features；
+ * 若直接拉 board_features，未定义的 PWM_AVAILABLE 在 #if 里当 0，
+ * 会把 DEEP_DOG_GIMBAL_ENABLE 钳成 0（见手柄 keymap 日志）。 */
+#include "config.h"
 
 #ifndef DEEP_DOG_HANDLE_ENABLE
 #define DEEP_DOG_HANDLE_ENABLE 1
@@ -26,6 +29,10 @@
 
 #ifndef DEEP_DOG_HANDLE_APP_SERVO_ENABLE
 #define DEEP_DOG_HANDLE_APP_SERVO_ENABLE 0
+#endif
+
+#ifndef DEEP_DOG_HANDLE_APP_KEYMAP_ENABLE
+#define DEEP_DOG_HANDLE_APP_KEYMAP_ENABLE 1
 #endif
 
 /** Dispatcher 轮询周期 */

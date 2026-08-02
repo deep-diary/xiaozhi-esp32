@@ -39,12 +39,12 @@
 #define DEEP_DOG_ARM_ENABLE 0
 #endif
 
-/* -------- PWM 产品（需 EXT_PIN=PWM；默认开舵机调试） -------- */
+/* -------- PWM 产品（需 EXT_PIN=PWM；默认开云台，裸舵机调试互斥） -------- */
 #ifndef DEEP_DOG_SERVO_ENABLE
-#define DEEP_DOG_SERVO_ENABLE 1
+#define DEEP_DOG_SERVO_ENABLE 0
 #endif
 #ifndef DEEP_DOG_GIMBAL_ENABLE
-#define DEEP_DOG_GIMBAL_ENABLE 0
+#define DEEP_DOG_GIMBAL_ENABLE 1
 #endif
 
 /* -------- 非引出脚功能 -------- */
@@ -73,8 +73,8 @@
 #define DEEP_DOG_HANDLE_ENABLE 1
 #endif
 
-/* -------- 依赖钳位 -------- */
-#if !DEEP_DOG_CAN_AVAILABLE
+/* -------- 依赖钳位（*_AVAILABLE 必须已由 config.h 定义；未定义时不钳位） -------- */
+#if defined(DEEP_DOG_CAN_AVAILABLE) && !DEEP_DOG_CAN_AVAILABLE
 #undef DEEP_DOG_CAN_ENABLE
 #define DEEP_DOG_CAN_ENABLE 0
 #endif
@@ -89,35 +89,36 @@
 #define DEEP_DOG_ARM_ENABLE 0
 #endif
 
-#if !DEEP_DOG_UART_AVAILABLE
+#if defined(DEEP_DOG_UART_AVAILABLE) && !DEEP_DOG_UART_AVAILABLE
 #undef DEEP_DOG_UART_ENABLE
 #define DEEP_DOG_UART_ENABLE 0
 #endif
-#if !DEEP_DOG_RS485_AVAILABLE
+#if defined(DEEP_DOG_RS485_AVAILABLE) && !DEEP_DOG_RS485_AVAILABLE
 #undef DEEP_DOG_RS485_ENABLE
 #define DEEP_DOG_RS485_ENABLE 0
 #endif
-#if !DEEP_DOG_IO_AVAILABLE
+#if defined(DEEP_DOG_IO_AVAILABLE) && !DEEP_DOG_IO_AVAILABLE
 #undef DEEP_DOG_IO_ENABLE
 #define DEEP_DOG_IO_ENABLE 0
 #endif
-#if !DEEP_DOG_AD_AVAILABLE
+#if defined(DEEP_DOG_AD_AVAILABLE) && !DEEP_DOG_AD_AVAILABLE
 #undef DEEP_DOG_AD_ENABLE
 #define DEEP_DOG_AD_ENABLE 0
 #endif
 
-#if !DEEP_DOG_PWM_AVAILABLE
+#if defined(DEEP_DOG_PWM_AVAILABLE) && !DEEP_DOG_PWM_AVAILABLE
 #undef DEEP_DOG_SERVO_ENABLE
 #define DEEP_DOG_SERVO_ENABLE 0
 #undef DEEP_DOG_GIMBAL_ENABLE
 #define DEEP_DOG_GIMBAL_ENABLE 0
 #endif
-#if !DEEP_DOG_SERVO_ENABLE
-#undef DEEP_DOG_GIMBAL_ENABLE
-#define DEEP_DOG_GIMBAL_ENABLE 0
+/* 同脚互斥：同时开时优先云台；底层 Servo 驱动随 GIMBAL|SERVO 任一开启 */
+#if DEEP_DOG_GIMBAL_ENABLE && DEEP_DOG_SERVO_ENABLE
+#undef DEEP_DOG_SERVO_ENABLE
+#define DEEP_DOG_SERVO_ENABLE 0
 #endif
 
-#if !DEEP_DOG_LED_AVAILABLE
+#if defined(DEEP_DOG_LED_AVAILABLE) && !DEEP_DOG_LED_AVAILABLE
 #undef DEEP_DOG_LED_ENABLE
 #define DEEP_DOG_LED_ENABLE 0
 #endif

@@ -27,6 +27,7 @@ public:
     void OnSnapshot(const HandleSnapshot& snap);
 
     bool PublishStatus();
+    bool PublishKeymap();
 
     /**
      * 发布 handle/cmd action=output（I09）。PC 桥订同一 Topic 写 DS4 灯/震。

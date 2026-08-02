@@ -9,6 +9,8 @@
 | [`config.h`](./config.h) | 硬件 GPIO + **自由引出脚成对模式** `DEEP_DOG_EXT_PIN_MODE` |
 | [`board_features.h`](./board_features.h) | 分层 ENABLE（总线→驱动→产品）与非引脚总开关 |
 
+**只改一个宏开/关云台**：`board_features.h` 里的 `DEEP_DOG_GIMBAL_ENABLE`（需 `EXT_PIN=PWM`）。不要单独改底层 `Servo.c` 开关；驱动随 `GIMBAL|SERVO` 自动编入。模块侧请 `#include "config.h"`，**禁止**直接 include `board_features.h`（否则 `*_AVAILABLE` 未定义会被当成 0，误关云台）。
+
 模块参数（波特率、电机增益、步态等）留在各目录 `*_config.h`，**不要**在模块内写死 GPIO 38/48。
 
 ## 引出脚成对模式
@@ -45,13 +47,13 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 
 | 剖面 | EXT_PIN | CAN | MOTOR | DOG | ARM | SERVO/GIMBAL | 说明 |
 |------|---------|-----|-------|-----|-----|--------------|------|
-| **舵机调试（当前默认）** | `PWM` | 0 | 0 | 0 | 0 | **1/0** | 2 路裸舵机 MQTT/MCP |
+| **云台（当前默认）** | `PWM` | 0 | 0 | 0 | 0 | **0/1** | 产品 pan/tilt MQTT + 手柄 keymap |
+| 舵机调试 | `PWM` | 0 | 0 | 0 | 0 | **1/0** | 2 路裸舵机 MQTT/MCP（与云台互斥） |
 | 灯带联调 | `LED` | 0 | 0 | 0 | 0 | 0 | `LED_ENABLE=1`；DIN=`gpio_a`(38) |
 | 前端壳 | `NONE` | 0 | 0 | 0 | 0 | 0 | MQTT 设备页联调 |
 | 单电机 | `CAN` | 1 | 1 | 0 | 0 | 0 | 协议/MCP 点动 |
 | 四足狗 | `CAN` | 1 | 1 | 1 | 0 | 0 | 完整运控 |
 | 机械臂 | `CAN` | 1 | 1 | 0 | 1 | 0 | 占位，实现后启用 |
-| 云台 | `PWM` | 0 | 0 | 0 | 0 | 1/1 | pan/tilt（开 GIMBAL） |
 | UART | `UART` | 0 | 0 | 0 | 0 | 0 | `UART_ENABLE=1` |
 
 非引脚开关（默认可按联调需要改 `board_features.h`）：

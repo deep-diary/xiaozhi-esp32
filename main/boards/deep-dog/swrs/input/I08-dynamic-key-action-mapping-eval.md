@@ -6,7 +6,7 @@
 | 类型 | **评估**（非交付规格）；结论供 ROADMAP 选型 |
 | 动机 | 编译期「一手柄一 App、键位写死」→ 希望 Web/MQTT 改绑定并 NVS 固化 |
 | 现状对照 | [I01](./I01-architecture.md) · [I04](./I04-apps-mapping.md) · [08-led](../mqtt/modules/08-led.md) |
-| 状态 | 评估完成；契约已拍板见 [I08a](./I08a-keymap-mqtt-contract-draft.md)；**固件 planned** |
+| 状态 | 评估完成；契约已拍板见 [I08a](./I08a-keymap-mqtt-contract-draft.md)；**固件 keymap 已落地**（`HandleAppKeyMap`） |
 
 ---
 
@@ -189,7 +189,7 @@ HandleEventHub
 
 | 优先级 | 建议 |
 |--------|------|
-| **P0（现在）** | 契约已拍板（I08a）；固件尚未实现 |
+| **P0（现在）** | 契约已拍板（I08a）；固件 `HandleAppKeyMap` + NVS + profile 已落地 |
 | **P1（灯带演示有需求时）** | 做 **最小 keymap**：仅离散键 → `LedStripControl` 已有 Apply*；MQTT + NVS |
 | **P2** | 扩展到舵机调试键；仍避开主运控 |
 | **P3 / 谨慎** | 狗动作进 remap（需安全态、确认、限速） |
@@ -280,4 +280,4 @@ HandleEventHub
 - [x] 行业惯例说明
 - [x] 与 I01/I04/led 架构对齐的落点建议
 - [x] 契约草稿：[I08a](./I08a-keymap-mqtt-contract-draft.md) → **已拍板并合入 YAML**
-- [ ] 固件实现 `HandleAppLedMap` + NVS + profile 门控
+- [x] 固件实现 keymap App + NVS + profile 门控（`HandleAppKeyMap`；灯带/云台 catalog；后续 App 用到再扩）

@@ -58,15 +58,19 @@ modules:
     status: defined
     required: false
     depends: [servo]
-    impl: modules/09-gimbal
-    ref: main/boards/deep-diary/gimbal/
+    impl: mqtt/modules/gimbal_mqtt
+    note: >
+      Product pan/tilt path; mutually exclusive with bare servo on same EXT pins.
+      Default board profile: GIMBAL=1 SERVO=0. Keymap via handle profile=gimbal (I08a).
+    ref: main/boards/deep-dog/gimbal/
   handle:
     status: defined
     required: false
     note: >
       Dual-source v0.1: onboard Bluepad32+BTstack Xbox BLE (source=bt) and PC MQTT
       bridge (source=wifi, handle/input). Hub+App layering in swrs/input/;
-      keymap+profile (I08a) selects HandleApp class; firmware HandleAppLedMap planned.
+      keymap+profile (I08a) selects HandleApp class; press/hold bindings;
+      profiles led_demo|gimbal|dog|off.
     ref: main/boards/deep-dog/swrs/input/
     impl: modules/11-handle
   touch:
@@ -486,11 +490,37 @@ topics:
     dir: downlink
     qos: 1
     retain: false
+    note: >
+      Either mode absolute|relative (+pan/tilt), or action-based control.
+      speed / pan_speed / tilt_speed in deg/s; 0 speed on absolute = ASAP.
     payload:
-      mode: { type: enum, values: [absolute, relative] }
-      pan: { type: number }
-      tilt: { type: number }
-      speed: { type: number, optional: true, note: "0 = ASAP" }
+      mode: { type: enum, values: [absolute, relative], optional: true }
+      pan: { type: number, optional: true }
+      tilt: { type: number, optional: true }
+      speed: { type: number, optional: true, note: "deg/s for this move; 0 = ASAP" }
+      action:
+        type: enum
+        optional: true
+        values:
+          - nudge_left
+          - nudge_right
+          - nudge_up
+          - nudge_down
+          - jog_start
+          - jog_stop
+          - pan_speed_up
+          - pan_speed_down
+          - tilt_speed_up
+          - tilt_speed_down
+          - set_speed
+          - stop
+      dir:
+        type: enum
+        values: [left, right, up, down]
+        optional: true
+        note: "jog_start"
+      pan_speed: { type: number, optional: true, note: "set_speed; deg/s" }
+      tilt_speed: { type: number, optional: true, note: "set_speed; deg/s" }
       ts: { type: int }
 
   gimbal/status:
@@ -501,6 +531,11 @@ topics:
     payload:
       pan: { type: number }
       tilt: { type: number }
+      pan_speed: { type: number, note: "deg/s" }
+      tilt_speed: { type: number, note: "deg/s" }
+      step_deg: { type: number }
+      moving_pan: { type: bool }
+      moving_tilt: { type: bool }
       ready: { type: bool }
       lim_pan: { type: array, item: number, optional: true }
       lim_tilt: { type: array, item: number, optional: true }
@@ -518,7 +553,8 @@ topics:
       rumble = board BT Xbox (I02); output = PC-bridge DS4 LED+rumble (I09).
       Device may also PUBLISH output (alerts); bridge SUB and writes HID.
       Keymap (I08a): set_keymap/get_keymap/reset_keymap/set_profile;
-      profile selects which HandleApp class drives actuators (led_demo|dog|off).
+      profile selects which HandleApp class drives actuators
+      (led_demo|gimbal|dog|off). Bindings are per-key press+hold.
     payload:
       action:
         type: enum
@@ -555,15 +591,15 @@ topics:
       persist: { type: bool, optional: true, note: "keymap/profile; default true" }
       profile:
         type: enum
-        values: [led_demo, dog, off]
+        values: [led_demo, gimbal, dog, off]
         optional: true
         note: "set_profile; App-class slice (I08a §0)"
       bindings:
         type: object
         optional: true
         note: >
-          set_keymap; keys a|b|x|y|l1|r1 (v0); value = binding
-          {id: led.*|none, optional led/cmd-aligned color fields}
+          set_keymap; keys a|b|x|y|l1|r1|start|select|dpad_*|l3|r3;
+          value = {press:{id,...}, hold:{id,...}} or legacy flat {id,...}=press only
       ts: { type: int }
 
   handle/keymap:
@@ -573,21 +609,26 @@ topics:
     retain: true
     when: on_change_or_reconnect_or_get
     note: >
-      I08a: active key→action table + profile (HandleApp class).
-      Firmware planned (HandleAppLedMap + NVS h_keymap).
+      I08a schema_ver 3: press/hold; bindable_keys list; catalog filtered by profile
+      (led_demo→led.*; gimbal→gimbal.*; dog/off→none only).
+      set_profile always loads that app's default bindings.
     payload:
       schema_ver: { type: int }
       ok: { type: bool }
-      profile: { type: enum, values: [led_demo, dog, off] }
+      profile: { type: enum, values: [led_demo, gimbal, dog, off] }
       persist: { type: bool }
       source: { type: enum, values: [nvs, default, mqtt] }
+      bindable_keys:
+        type: array
+        item: { type: string }
+        note: "all remappable bool keys for UI"
       bindings:
         type: object
-        note: "at least a,b,x,y,l1,r1; each {id, optional params}"
+        note: "each bindable key → {press,hold} with {id, optional params}"
       catalog:
         type: array
         item: { type: string }
-        note: "supported action ids; always present for UI dropdown"
+        note: "action ids for current profile only (+ none)"
       warnings:
         type: array
         item: { type: string }
