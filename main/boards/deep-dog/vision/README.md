@@ -29,9 +29,9 @@
 curl -X POST 'http://192.168.31.211:8080/api/vision_publish?mode=rtsp_push'
 
 # Python 拉流落盘（硬门禁；本机 ffmpeg 连 :8554 可能 EHOSTUNREACH，脚本会走 TCP 拉流）
-python3 scripts/deep_dog_rtsp_pull_verify.py --outdir h264 --python-only
+python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir h264 --python-only
 # JPEG 回退固件时：
-python3 scripts/deep_dog_rtsp_pull_verify.py --outdir jpeg --python-only
+python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir jpeg --python-only
 
 # DESCRIBE 期望 H264/90000
 # HLS（软探，非硬门禁）：http://192.168.31.25:8888/deep-dog/dev/index.m3u8

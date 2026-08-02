@@ -4,7 +4,7 @@
 |----|------|
 | 域 | input / handle |
 | 状态 | 需求 ready；固件 wifi 源 + 板载 BT 适配已落地（BT 宏默认关） |
-| 参考实现 | [touch_btn](../../touch_btn/) · PC 桥 [`scripts/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog_handle_bridge.py) |
+| 参考实现 | [touch_btn](../../touch_btn/) · PC 桥 [`scripts/deep_dog/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog/deep_dog_handle_bridge.py) |
 
 ## 数据流
 

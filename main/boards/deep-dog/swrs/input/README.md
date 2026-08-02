@@ -8,7 +8,7 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | MQTT 契约 | [modules/11-handle](../mqtt/modules/11-handle.md) · [YAML](../mqtt/protocol/deep-dog-mqtt.yml) |
 | 固件 | [`handle/`](../../handle/) + [`handle_mqtt`](../../mqtt/modules/handle_mqtt.h) |
 | 镜像分层 | [touch_btn](../../touch_btn/)（Hub + Dispatcher + App） |
-| 本轮状态 | **wifi 源 + PC 桥 + 板载 BT + keymap(I08a) 已落地**；BT 宏/`-DDEEP_DOG_HANDLE_BT` 默认关；后续 App 绑定按需扩 |
+| 本轮状态 | **日常：关板载 BT + PC 桥（含 Xbox output 震）**；板载 BT 已验、瘦剖面可再开；keymap(I08a) 已落地 |
 
 ## 目标
 
@@ -31,7 +31,7 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | [I07-motion-gyro](./I07-motion-gyro.md) | DS4 手柄 gyro/accel（可选 `motion`） |
 | [I08-dynamic-key-action-mapping-eval](./I08-dynamic-key-action-mapping-eval.md) | **评估**：运行时按键→动作表 / MQTT+NVS（灯带试点） |
 | [I08a-keymap-mqtt-contract-draft](./I08a-keymap-mqtt-contract-draft.md) | **契约拍板**：`profile`=App 类；keymap + retain `handle/keymap` |
-| [I09-ds4-output-feedback](./I09-ds4-output-feedback.md) | DS4 灯条/震动：`handle/cmd` `output` |
+| [I09-ds4-output-feedback](./I09-ds4-output-feedback.md) | PC 桥 `output`：DS4 灯震 + Xbox pygame 震 |
 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png) | DualShock 4 实测标注（Linux） |
 
 ## 边界

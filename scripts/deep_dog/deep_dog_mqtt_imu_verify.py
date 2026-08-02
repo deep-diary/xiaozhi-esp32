@@ -2,9 +2,9 @@
 """Verify deep-dog MQTT imu/status on LAN and/or WSS (for frontend contract).
 
 Examples:
-  /usr/bin/python3 scripts/deep_dog_mqtt_imu_verify.py --via web --wait 8
-  /usr/bin/python3 scripts/deep_dog_mqtt_imu_verify.py --via lan --wait 8
-  /usr/bin/python3 scripts/deep_dog_mqtt_imu_verify.py --via both --min-msgs 5
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_imu_verify.py --via web --wait 8
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_imu_verify.py --via lan --wait 8
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_imu_verify.py --via both --min-msgs 5
 """
 
 from __future__ import annotations

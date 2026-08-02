@@ -2,7 +2,7 @@
 # Fetch Bluepad32 + patch/integrate BTstack for deep-dog handle BT source.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEST="${ROOT}/main/boards/deep-dog/handle/third_party/bluepad32"
 REPO_URL="${DEEP_DOG_BLUEPAD32_URL:-https://github.com/ricardoquesada/bluepad32.git}"
 REF="${DEEP_DOG_BLUEPAD32_REF:-main}"

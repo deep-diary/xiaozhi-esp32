@@ -19,7 +19,7 @@ if(DEEP_DOG_HANDLE_BT)
     else()
         message(FATAL_ERROR
             "DEEP_DOG_HANDLE_BT=ON but Bluepad32 missing at ${DEEP_DOG_BLUEPAD32_ROOT}. "
-            "Run: ./scripts/deep_dog_fetch_bluepad32.sh")
+            "Run: ./scripts/deep_dog/deep_dog_fetch_bluepad32.sh")
     endif()
 endif()
 

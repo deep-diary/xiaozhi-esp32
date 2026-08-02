@@ -60,7 +60,7 @@
 | 层 | 工作 | 状态 |
 |----|------|------|
 | 桥 | `--touchpad-xy` → hidapi；填 contacts + 仍填 x/y | done / 本轮双点 |
-| 共享解析 | [`scripts/deep_dog_ds4_hid.py`](../../../../../scripts/deep_dog_ds4_hid.py) | done |
+| 共享解析 | [`scripts/deep_dog/deep_dog_ds4_hid.py`](../../../../../scripts/deep_dog/deep_dog_ds4_hid.py) | done |
 | 契约 | YAML + [11-handle](../mqtt/modules/11-handle.md) / I05 | 本轮更新 |
 | 固件 | `HandleTouchpad` + contacts 透传 | 本轮 |
 | 前端 | TOUCH 画最多 2 点 | 需求同步 |

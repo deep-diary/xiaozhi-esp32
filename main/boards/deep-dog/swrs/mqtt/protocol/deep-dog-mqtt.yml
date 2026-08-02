@@ -550,8 +550,9 @@ topics:
     retain: false
     note: >
       enable/disable gate local HandleApps; pair onboard BT;
-      rumble = board BT Xbox (I02); output = PC-bridge DS4 LED+rumble (I09).
-      Device may also PUBLISH output (alerts); bridge SUB and writes HID.
+      rumble = board BT Xbox (I02, lean profile); output = PC-bridge DS4 LED+rumble
+      or Xbox pygame rumble (I09, daily profile). Device may PUBLISH output (alerts);
+      bridge SUB and applies.
       Keymap (I08a): set_keymap/get_keymap/reset_keymap/set_profile;
       profile selects which HandleApp class drives actuators
       (led_demo|gimbal|dog|off). Bindings are per-key press+hold.

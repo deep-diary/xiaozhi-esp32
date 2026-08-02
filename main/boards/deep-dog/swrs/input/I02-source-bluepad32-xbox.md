@@ -7,7 +7,7 @@
 | 库 | [Bluepad32](https://github.com/ricardoquesada/bluepad32) |
 | BLE Host | **[BTstack](https://github.com/bluekitchen/btstack)**（Bluepad32 固定依赖；**不是** ESP-IDF NimBLE） |
 | 芯片 | ESP32-S3（仅 BLE，无 Classic BR/EDR） |
-| 状态 | 固件已落地；宏 `DEEP_DOG_HANDLE_BT_ENABLE` 默认 0；联调开 `-DDEEP_DOG_HANDLE_BT=ON` |
+| 状态 | 固件已落地并实机验过；**日常剖面默认关**（堆预算给 MQTT/人脸/唤醒）；瘦剖面再 `-DDEEP_DOG_HANDLE_BT=ON` |
 
 ## 选型
 
@@ -16,7 +16,7 @@
 | **Bluepad32 + BTstack** | **首选**。ESP-IDF 原生、Xbox Series BLE 已验证；统一 `uni_gamepad_t` + `play_dual_rumble` | 板载 `source=bt` |
 | 手写 NimBLE HID Host | 扫描/配对/Xbox HID 解析/重连工作量大，与 Hub 契约重复造轮 | 不推荐 |
 | ESP-IDF Bluedroid/NimBLE 裸 HID | 无现成 Xbox BLE 主机适配层 | 不推荐 |
-| PC MQTT 桥（已有） | [`scripts/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog_handle_bridge.py) → `handle/input` | `source=wifi` |
+| PC MQTT 桥（已有） | [`scripts/deep_dog/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog/deep_dog_handle_bridge.py) → `handle/input` | `source=wifi` |
 
 ### Bluepad32 角色
 
@@ -100,21 +100,22 @@ ESP 是 **HID Host**，手柄是 Peripheral。可向下发输出报告；**不�
 
 1. ~~扩 OTA~~：**已完成**（见 [`16m_deep_dog.csv`](../../../../../partitions/v2/16m_deep_dog.csv)）。
 2. 板级适配已落地：[`handle/sources/handle_bt.*`](../../handle/sources/handle_bt.h)（宏默认 0 为桩）。
-3. 启用实机 BT：
+3. **日常**用 PC 桥（[I03](./I03-source-pc-mqtt-bridge.md)），固件保持 `DEEP_DOG_HANDLE_BT=OFF`。
+4. 瘦剖面再开板载 BT：
    ```bash
-   ./scripts/deep_dog_fetch_bluepad32.sh
+   ./scripts/deep_dog/deep_dog_fetch_bluepad32.sh
    idf.py -DDEEP_DOG_HANDLE_BT=ON reconfigure build
    ```
-   详见 [`handle/sources/README.md`](../../handle/sources/README.md)。
-4. wifi 源（`handle/input`）已落地；与本源 Hub 后到覆盖。
+   **`fullclean` 后须再带** `-D`；烧录前停 `monitor`。详见 [`handle/sources/README.md`](../../handle/sources/README.md)。
+5. wifi 源（`handle/input`）与本源 Hub 后到覆盖；震动：板载用 `action: rumble`，桥用 `action: output`（I09）。
 
 ## 与 Wi‑Fi 共存
 
 - deep-dog 常驻 Wi‑Fi（MQTT / 推流）。BLE + Wi‑Fi 共存会抬高内部 RAM 与调度压力。
-- **启动顺序**：先 WiFi 拿 IP → 再 `HandleBtStart`（须在人脸模型之前）→ 再 face/MQTT；见 `StartNetwork`。减轻 WiFi/`HCI` 双边 `NO_MEM`。
-- **扫描**：WiFi 正常后即扫；手柄 `ready` 后停扫；断连再扫（Xbox BLE 重连需要中央扫描）。扫描是**固定开销**，一般不会边扫边无限涨堆。
-- sdkconfig：`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`（WiFi/LWIP 尽量上 PSRAM）；`SPIRAM_MALLOC_RESERVE_INTERNAL` 抬高、`BT_CTRL_BLE_MAX_ACT=3`、关 `BT_CTRL_BLE_ADV`。注意：**BLE controller 与 BTstack 任务栈都必须 INTERNAL**（HCI 会触 flash；PSRAM 栈会 assert），PSRAM 只能间接腾出这块。
-- 建议：人脸高峰 / 高分辨率编码时允许运行时 `disable` 扫描或编译关掉 BT；运控联调时再开。
+- **启动顺序**（仅开 BT 时）：`HandleBtStart` 先于 WiFi（HCI 要大块 DMA）→ WiFi/MQTT → idle 时 AFE（INTERNAL 失败则 PSRAM 栈回退）→ Face AI 延后。会抬高 INTERNAL，板级 MQTT/OTA 可能失败——**日常默认关 BT**，手柄走 PC 桥。
+- **扫描**：WiFi 正常后即扫；手柄 `ready` 后停扫；断连再扫。
+- sdkconfig（开 BT 时）：`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`；`BT_CTRL_BLE_MAX_ACT=3`、关 `BT_CTRL_BLE_ADV`。HCI/BTstack 栈须 INTERNAL。
+- 建议：需要人脸+稳定 MQTT 时编译关掉 BT；瘦剖面运控联调再开。
 
 ## 数据流
 

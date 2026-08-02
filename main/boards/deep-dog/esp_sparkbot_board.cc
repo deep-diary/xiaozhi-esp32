@@ -108,6 +108,7 @@
 #endif
 
 #include <wifi_manager.h>
+#include <esp_heap_caps.h>
 
 #if DEEP_DOG_HTTP_SERVER_ENABLE
 #include "http-server/http_server_config.h"
@@ -528,8 +529,8 @@ private:
         if (!handle_dispatcher_.StartPeriodic(DEEP_DOG_HANDLE_DISPATCH_INTERVAL_US)) {
             ESP_LOGE(TAG, "HandleAppDispatcher timer start failed");
         }
-        // BT 延后到 StartNetwork（WiFi/MQTT 就绪后），避免与 WiFi 争内部堆
-        ESP_LOGI(TAG, "Handle input ready (BT=%d mqtt_input=%d; BT starts after WiFi)",
+        // BT 在 StartNetwork 里先于 WiFi 拉起（HCI 要 DMA）；AFE 可走 PSRAM 栈回退
+        ESP_LOGI(TAG, "Handle input ready (BT=%d mqtt_input=%d; BT before WiFi)",
                  DEEP_DOG_HANDLE_BT_ENABLE, DEEP_DOG_HANDLE_MQTT_INPUT_ENABLE);
     }
 #endif
@@ -731,6 +732,8 @@ public:
         InitializeI2c();
         InitializeSpi();
         InitializeDisplay();
+        // 背光尽早恢复：勿等触摸校准/摄像头重试（否则黑屏约 7s）
+        GetBacklight()->RestoreBrightness();
         InitializeButtons();
         InitializeTouchButtons();
 #if DEEP_DOG_HANDLE_ENABLE
@@ -753,7 +756,6 @@ public:
 #endif
 #endif
         InitializeTools();
-        GetBacklight()->RestoreBrightness();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
@@ -778,12 +780,12 @@ public:
 
     void StartNetwork() override {
 #if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
-        // HCI 需要连续 INTERNAL|DMA；WiFi 连上后再启常 NO_MEM。
-        // 先起 Bluepad32/BTstack，再连 WiFi（扫描与 STA 共存）。
+        // HCI 需要大块 INTERNAL|DMA；idle 后再启常 NO_MEM。先起 BT 占住 DMA。
+        // AFE 任务栈在公共代码里对 INTERNAL 失败时回退 PSRAM（见 afe_audio_engine.cc）。
         if (!HandleBtStart(&handle_hub_)) {
             ESP_LOGE(TAG, "HandleBtStart failed (before WiFi)");
         } else {
-            ESP_LOGI(TAG, "Handle BT up before WiFi; will scan while STA connects");
+            ESP_LOGI(TAG, "Handle BT up before WiFi (AFE may use PSRAM stack)");
         }
 #endif
         WifiBoard::StartNetwork();
@@ -821,9 +823,30 @@ public:
         InitializeImu();
 #endif
 #if DEEP_DOG_FACE_AI_ENABLE
+#if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
+        // BT 已占 INTERNAL；Face AI 12KB 栈延后到 idle+AFE 之后再试
+        ESP_LOGW(TAG, "Face AI deferred ~90s (BT on: protect wake / TLS heap)");
+        xTaskCreate(
+            [](void*) {
+                vTaskDelay(pdMS_TO_TICKS(90000));
+                const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+                ESP_LOGI(TAG, "deferred Face AI try: largest_int=%u", (unsigned)largest);
+                if (largest < 14000) {
+                    ESP_LOGW(TAG, "deferred Face AI skipped (need ~12KB contiguous internal)");
+                    vTaskDelete(nullptr);
+                    return;
+                }
+                if (!DeepDogFaceAiRuntimeStart()) {
+                    ESP_LOGW(TAG, "deferred Face AI still failed");
+                }
+                vTaskDelete(nullptr);
+            },
+            "face_ai_defer", 3072, nullptr, 1, nullptr);
+#else
         if (!DeepDogFaceAiRuntimeStart()) {
             ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");
         }
+#endif
 #endif
 #if DEEP_DOG_VISION_HUB_ENABLE
         if (vision_hub_ && !vision_hub_->IsRunning()) {

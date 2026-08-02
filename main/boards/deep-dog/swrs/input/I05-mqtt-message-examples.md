@@ -274,7 +274,7 @@ Topic：`deepdiary/deep-dog/dev/handle/cmd`（QoS1）
 | 面键印刷 | 字母 A/B/X/Y | 符号 ✕○□△（位置对应上表） |
 | Guide / PS | Guide（Xbox） | PS → 可选 `ps` |
 | 触控板 | **无** | 有点击 → `touch`；**无坐标（本栈）** |
-| HID 下标 | XInput / pygame Xbox 表 | `ds4_sdl` / `ds4_linux` 不同 |
+| HID 下标 | Mac=`xbox_sdl`（轴同 ds4_sdl）；Linux 常=`xbox_xinput` | `ds4_sdl` / `ds4_linux` 不同 |
 | 板载直连 | Bluepad32 Xbox BLE（固件已落地，宏默认关） | **不能**无线直连 ESP32；靠 PC 桥 |
 
 前端一页 DualShock 示意皮：Xbox 源时仍亮同一抽象字段，仅皮肤符号仍是 PS 样式（可后续加皮肤切换）。
@@ -283,8 +283,8 @@ Topic：`deepdiary/deep-dog/dev/handle/cmd`（QoS1）
 
 ```bash
 # 桥（会 PUB input，并打印设备 STATUS）
-/usr/bin/python3 scripts/deep_dog_handle_bridge.py --via lan --device-id dev --layout ds4_sdl --hz 40
+/usr/bin/python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id dev --layout ds4_sdl --hz 40
 
 # 仅看原始 HID 下标
-/usr/bin/python3 scripts/deep_dog_handle_bridge.py --probe
+/usr/bin/python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe
 ```

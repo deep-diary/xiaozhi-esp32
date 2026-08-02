@@ -13,9 +13,9 @@ Dependencies:
   # hybrid also needs: pip3 install pygame
 
 Examples (prefer the Python that has hidapi, e.g. Frameworks 3.11):
-  python3 scripts/deep_dog_ds4_touchpad_probe.py --list
-  python3 scripts/deep_dog_ds4_touchpad_probe.py --mode hid
-  python3 scripts/deep_dog_ds4_touchpad_probe.py --mode hybrid --hz 20
+  python3 scripts/deep_dog/deep_dog_ds4_touchpad_probe.py --list
+  python3 scripts/deep_dog/deep_dog_ds4_touchpad_probe.py --mode hid
+  python3 scripts/deep_dog/deep_dog_ds4_touchpad_probe.py --mode hybrid --hz 20
 """
 
 from __future__ import annotations

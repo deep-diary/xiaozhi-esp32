@@ -5,7 +5,7 @@
 | source | `wifi` |
 | 典型硬件 | 电脑已连接的 **PS4 DualShock 4** 或 Xbox（USB / 系统蓝牙均可） |
 | 路径 | PC 读 HID → 归一化 → 发布 `handle/input` → 设备 Hub |
-| 脚本 | [`scripts/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog_handle_bridge.py) |
+| 脚本 | [`scripts/deep_dog/deep_dog_handle_bridge.py`](../../../../../scripts/deep_dog/deep_dog_handle_bridge.py) |
 | 实测图 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png)（Linux 标注；pygame 0-based） |
 
 ## 为何现实
@@ -88,16 +88,36 @@ PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
 
 误用 `ds4_linux` 在 Mac 上的典型症状：右杆静置 `ry≈1`、L2≈0.5、Share 亮成 L1、左右摇杆对调。
 
+### Xbox 与 HID
+
+Mac 蓝牙下 `hidapi` 可枚举并读 **17B** 输入 report；**无陀螺仪/触控**。相对 pygame，HID 主要可能多出 Share 位 / 电池（系统或协议仍可能吞 Share）。日常桥用 pygame；细节见 [`scripts/deep_dog/README.md`](../../../../../scripts/deep_dog/README.md)。
+
+### Xbox（pygame）— 两套轴表，勿混用
+
+| | `xbox_sdl`（**macOS Series X 实测**） | `xbox_xinput`（Linux / 经典 XInput） |
+|--|--------------------------------------|--------------------------------------|
+| 静置 axes | `[0,0,0,0,-1,-1]` | `[0,0,-1,0,0,-1]` |
+| 左 / 右杆 | 0/1 · **2/3** | 0/1 · **3/4** |
+| LT / RT | **4 / 5** | **2 / 5** |
+| View/Menu/LB… | btn 4/6/9…（同 ds4_sdl 键位骨架） | btn 6/7/4… |
+| D-pad | btn 11–14（`hats=0`） | hat0 |
+
+`--layout xbox` / `auto`：按静置轴与 `hats` **自动选** `xbox_sdl` 或 `xbox_xinput`。
+
+误用 `xbox_xinput` 在 Mac 上的典型症状（与误用 `ds4_linux` 同源）：静置 `ry≈-1`、`l2≈0.5`；右杆左右变成 L2；右杆上下变成左右；View→L1；方向键无效。
+
+**真源**：`--probe` 先打 `RAW IDLE axes` 与各 layout 解释，再决定映射；契约层只保留抽象字段，不把错误 XInput 表当原始数据。
+
 ## 桥职责（需求）
 
 | 项 | 要求 |
 |----|------|
 | 读入 | pygame（当前） |
-| 映射 | 上表；`--layout auto\|ds4\|xbox` |
+| 映射 | 上表；`--layout auto\|ds4\|xbox\|xbox_sdl\|xbox_xinput` |
 | 发布 | `deepdiary/deep-dog/{device_id}/handle/input` |
 | 节流 | on_change 或 ≤20～30 Hz |
 | 断线 | 桥发心跳；手柄休眠/拔出发 `connected:false`；**唤醒后自动 rescan 重连，无需重启脚本**；停发后设备超时 500ms 清零 |
-| 触控 XY | **默认 HID 全量读**（触控双点 + motion + 灯震）；`--no-touchpad-xy` 回退 pygame 仅点击；探测见 `scripts/deep_dog_ds4_touchpad_probe.py`；[I06](./I06-touchpad-xy.md) · [I09](./I09-ds4-output-feedback.md) |
+| 触控 XY | **默认 HID 全量读**（触控双点 + motion + 灯震）；`--no-touchpad-xy` 回退 pygame（Xbox/通用输入 + **output 震动**）；探测见 `scripts/deep_dog/deep_dog_ds4_touchpad_probe.py`；[I06](./I06-touchpad-xy.md) · [I09](./I09-ds4-output-feedback.md) |
 | 凭证 | 环境变量，禁止写入仓库 |
 
 ## 样例 payload
@@ -119,16 +139,21 @@ PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
 ## 用法
 
 ```bash
-pip3 install paho-mqtt hidapi
-# 默认：HID 全量（触控/motion）+ 订 handle/cmd 灯震反馈
-python3 scripts/deep_dog_handle_bridge.py --via lan --device-id dev
-# 回退 pygame（无 contacts/motion/灯震）
-python3 scripts/deep_dog_handle_bridge.py --via lan --no-touchpad-xy --layout ds4_sdl
+pip3 install paho-mqtt hidapi pygame
+# 默认：DS4 HID 全量（触控/motion）+ 订 handle/cmd 灯震
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id dev
+# Xbox：pygame 输入 + output 震动（macOS 优先蓝牙连手柄）
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --layout xbox
+# 看 RAW 轴/键 + 各 layout 静置解释（排查映射必跑）
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe
 # 启动时无手柄则等待
-python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
-# 本地测灯震（不经 MQTT）
-python3 scripts/deep_dog_handle_bridge.py --probe-output
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --wait-pad
+# 本地冒烟（不经 MQTT）
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe-output
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe-xbox-rumble
 ```
+
+日常固件关板载 BT（见 [handle/sources/README](../../handle/sources/README.md)）；手柄与震动均走本桥。
 
 ## 验收（本源）
 
@@ -136,4 +161,5 @@ python3 scripts/deep_dog_handle_bridge.py --probe-output
 - [x] PS4 HID ↔ 抽象对照表定稿（含极性）
 - [x] PC 脚本按表归一化；设备透传 `handle/status`
 - [x] 默认 HID + `handle/cmd` `output` 反馈（I09）
+- [x] pygame 路径 Xbox `output` 震动
 - [ ] 断流 / `connected:false` 后狗控停止或轴归零（联调勾选）

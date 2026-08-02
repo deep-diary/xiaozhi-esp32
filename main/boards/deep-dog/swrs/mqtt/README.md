@@ -51,10 +51,10 @@ NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` /
 
 ```bash
 # 外网 WSS（默认，对齐前端）
-/usr/bin/python3 scripts/deep_dog_mqtt_verify.py --wait 30 --start-stream
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --wait 30 --start-stream
 
 # 仅局域网 TCP（设备同路径）
-/usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via lan --wait 20
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via lan --wait 20
 ```
 
 1. 连接外网 WSS（或局域网 `192.168.31.25:1883`）。
@@ -69,9 +69,9 @@ NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` /
 Face / Track（同页联调）：
 
 ```bash
-/usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
-/usr/bin/python3 scripts/deep_dog_mqtt_face_verify.py --via both --wait 10
-/usr/bin/python3 scripts/deep_dog_mqtt_track_verify.py --via both --wait 12
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_face_verify.py --via both --wait 10
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_track_verify.py --via both --wait 12
 ```
 
 `device/info.capabilities.track=true`（`DEEP_DOG_TRACK_MQTT_ENABLE`）；`actuator=none`。详见 [05-track](./modules/05-track.md)。

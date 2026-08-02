@@ -3,11 +3,11 @@
 
 Default: DS4 hidapi full-read (axes/buttons/touchpad/motion) + subscribe
 handle/cmd for lightbar/rumble feedback (I09).
-Fallback: --no-touchpad-xy → pygame (no contacts/motion/LED/rumble).
+Fallback: --no-touchpad-xy → pygame（Xbox/通用输入；同样订 handle/cmd output 震动）。
 
 Dependencies:
   pip3 install paho-mqtt hidapi
-  # only for --no-touchpad-xy:
+  # for --no-touchpad-xy / Xbox:
   pip3 install pygame
 
 Credentials (do not commit):
@@ -15,13 +15,15 @@ Credentials (do not commit):
   export DEEP_DOG_MQTT_PASS=...
 
 Examples:
-  python3 scripts/deep_dog_handle_bridge.py --via lan
-  python3 scripts/deep_dog_handle_bridge.py --via lan --no-touchpad-xy --layout ds4_sdl
-  python3 scripts/deep_dog_handle_bridge.py --probe-output
-  python3 scripts/deep_dog_handle_bridge.py --via lan --wait-pad
+  python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan
+  python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --layout xbox
+  python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe-output
+  python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe-xbox-rumble
+  python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --wait-pad
 
 抽象极性（I01）：lx/rx 右为正；ly/ry 下为正（前推 ly<0）。
-Touchpad（I06）/ Motion（I07）/ Output（I09）：默认 HID 路径。
+Touchpad（I06）/ Motion（I07）/ Output（I09）：DS4=HID；Xbox 震=pygame rumble。
+macOS：Xbox 震动优先蓝牙连 Mac（USB 有线常不震）。
 """
 
 from __future__ import annotations
@@ -67,7 +69,7 @@ WEB_WSS_DEFAULT = "wss://mqtt-ws.deep-diary.com/mqtt"
 LAN_HOST_DEFAULT = "192.168.31.25"
 LAN_PORT_DEFAULT = 1883
 
-LAYOUT_CHOICES = ("auto", "ds4_sdl", "ds4_linux", "ds4", "xbox")
+LAYOUT_CHOICES = ("auto", "ds4_sdl", "ds4_linux", "ds4", "xbox", "xbox_sdl", "xbox_xinput")
 
 
 def ts() -> str:
@@ -93,12 +95,41 @@ def axis_deadzone(v: float, dz: float = 0.08) -> float:
     return 0.0 if abs(v) < dz else clamp(v, -1.0, 1.0)
 
 
+def xbox_uses_sdl_axes(joy) -> bool:
+    """True if this Xbox pad exposes SDL/macOS axes (LT/RT on 4/5), not XInput (LT on 2).
+
+    Mac「Xbox Series X Controller」实测 idle：
+      axes ≈ [0, 0, 0, 0, -1, -1]  → 2/3=右杆, 4/5=扳机
+    误用 XInput 表时静置会出现 ry≈-1、l2≈0.5（与 I03 误用 ds4_linux 同源）。
+    """
+    require_pygame()
+    pygame.event.pump()
+    n_axes = joy.get_numaxes()
+    n_buttons = joy.get_numbuttons()
+    n_hats = joy.get_numhats()
+    if n_axes < 6:
+        return False
+    a2 = joy.get_axis(2)
+    a4 = joy.get_axis(4)
+    # XInput 静置：LT(axis2)≈-1，RX(axis3)≈0
+    if a2 < -0.5 and abs(joy.get_axis(3)) < 0.35:
+        return False
+    # SDL 静置：RX≈0 且 LT≈-1；或 Mac GC：无 hat + 多键（扳机尚未泵到 -1 时）
+    if abs(a2) < 0.35 and a4 < -0.5:
+        return True
+    if n_hats == 0 and n_buttons >= 14:
+        return True
+    return False
+
+
 def detect_layout(joy, explicit: str = "auto") -> str:
-    """Pick HID profile. `ds4` is alias for ds4_sdl (pygame2 官方表)."""
+    """Pick HID profile. `ds4`→ds4_sdl；`xbox`→按静置轴选 xbox_sdl / xbox_xinput。"""
     require_pygame()
     if explicit == "ds4":
         return "ds4_sdl"
-    if explicit in ("ds4_sdl", "ds4_linux", "xbox"):
+    if explicit == "xbox":
+        return "xbox_sdl" if xbox_uses_sdl_axes(joy) else "xbox_xinput"
+    if explicit in ("ds4_sdl", "ds4_linux", "xbox_sdl", "xbox_xinput"):
         return explicit
 
     name = (joy.get_name() or "").lower()
@@ -108,7 +139,7 @@ def detect_layout(joy, explicit: str = "auto") -> str:
     idle = [joy.get_axis(i) if i < n_axes else 0.0 for i in range(min(n_axes, 8))]
 
     if any(k in name for k in ("xbox", "x-box", "xinput", "360")):
-        return "xbox"
+        return "xbox_sdl" if xbox_uses_sdl_axes(joy) else "xbox_xinput"
 
     # 扳机静置 ≈ -1：若 axis4/5 是扳机而 axis2≈0 → pygame2 SDL 布局
     if n_axes >= 6 and n_buttons >= 14:
@@ -147,10 +178,17 @@ def read_snapshot(joy, layout: str) -> dict:
             return 0.0
         return clamp((raw_ax(axis_i) + 1.0) * 0.5, 0.0, 1.0)
 
+    # Resolve alias: legacy --layout xbox
+    if layout == "xbox":
+        layout = "xbox_sdl" if xbox_uses_sdl_axes(joy) else "xbox_xinput"
+
     ps = l3 = r3 = touch = False
     dx = dy = 0.0
+    dpad_from_hat = False
+    dpad_up = dpad_down = dpad_left = dpad_right = False
 
-    if layout == "xbox":
+    if layout == "xbox_xinput":
+        # Linux / 经典 XInput：0 LX 1 LY 2 LT 3 RX 4 RY 5 RT；D-pad 常为 hat
         lx = axis_deadzone(raw_ax(0))
         ly = axis_deadzone(raw_ax(1))
         if n_axes >= 6:
@@ -170,6 +208,26 @@ def read_snapshot(joy, layout: str) -> dict:
         if n_hats > 0:
             hx, hy = joy.get_hat(0)
             dx, dy = float(hx), float(-hy)
+            dpad_from_hat = True
+
+    elif layout == "xbox_sdl":
+        # macOS pygame/SDL「Xbox Series X Controller」实测（与 ds4_sdl 轴下标同构）：
+        # axes: 0/1 左杆；2/3 右杆；4/5 LT/RT（松开 -1，按下 +1）
+        # buttons: 0A 1B 2X 3Y 4 View 5 Guide 6 Menu 7 L3 8 R3 9 LB 10 RB
+        #          11↑ 12↓ 13← 14→ （hats=0）
+        # 极性：SDL 已是右为正、上为负 → 直接对齐 I01（下为正），勿再取反
+        lx = axis_deadzone(raw_ax(0))
+        ly = axis_deadzone(raw_ax(1))
+        rx = axis_deadzone(raw_ax(2))
+        ry = axis_deadzone(raw_ax(3))
+        l2 = trigger01(4)
+        r2 = trigger01(5)
+        a, b, x, y = btn(0), btn(1), btn(2), btn(3)
+        select, ps, start = btn(4), btn(5), btn(6)
+        l3, r3 = btn(7), btn(8)
+        l1, r1 = btn(9), btn(10)
+        dpad_up, dpad_down = btn(11), btn(12)
+        dpad_left, dpad_right = btn(13), btn(14)
 
     elif layout == "ds4_linux":
         # Linux 标注图：0 LX 1 LY 2 L2 3 RX 4 RY 5 R2 6/7 D-pad
@@ -188,6 +246,7 @@ def read_snapshot(joy, layout: str) -> dict:
         ps, l3, r3 = btn(10), btn(11), btn(12)
         dx = axis_deadzone(-raw_ax(6)) if n_axes > 6 else 0.0
         dy = axis_deadzone(-raw_ax(7)) if n_axes > 7 else 0.0
+        dpad_from_hat = True
 
     else:
         # ds4_sdl — pygame 2 官方「PS4 Controller」表（macOS 实测）
@@ -210,7 +269,7 @@ def read_snapshot(joy, layout: str) -> dict:
         dpad_left, dpad_right = btn(13), btn(14)
         touch = btn(15)
 
-    if layout != "ds4_sdl":
+    if dpad_from_hat:
         dpad_up = dy < -0.5
         dpad_down = dy > 0.5
         dpad_left = dx < -0.5
@@ -420,17 +479,50 @@ def acquire_ds4_hid(hid_mod, path: bytes | None = None):
     return open_ds4_device(hid_mod, path=path)
 
 
-class Ds4OutputCtl:
-    """Thread-safe DS4 lightbar/rumble writer for MQTT handle/cmd action=output."""
+def _parse_output_rumble_led(obj: dict):
+    """Parse I09 output fields → (weak, strong, duration_ms, r, g, b)."""
+    led = obj.get("led") if isinstance(obj.get("led"), dict) else None
+    rumble = obj.get("rumble") if isinstance(obj.get("rumble"), dict) else None
+    r = g = b = None
+    if led is not None:
+        if "r" in led:
+            r = int(led.get("r", 0))
+        if "g" in led:
+            g = int(led.get("g", 0))
+        if "b" in led:
+            b = int(led.get("b", 0))
+    weak = float(rumble.get("weak", 0) if rumble else 0)
+    strong = float(rumble.get("strong", 0) if rumble else 0)
+    weak = clamp(weak, 0.0, 1.0)
+    strong = clamp(strong, 0.0, 1.0)
+    duration_ms = obj.get("duration_ms")
+    try:
+        duration_ms = int(duration_ms) if duration_ms is not None else None
+    except (TypeError, ValueError):
+        duration_ms = None
+    if duration_ms is not None:
+        duration_ms = max(0, min(5000, duration_ms))
+    return weak, strong, duration_ms, r, g, b
 
-    def __init__(self) -> None:
+
+class PadOutputCtl:
+    """Thread-safe handle/cmd action=output: ds4_hid (灯+震) or pygame rumble (Xbox/通用)."""
+
+    def __init__(self, backend: str = "ds4_hid") -> None:
+        assert backend in ("ds4_hid", "pygame")
+        self.backend = backend
         self._lock = threading.Lock()
-        self._dev = None
+        self._dev = None  # DS4 hid device
+        self._joy = None  # pygame Joystick
         self._timer: threading.Timer | None = None
 
     def set_dev(self, dev) -> None:
         with self._lock:
             self._dev = dev
+
+    def set_joy(self, joy) -> None:
+        with self._lock:
+            self._joy = joy
 
     def _cancel_timer_locked(self) -> None:
         if self._timer is not None:
@@ -438,43 +530,42 @@ class Ds4OutputCtl:
             self._timer = None
 
     def clear_rumble(self) -> None:
-        from deep_dog_ds4_hid import apply_ds4_output
-
         with self._lock:
             self._cancel_timer_locked()
+            backend = self.backend
             dev = self._dev
-        if dev is None:
+            joy = self._joy
+        if backend == "ds4_hid":
+            if dev is None:
+                return
+            from deep_dog_ds4_hid import apply_ds4_output
+
+            apply_ds4_output(dev, rumble_weak=0.0, rumble_strong=0.0)
             return
-        apply_ds4_output(dev, rumble_weak=0.0, rumble_strong=0.0)
+        if joy is None:
+            return
+        try:
+            if hasattr(joy, "stop_rumble"):
+                joy.stop_rumble()
+            elif hasattr(joy, "rumble"):
+                joy.rumble(0.0, 0.0, 1)
+        except Exception:
+            pass
 
     def apply_output_cmd(self, obj: dict) -> bool:
-        from deep_dog_ds4_hid import apply_ds4_output
-
-        led = obj.get("led") if isinstance(obj.get("led"), dict) else None
-        rumble = obj.get("rumble") if isinstance(obj.get("rumble"), dict) else None
-        r = g = b = None
-        if led is not None:
-            if "r" in led:
-                r = int(led.get("r", 0))
-            if "g" in led:
-                g = int(led.get("g", 0))
-            if "b" in led:
-                b = int(led.get("b", 0))
-        weak = float(rumble.get("weak", 0) if rumble else 0)
-        strong = float(rumble.get("strong", 0) if rumble else 0)
-        duration_ms = obj.get("duration_ms")
-        try:
-            duration_ms = int(duration_ms) if duration_ms is not None else None
-        except (TypeError, ValueError):
-            duration_ms = None
-        if duration_ms is not None:
-            duration_ms = max(0, min(5000, duration_ms))
+        weak, strong, duration_ms, r, g, b = _parse_output_rumble_led(obj)
 
         with self._lock:
             self._cancel_timer_locked()
+            backend = self.backend
             dev = self._dev
+            joy = self._joy
+
+        if backend == "ds4_hid":
             if dev is None:
                 return False
+            from deep_dog_ds4_hid import apply_ds4_output
+
             ok = apply_ds4_output(
                 dev,
                 rumble_weak=weak,
@@ -484,11 +575,33 @@ class Ds4OutputCtl:
                 b=b,
             )
             if ok and duration_ms and (weak > 0 or strong > 0):
-                t = threading.Timer(duration_ms / 1000.0, self.clear_rumble)
-                t.daemon = True
-                self._timer = t
-                t.start()
+                with self._lock:
+                    t = threading.Timer(duration_ms / 1000.0, self.clear_rumble)
+                    t.daemon = True
+                    self._timer = t
+                    t.start()
             return ok
+
+        # pygame: led ignored; strong→low-freq, weak→high-freq (I09)
+        if joy is None or not hasattr(joy, "rumble"):
+            return False
+        try:
+            if strong <= 0 and weak <= 0:
+                if hasattr(joy, "stop_rumble"):
+                    joy.stop_rumble()
+                else:
+                    joy.rumble(0.0, 0.0, 1)
+                return True
+            dur = duration_ms if duration_ms and duration_ms > 0 else 250
+            joy.rumble(strong, weak, dur)
+            return True
+        except Exception as e:
+            print(f"[{ts()}] pygame rumble failed: {e}", file=sys.stderr)
+            return False
+
+
+# Back-compat alias (defaults to ds4_hid)
+Ds4OutputCtl = PadOutputCtl
 
 
 def probe_ds4_output() -> int:
@@ -518,6 +631,35 @@ def probe_ds4_output() -> int:
             dev.close()
         except Exception:
             pass
+
+
+def probe_xbox_rumble() -> int:
+    """Local Xbox/pygame rumble smoke test without MQTT (prefer BT on macOS)."""
+    require_pygame()
+    pygame.init()
+    pygame.joystick.init()
+    joy, layout = acquire_joystick(0, "auto")
+    if joy is None:
+        print("no joystick found (plug Xbox; macOS prefer Bluetooth)", file=sys.stderr)
+        return 1
+    name = joy.get_name()
+    print(f"[{ts()}] probe-xbox-rumble name={name!r} layout={layout}")
+    if not hasattr(joy, "rumble"):
+        print("joystick.rumble unsupported (pygame/SDL too old?)", file=sys.stderr)
+        return 1
+    ctl = PadOutputCtl(backend="pygame")
+    ctl.set_joy(joy)
+    try:
+        ok1 = ctl.apply_output_cmd(
+            {"action": "output", "rumble": {"strong": 0.5, "weak": 0.3}, "duration_ms": 400}
+        )
+        time.sleep(0.5)
+        ok2 = ctl.apply_output_cmd({"action": "output", "rumble": {"strong": 0, "weak": 0}})
+        print(f"[{ts()}] probe-xbox-rumble done ok_on={ok1} ok_off={ok2}")
+        return 0 if ok1 else 1
+    finally:
+        ctl.clear_rumble()
+        pygame.quit()
 
 
 def read_hid_snapshot(dev) -> dict | None:
@@ -696,6 +838,7 @@ def run_touchpad_xy_loop(
 
 
 def probe_joystick(index: int, seconds: float = 20.0) -> int:
+    """Print pygame raw axes/buttons + interpret under each layout (真源对照，勿盲信映射)。"""
     require_pygame()
     pygame.init()
     pygame.joystick.init()
@@ -710,10 +853,24 @@ def probe_joystick(index: int, seconds: float = 20.0) -> int:
         f"axes={joy.get_numaxes()} buttons={joy.get_numbuttons()} hats={joy.get_numhats()} "
         f"auto_layout={layout}"
     )
-    pygame.event.pump()
+    # Warm up HID so triggers leave 0 → -1 on macOS
+    for _ in range(10):
+        pygame.event.pump()
+        time.sleep(0.02)
     idle = [round(joy.get_axis(i), 3) for i in range(joy.get_numaxes())]
-    print(f"IDLE axes: {idle}")
-    print("Press buttons / move sticks…")
+    print(f"RAW IDLE axes: {idle}")
+    if joy.get_numhats():
+        print(f"RAW IDLE hat0: {joy.get_hat(0)}")
+    print("Interpreted @idle (抽象契约；选与全零 sticks + l2/r2≈0 最接近的 layout):")
+    for name in ("xbox_sdl", "xbox_xinput", "ds4_sdl", "ds4_linux"):
+        snap = read_snapshot(joy, name)
+        ax, bt = snap["axes"], snap["buttons"]
+        print(
+            f"  {name:12} lx={ax['lx']:+.2f} ly={ax['ly']:+.2f} "
+            f"rx={ax['rx']:+.2f} ry={ax['ry']:+.2f} "
+            f"l2={float(bt['l2']):.2f} r2={float(bt['r2']):.2f}"
+        )
+    print("Press buttons / move sticks… (lines are RAW pygame indices)")
     prev_btns: set[int] = set()
     t0 = time.time()
     while time.time() - t0 < seconds:
@@ -753,7 +910,7 @@ def main() -> int:
         "--layout",
         choices=LAYOUT_CHOICES,
         default="auto",
-        help="HID profile; Mac PS4 用 ds4_sdl（auto 会识别）",
+        help="profile；xbox/xbox_sdl/xbox_xinput 默认走 pygame（等同 --no-touchpad-xy）",
     )
     ap.add_argument("--hz", type=float, default=40.0, help="max publish rate on change")
     ap.add_argument(
@@ -786,7 +943,7 @@ def main() -> int:
         "--no-touchpad-xy",
         dest="touchpad_xy",
         action="store_false",
-        help="fallback pygame path (no contacts/motion/LED/rumble)",
+        help="pygame path (Xbox/通用输入 + handle/cmd output 震动；无触控/灯条)",
     )
     ap.add_argument(
         "--hid-path",
@@ -798,10 +955,21 @@ def main() -> int:
         action="store_true",
         help="local DS4 LED/rumble smoke test then exit (no MQTT)",
     )
+    ap.add_argument(
+        "--probe-xbox-rumble",
+        action="store_true",
+        help="local Xbox/pygame rumble smoke test then exit (no MQTT; prefer BT on macOS)",
+    )
     args = ap.parse_args()
+
+    # Xbox 无触控板/灯条：选 xbox* 时默认 pygame（不必再写 --no-touchpad-xy）
+    if args.layout in ("xbox", "xbox_sdl", "xbox_xinput") and args.touchpad_xy:
+        args.touchpad_xy = False
 
     if args.probe_output:
         return probe_ds4_output()
+    if args.probe_xbox_rumble:
+        return probe_xbox_rumble()
 
     if args.probe:
         return probe_joystick(args.joystick)
@@ -860,7 +1028,12 @@ def main() -> int:
     transport = "websockets" if use_ws else "tcp"
     client_id = f"deep-dog-handle-bridge-{int(time.time())}"
     connected = {"ok": False}
-    output_ctl = Ds4OutputCtl() if args.touchpad_xy else None
+    if args.touchpad_xy:
+        output_ctl: PadOutputCtl | None = PadOutputCtl(backend="ds4_hid")
+    else:
+        output_ctl = PadOutputCtl(backend="pygame")
+        if joy is not None:
+            output_ctl.set_joy(joy)
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         rc = reason_code if isinstance(reason_code, int) else getattr(reason_code, "value", reason_code)
@@ -873,7 +1046,7 @@ def main() -> int:
             client.subscribe(cmd_topic, qos=1)
             print(
                 f"[{ts()}] CONNECTED; PUB {input_topic}; "
-                f"SUB {status_topic} + {cmd_topic}"
+                f"SUB {status_topic} + {cmd_topic} (output backend={output_ctl.backend})"
             )
         else:
             print(f"[{ts()}] CONNECTED; PUB {input_topic}; SUB {status_topic}")
@@ -892,14 +1065,17 @@ def main() -> int:
             ok = output_ctl.apply_output_cmd(o)
             led = o.get("led") or {}
             rum = o.get("rumble") or {}
-            try:
-                from deep_dog_ds4_hid import _ds4_bus_type
+            backend = output_ctl.backend
+            bus = backend
+            if backend == "ds4_hid":
+                try:
+                    from deep_dog_ds4_hid import _ds4_bus_type
 
-                bus = "bt" if int(_ds4_bus_type) == 2 else f"bus={_ds4_bus_type}"
-            except Exception:
-                bus = "?"
+                    bus = "bt" if int(_ds4_bus_type) == 2 else f"bus={_ds4_bus_type}"
+                except Exception:
+                    bus = "ds4_hid"
             print(
-                f"[{ts()}] CMD output ok={1 if ok else 0} bus={bus} "
+                f"[{ts()}] CMD output ok={1 if ok else 0} backend={backend} bus={bus} "
                 f"led={led} rumble={rum} duration_ms={o.get('duration_ms')}"
             )
             return
@@ -991,7 +1167,7 @@ def main() -> int:
 
     print(
         f"[{ts()}] pygame path (--no-touchpad-xy); "
-        f"output feedback disabled — use default HID mode for LED/rumble"
+        f"handle/cmd output rumble enabled (Xbox/pygame; led ignored)"
     )
     interval = 1.0 / max(args.hz, 1.0)
     heartbeat_s = max(args.heartbeat_ms, 50) / 1000.0
@@ -1003,6 +1179,8 @@ def main() -> int:
     last_rescan = 0.0
     pad_online = joy is not None
     need_hard_rescan = False
+    if output_ctl is not None and joy is not None:
+        output_ctl.set_joy(joy)
     print(
         f"[{ts()}] publish on-change @{args.hz:.0f}Hz; heartbeat every {args.heartbeat_ms}ms; "
         f"auto-reconnect every {args.reconnect_ms}ms when pad lost"
@@ -1019,6 +1197,9 @@ def main() -> int:
                     # 已在线时忽略瞬时 REMOVED（Mac 上常与 ADDED 成对刷屏）
                     if not pad_online or not joystick_alive(joy):
                         print(f"[{ts()}] JOYDEVICEREMOVED — waiting for pad…")
+                        if output_ctl is not None:
+                            output_ctl.clear_rumble()
+                            output_ctl.set_joy(None)
                         joy = None
                         pad_online = False
                         need_hard_rescan = True
@@ -1041,12 +1222,17 @@ def main() -> int:
                         pad_online = True
                         need_hard_rescan = False
                         last_snap = None
+                        if output_ctl is not None:
+                            output_ctl.set_joy(joy)
 
             if not joystick_alive(joy):
                 if pad_online:
                     print(f"[{ts()}] pad lost/stale — publish connected=false; will rescan")
                     pad_online = False
                     need_hard_rescan = True
+                    if output_ctl is not None:
+                        output_ctl.clear_rumble()
+                        output_ctl.set_joy(None)
                     off = offline_snapshot()
                     publish_snap(client, input_topic, off)
                     last_pub = now
@@ -1072,6 +1258,8 @@ def main() -> int:
                         pad_online = True
                         need_hard_rescan = False
                         last_snap = None
+                        if output_ctl is not None:
+                            output_ctl.set_joy(joy)
                 time.sleep(0.05)
                 continue
 
@@ -1096,9 +1284,14 @@ def main() -> int:
             time.sleep(0.01)
     except KeyboardInterrupt:
         print(f"[{ts()}] stopping; publish connected=false")
+        if output_ctl is not None:
+            output_ctl.clear_rumble()
         publish_snap(client, input_topic, offline_snapshot())
         time.sleep(0.2)
     finally:
+        if output_ctl is not None:
+            output_ctl.clear_rumble()
+            output_ctl.set_joy(None)
         client.loop_stop()
         client.disconnect()
         pygame.quit()

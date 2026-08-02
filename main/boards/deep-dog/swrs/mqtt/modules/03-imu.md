@@ -154,9 +154,9 @@
 ## 验证脚本
 
 ```bash
-/usr/bin/python3 scripts/deep_dog_mqtt_imu_verify.py --via web --wait 8
-/usr/bin/python3 scripts/deep_dog_mqtt_imu_verify.py --via lan --wait 8
-/usr/bin/python3 scripts/deep_dog_mqtt_imu_verify.py --via both --min-msgs 5
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_imu_verify.py --via web --wait 8
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_imu_verify.py --via lan --wait 8
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_imu_verify.py --via both --min-msgs 5
 ```
 
 （脚本校验 `switches` 12 键存在且为非负整数；动作触发验收以手动绕轴旋转约 90° / 沿轴甩动为主。）
