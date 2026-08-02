@@ -3,7 +3,7 @@
 
 protocol:
   id: deep-dog-mqtt
-  version: "0.1.1"
+  version: "0.1.2"
   product: deep-dog
   description: >
     Modular full-feature board MQTT contract. Topics are split by module;
@@ -58,13 +58,21 @@ modules:
     status: defined
     required: false
     depends: [servo]
-    impl: modules/09-gimbal
-    ref: main/boards/deep-diary/gimbal/
+    impl: mqtt/modules/gimbal_mqtt
+    note: >
+      Product pan/tilt path; mutually exclusive with bare servo on same EXT pins.
+      Default board profile: GIMBAL=1 SERVO=0. Keymap via handle profile=gimbal (I08a).
+    ref: main/boards/deep-dog/gimbal/
   handle:
     status: defined
     required: false
-    note: "Skeleton; axis map may patch in 0.1.x after hardware pick"
-    ref: main/boards/deep-diary/handle/
+    note: >
+      Dual-source v0.1: onboard Bluepad32+BTstack Xbox BLE (source=bt) and PC MQTT
+      bridge (source=wifi, handle/input). Hub+App layering in swrs/input/;
+      keymap+profile (I08a) selects HandleApp class; press/hold bindings;
+      profiles led_demo|gimbal|dog|off.
+    ref: main/boards/deep-dog/swrs/input/
+    impl: modules/11-handle
   touch:
     status: defined
     required: false
@@ -482,11 +490,37 @@ topics:
     dir: downlink
     qos: 1
     retain: false
+    note: >
+      Either mode absolute|relative (+pan/tilt), or action-based control.
+      speed / pan_speed / tilt_speed in deg/s; 0 speed on absolute = ASAP.
     payload:
-      mode: { type: enum, values: [absolute, relative] }
-      pan: { type: number }
-      tilt: { type: number }
-      speed: { type: number, optional: true, note: "0 = ASAP" }
+      mode: { type: enum, values: [absolute, relative], optional: true }
+      pan: { type: number, optional: true }
+      tilt: { type: number, optional: true }
+      speed: { type: number, optional: true, note: "deg/s for this move; 0 = ASAP" }
+      action:
+        type: enum
+        optional: true
+        values:
+          - nudge_left
+          - nudge_right
+          - nudge_up
+          - nudge_down
+          - jog_start
+          - jog_stop
+          - pan_speed_up
+          - pan_speed_down
+          - tilt_speed_up
+          - tilt_speed_down
+          - set_speed
+          - stop
+      dir:
+        type: enum
+        values: [left, right, up, down]
+        optional: true
+        note: "jog_start"
+      pan_speed: { type: number, optional: true, note: "set_speed; deg/s" }
+      tilt_speed: { type: number, optional: true, note: "set_speed; deg/s" }
       ts: { type: int }
 
   gimbal/status:
@@ -497,19 +531,178 @@ topics:
     payload:
       pan: { type: number }
       tilt: { type: number }
+      pan_speed: { type: number, note: "deg/s" }
+      tilt_speed: { type: number, note: "deg/s" }
+      step_deg: { type: number }
+      moving_pan: { type: bool }
+      moving_tilt: { type: bool }
       ready: { type: bool }
       lim_pan: { type: array, item: number, optional: true }
       lim_tilt: { type: array, item: number, optional: true }
       ts: { type: int }
 
   # ---- handle ----
+  # Snapshot fields (status uplink + input downlink) share the same shape.
   handle/cmd:
     module: handle
     dir: downlink
     qos: 1
     retain: false
+    note: >
+      enable/disable gate local HandleApps; pair onboard BT;
+      rumble = board BT Xbox (I02, lean profile); output = PC-bridge DS4 LED+rumble
+      or Xbox pygame rumble (I09, daily profile). Device may PUBLISH output (alerts);
+      bridge SUB and applies.
+      Keymap (I08a): set_keymap/get_keymap/reset_keymap/set_profile;
+      profile selects which HandleApp class drives actuators
+      (led_demo|gimbal|dog|off). Bindings are per-key press+hold.
     payload:
-      action: { type: enum, values: [enable, disable, pair] }
+      action:
+        type: enum
+        values:
+          - enable
+          - disable
+          - pair
+          - rumble
+          - output
+          - set_keymap
+          - get_keymap
+          - reset_keymap
+          - set_profile
+      duration_ms: { type: int, optional: true, note: "rumble or output; ms; cap ~2000" }
+      weak: { type: int, optional: true, note: "BT rumble weak 0-255" }
+      strong: { type: int, optional: true, note: "BT rumble strong 0-255" }
+      delay_ms: { type: int, optional: true, note: "BT rumble delay ms" }
+      led:
+        type: object
+        optional: true
+        note: "output only; DS4 lightbar"
+        fields:
+          r: { type: int, range: [0, 255] }
+          g: { type: int, range: [0, 255] }
+          b: { type: int, range: [0, 255] }
+      rumble:
+        type: object
+        optional: true
+        note: "output only; normalized motors (PC bridge)"
+        fields:
+          strong: { type: float, range: [0, 1], note: "large motor" }
+          weak: { type: float, range: [0, 1], note: "small motor" }
+      merge: { type: bool, optional: true, note: "set_keymap; default true" }
+      persist: { type: bool, optional: true, note: "keymap/profile; default true" }
+      profile:
+        type: enum
+        values: [led_demo, gimbal, dog, off]
+        optional: true
+        note: "set_profile; App-class slice (I08a §0)"
+      bindings:
+        type: object
+        optional: true
+        note: >
+          set_keymap; keys a|b|x|y|l1|r1|start|select|dpad_*|l3|r3;
+          value = {press:{id,...}, hold:{id,...}} or legacy flat {id,...}=press only
+      ts: { type: int }
+
+  handle/keymap:
+    module: handle
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_change_or_reconnect_or_get
+    note: >
+      I08a schema_ver 3: press/hold; bindable_keys list; catalog filtered by profile
+      (led_demo→led.*; gimbal→gimbal.*; dog/off→none only).
+      set_profile always loads that app's default bindings.
+    payload:
+      schema_ver: { type: int }
+      ok: { type: bool }
+      profile: { type: enum, values: [led_demo, gimbal, dog, off] }
+      persist: { type: bool }
+      source: { type: enum, values: [nvs, default, mqtt] }
+      bindable_keys:
+        type: array
+        item: { type: string }
+        note: "all remappable bool keys for UI"
+      bindings:
+        type: object
+        note: "each bindable key → {press,hold} with {id, optional params}"
+      catalog:
+        type: array
+        item: { type: string }
+        note: "action ids for current profile only (+ none)"
+      warnings:
+        type: array
+        item: { type: string }
+        optional: true
+      ts: { type: int }
+
+  handle/input:
+    module: handle
+    dir: downlink
+    qos: 0
+    retain: false
+    when: on_change_or_poll
+    note: >
+      PC/web injects control snapshot (PS4/Xbox bridge). Device merges into
+      HandleEventHub; last-writer-wins. Prefer source=wifi. See swrs/input/I03.
+    payload:
+      connected: { type: bool }
+      source: { type: enum, values: [bt, usb, wifi], optional: true, note: "bridge should set wifi" }
+      axes:
+        type: object
+        fields:
+          lx: { type: float, range: [-1, 1] }
+          ly: { type: float, range: [-1, 1] }
+          rx: { type: float, range: [-1, 1] }
+          ry: { type: float, range: [-1, 1] }
+      buttons:
+        type: object
+        fields:
+          a: { type: bool }
+          b: { type: bool }
+          x: { type: bool }
+          y: { type: bool }
+          l1: { type: bool }
+          r1: { type: bool }
+          l2: { type: float, range: [0, 1] }
+          r2: { type: float, range: [0, 1] }
+          start: { type: bool }
+          select: { type: bool }
+      touchpad:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 touchpad (I06). Absent = source unsupported / flag off.
+          x/y = primary contact (compat). contacts[] up to 2 fingers (I06 dual).
+        fields:
+          active: { type: bool }
+          x: { type: float, range: [0, 1] }
+          y: { type: float, range: [0, 1] }
+          fingers: { type: int, optional: true }
+          contacts:
+            type: array
+            optional: true
+            note: "0..2 items; each {active,x,y}"
+            item:
+              active: { type: bool }
+              x: { type: float, range: [0, 1] }
+              y: { type: float, range: [0, 1] }
+      motion:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 onboard IMU (I07). Absent without HID full report.
+          Body frame: +X right, +Y forward (light bar), +Z up;
+          flat face-up => accel_z ≈ -1 g. gyro_* dps; accel_* g.
+          Not board imu/status. See I07.
+        fields:
+          gyro_x: { type: float }
+          gyro_y: { type: float }
+          gyro_z: { type: float }
+          accel_x: { type: float }
+          accel_y: { type: float }
+          accel_z: { type: float }
+      raw: { type: object, optional: true }
       ts: { type: int }
 
   handle/status:
@@ -518,7 +711,9 @@ topics:
     qos: 0
     retain: false
     when: on_change_or_poll
-    note: "Reports actual control request values for web/actuators"
+    note: >
+      Merged control request after Hub normalize (bt and/or wifi input).
+      Web UI read-only viz; actuators consume via HandleApps not this topic alone.
     payload:
       connected: { type: bool }
       source: { type: enum, values: [bt, usb, wifi], optional: true }
@@ -542,6 +737,37 @@ topics:
           r2: { type: float, range: [0, 1] }
           start: { type: bool }
           select: { type: bool }
+      touchpad:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 touchpad passthrough (I06). Absent when input omitted it.
+          x/y primary; contacts[] up to 2.
+        fields:
+          active: { type: bool }
+          x: { type: float, range: [0, 1] }
+          y: { type: float, range: [0, 1] }
+          fingers: { type: int, optional: true }
+          contacts:
+            type: array
+            optional: true
+            item:
+              active: { type: bool }
+              x: { type: float, range: [0, 1] }
+              y: { type: float, range: [0, 1] }
+      motion:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 IMU passthrough (I07). Body frame +X right/+Y forward/+Z up;
+          flat face-up => accel_z ≈ -1 g. gyro dps, accel g.
+        fields:
+          gyro_x: { type: float }
+          gyro_y: { type: float }
+          gyro_z: { type: float }
+          accel_x: { type: float }
+          accel_y: { type: float }
+          accel_z: { type: float }
       raw: { type: object, optional: true }
       ts: { type: int }
 

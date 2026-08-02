@@ -2,9 +2,9 @@
 """Verify deep-dog MQTT track/cmd + track/status (LAN and/or WSS).
 
 Suggested order (Face page track section):
-  /usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
-  /usr/bin/python3 scripts/deep_dog_mqtt_face_verify.py --via web --wait 8
-  /usr/bin/python3 scripts/deep_dog_mqtt_track_verify.py --via both --wait 12
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_face_verify.py --via web --wait 8
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_track_verify.py --via both --wait 12
 """
 
 from __future__ import annotations

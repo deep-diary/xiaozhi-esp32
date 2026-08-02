@@ -6,7 +6,8 @@
 
 #define TAG "dog_servo"
 
-#if DEEP_DOG_SERVO_ENABLE
+/* 底层 MCPWM 驱动：裸舵机调试 或 云台产品路径都会用到 */
+#if DEEP_DOG_SERVO_ENABLE || DEEP_DOG_GIMBAL_ENABLE
 
 mcpwm_timer_handle_t g_servo_timer = NULL;
 bool g_servo_timer_initialized = false;

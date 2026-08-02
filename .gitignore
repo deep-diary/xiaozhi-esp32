@@ -22,3 +22,9 @@ main/mmap_generate_emoji.h
 mmap_generate_*.h
 .clangd
 ref/
+
+# deep-dog Bluepad32 symlinks (sources live under handle/third_party/)
+components/bluepad32
+components/btstack
+components/cmd_nvs
+components/cmd_system

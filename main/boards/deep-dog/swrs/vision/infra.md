@@ -45,7 +45,7 @@ Topic 前缀：`deepdiary/deep-dog/<device_id>/...`
 | `led/cmd` / `led/status` | 双向 | [08-led](../mqtt/modules/08-led.md) |
 | `servo/cmd` / `servo/status` | 双向 | [10-servo](../mqtt/modules/10-servo.md) |
 | `gimbal/cmd` / `gimbal/status` | 双向 | [09-gimbal](../mqtt/modules/09-gimbal.md)（V-C04） |
-| `handle/cmd` / `handle/status` | 双向 | [11-handle](../mqtt/modules/11-handle.md) |
+| `handle/cmd` / `handle/input` / `handle/status` | 双向 | [11-handle](../mqtt/modules/11-handle.md)；架构 [input/](../input/) |
 | `touch/status` | ↑ | [06-touch](../mqtt/modules/06-touch.md) |
 | `can/cmd` / `can/status` / `can/frames` / `can/tx` | 双向 | [12-can](../mqtt/modules/12-can.md) |
 | `person/active` | ↑ | [13-person](../mqtt/modules/13-person.md)（预留） |

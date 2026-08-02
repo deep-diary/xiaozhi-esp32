@@ -920,6 +920,18 @@ file(GLOB_RECURSE BOARD_REF_SOURCES
 )
 list(REMOVE_ITEM BOARD_SOURCES ${BOARD_REF_SOURCES})
 
+# deep-dog: third_party/bluepad32 由 EXTRA_COMPONENT_DIRS 引入，勿编进 main
+if(BOARD_TYPE STREQUAL "deep-dog")
+    file(GLOB_RECURSE BOARD_TP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-dog/handle/third_party/*.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-dog/handle/third_party/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-dog/handle/third_party/*.c
+    )
+    if(BOARD_TP_SOURCES)
+        list(REMOVE_ITEM BOARD_SOURCES ${BOARD_TP_SOURCES})
+    endif()
+endif()
+
 # deep-thumble 使用 esp_video（common/Esp32Camera），未引入 esp32-camera，故无 esp_camera.h。
 # 以下参考管线源文件依赖 esp_camera（camera_fb_t / esp_camera_fb_get/return），全部排除编译。
 if(BOARD_TYPE STREQUAL "deep-thumble")
@@ -1121,6 +1133,14 @@ if(BOARD_TYPE STREQUAL "deep-dog")
         espressif__bmi270_sensor
         espressif__i2c_bus
     )
+    # [deep-dog] 合入说明: 板载 Xbox BLE 需链接 Bluepad32/BTstack（可选）
+    # 背景: 仅 DEEP_DOG_HANDLE_BT=ON 时引入；默认构建不含 BT 主机栈
+    if(DEEP_DOG_HANDLE_BT)
+        message(STATUS "[deep-dog] PRIV_REQUIRES += bluepad32 btstack (DEEP_DOG_HANDLE_BT=${DEEP_DOG_HANDLE_BT})")
+        list(APPEND MAIN_PRIV_REQUIRES_EXTRA bluepad32 btstack cmd_nvs cmd_system)
+    else()
+        message(STATUS "[deep-dog] Bluepad32 not linked (DEEP_DOG_HANDLE_BT=${DEEP_DOG_HANDLE_BT})")
+    endif()
 endif()
 
 idf_component_register(SRCS ${SOURCES}
@@ -1151,6 +1171,14 @@ idf_component_register(SRCS ${SOURCES}
                         json
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
+
+# [deep-dog] 合入说明: 用 CMake 开关覆盖 handle_config.h 默认宏
+# 背景: WHOLE_ARCHIVE + component_requirements.py 会丢掉 PRIV_REQUIRES 中的
+# bluepad32/btstack，需显式 link 才能拿到头文件与库
+if(BOARD_TYPE STREQUAL "deep-dog" AND DEEP_DOG_HANDLE_BT)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE DEEP_DOG_HANDLE_BT_ENABLE=1)
+    target_link_libraries(${COMPONENT_LIB} PUBLIC idf::bluepad32 idf::btstack)
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE

@@ -97,8 +97,8 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
   "ext_pins": { "mode": "pwm", "gpio_a": 38, "gpio_b": 48 },
   "capabilities": {
     "dog": false, "motor": false, "stream": true, "face": true, "track": true, "imu": true,
-    "led": false, "servo": true, "gimbal": false,
-    "handle": false, "touch": true, "can": false, "arm": false, "uart": false
+    "led": false, "servo": false, "gimbal": true,
+    "handle": true, "touch": true, "can": false, "arm": false, "uart": false
   },
   "ts": 1710000000,
   "ts_iso": "2024-03-09T12:00:00Z"

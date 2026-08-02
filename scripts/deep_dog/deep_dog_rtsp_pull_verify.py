@@ -5,8 +5,8 @@ Prefers ffmpeg; falls back to a minimal TCP interleaved RTSP JPEG client when
 ffmpeg cannot reach :8554 (common intermittent EHOSTUNREACH on some Mac routes).
 
 Example:
-  python3 scripts/deep_dog_rtsp_pull_verify.py
-  python3 scripts/deep_dog_rtsp_pull_verify.py --outdir h264
+  python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py
+  python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir h264
 """
 
 from __future__ import annotations

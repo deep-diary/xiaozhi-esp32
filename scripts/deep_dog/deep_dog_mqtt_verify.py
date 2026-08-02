@@ -13,9 +13,9 @@ Credentials（勿写入仓库）:
   或 --username / --password
 
 Examples:
-  /usr/bin/python3 scripts/deep_dog_mqtt_verify.py --wait 30 --start-stream
-  /usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via lan --wait 20
-  /usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via web --username USER --password PASS
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --wait 30 --start-stream
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via lan --wait 20
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via web --username USER --password PASS
 """
 
 from __future__ import annotations

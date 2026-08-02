@@ -53,7 +53,7 @@
 | 6 | led | [08-led](./modules/08-led.md) | planned |
 | 7 | gimbal | [09-gimbal](./modules/09-gimbal.md)（V-C04） | ready / 更后 |
 | 8 | servo | [10-servo](./modules/10-servo.md) | ready |
-| 9 | handle | [11-handle](./modules/11-handle.md) | 骨架 |
+| 9 | handle | [11-handle](./modules/11-handle.md)；架构 [input/](../input/) | 契约扩展 ready；固件 planned |
 | 10 | can | [12-can](./modules/12-can.md) | planned |
 | — | person | [13-person](./modules/13-person.md) | 并入 face；**无入口卡** |
 
@@ -61,7 +61,7 @@
 
 1. `capabilities.<id>=false` → 设备不出入口卡；固件不订不发该域。
 2. `gimbal` 依赖 `servo` 驱动；`track` **依赖** `face`，可选 `gimbal`/`dog`；Track **不单独出入口卡**。
-3. `touch` 与 `dog` 协议解耦。
+3. `touch` 与 `dog` 协议解耦；`handle` 与 `dog`/`touch` 协议解耦（业务经 HandleApp）。
 4. `can` 可独立于 `dog`；`allow_tx` 默认关。
 
 ## 6. Topic 树（摘要）
@@ -70,6 +70,8 @@
 deepdiary/deep-dog/{device_id}/
 ├── device/info|status
 ├── stream|face|dog|led|servo|gimbal|handle  …/cmd|status
+├── handle/input（↓ PC/网页注入快照）
+├── handle/keymap（↑ retain；按键→动作表 + profile，I08a）
 ├── imu/status · touch/status
 ├── can/cmd|status|frames|tx
 ├── person/active (reserved) · track/cmd|status (MQTT ready / actuator=none)

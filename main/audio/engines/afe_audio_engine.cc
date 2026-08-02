@@ -170,11 +170,21 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms, srmode
     }
     afe_iface_->print_pipeline(afe_data_);
 
-    BaseType_t task_created = xTaskCreate([](void* arg) {
+    // [deep-dog] 合入说明: deep-dog 开 Bluepad32 时 INTERNAL 紧，AFE 4KB 栈常建失败
+    // 背景: 板级无法改任务创建点；INTERNAL 失败时回退 PSRAM 栈以保住唤醒
+    auto afe_task_fn = [](void* arg) {
         auto* engine = static_cast<AfeAudioEngine*>(arg);
         engine->ProcessingTask();
         vTaskDelete(nullptr);
-    }, "audio_afe", 4096, this, 3, &processing_task_);
+    };
+    BaseType_t task_created = xTaskCreate(afe_task_fn, "audio_afe", 4096, this, 3, &processing_task_);
+    if (task_created != pdPASS) {
+        ESP_LOGW(TAG, "AFE task INTERNAL stack failed (free=%u largest=%u), retry PSRAM stack",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        task_created = xTaskCreateWithCaps(afe_task_fn, "audio_afe", 4096, this, 3, &processing_task_,
+                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
     if (task_created != pdPASS) {
         ESP_LOGE(TAG, "Failed to create AFE processing task");
         afe_iface_->destroy(afe_data_);

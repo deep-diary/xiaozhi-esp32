@@ -2,11 +2,11 @@
 """Verify deep-dog MQTT face/cmd + face/status (LAN and/or WSS).
 
 Suggested order: stop RTSP push first so VisionHub feeds face_ai
-  /usr/bin/python3 scripts/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
 
 Then:
-  /usr/bin/python3 scripts/deep_dog_mqtt_face_verify.py --via web --wait 12
-  /usr/bin/python3 scripts/deep_dog_mqtt_face_verify.py --via both --wait 10
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_face_verify.py --via web --wait 12
+  /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_face_verify.py --via both --wait 10
 """
 
 from __future__ import annotations

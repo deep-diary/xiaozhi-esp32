@@ -46,7 +46,7 @@ EspVideo 帧源
 
 ## 6. 验收
 
-- [x] Python 拉流落盘：`scripts/deep_dog_rtsp_pull_verify.py --outdir jpeg|h264`（硬门禁）
+- [x] Python 拉流落盘：`scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir jpeg|h264`（硬门禁）
 - [x] `DESCRIBE` 为 `H264/90000`（默认固件）；JPEG 路径曾实测通但无法 HLS
 - [ ] HLS/内网可看到相机画面 ≥10 分钟稳定（软门禁；网页 HLS 依赖 H.264）
 - [ ] 推流开启时，本地数字 ID（及真名若 S05）行为与 Server 路径一致
@@ -55,7 +55,7 @@ EspVideo 帧源
 - [x] `mode=stream` 与 `mode=rtsp_push` 互斥
 
 ```bash
-python3 scripts/deep_dog_rtsp_pull_verify.py --outdir h264 --python-only
+python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir h264 --python-only
 ```
 
 ## 7. 选型
