@@ -13,6 +13,7 @@ class TouchButtonController;
 class TouchComboRecognizer;
 class HandleEventHub;
 class LedStripControl;
+class DeepMotor;
 
 /**
  * deep-dog 板级 MQTT 门面：device + stream + imu + touch + led …
@@ -35,6 +36,7 @@ public:
     void NotifyTouchCombo(const char* combo_id);
     void SetLedControl(LedStripControl* ctrl);
     void SetHandleHub(HandleEventHub* hub);
+    void SetDeepMotor(DeepMotor* motor);
 
     bool Start();
     void Stop();

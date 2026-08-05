@@ -7,7 +7,7 @@
 | 路由建议 | `/device/:deviceId/modules/handle` |
 | 契约 | **扩展 ready**；固件 wifi 源已实现；板载 BT planned |
 | YAML | `handle/status`、`handle/input`、`handle/cmd`、**`handle/keymap`**（I08a） |
-| 架构 | [swrs/input/](../../input/) · keymap [I08a](../../input/I08a-keymap-mqtt-contract-draft.md) |
+| 架构 | [swrs/input/](../../input/) · keymap [I08a](../../input/I08a-keymap-mqtt-contract-draft.md) · 轴 [I08b](../../input/I08b-axis-mapping.md) |
 
 ## 入口卡文案
 
@@ -19,7 +19,7 @@
 展示合并后的 `axes` / `buttons` / `connected` / `source`；可选：
 
 - `handle/cmd`：enable / disable / pair / rumble（板载 BT）/ **output**（PC 桥 DS4 灯震）  
-- **keymap（I08a）**：订 retain `handle/keymap`；`set_profile` 切 App 类（灯带 / **云台** / 运控 / 关闭）；每键 **press+hold** `set_keymap` 并 NVS 固化  
+- **keymap（I08a/I08b）**：订 retain `handle/keymap`；`set_profile` 切 App 类（灯带 / 云台 / **电机** / 运控 / 关闭）；离散 **press+hold** + **`axis_bindings`**；`set_keymap` 并 NVS 固化  
 - 调试：网页或脚本发 `handle/input`（虚拟摇杆 / PC 桥）
 
 **不含**狗动作名；编译期业务映射见 [I04](../../input/I04-apps-mapping.md)；运行时映射见 [I08a](../../input/I08a-keymap-mqtt-contract-draft.md)；云台详见 [09-gimbal](./09-gimbal.md)。

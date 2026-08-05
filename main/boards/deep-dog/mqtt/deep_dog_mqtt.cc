@@ -12,6 +12,8 @@
 #include "mqtt/modules/led_mqtt.h"
 #include "mqtt/modules/servo_mqtt.h"
 #include "mqtt/modules/gimbal_mqtt.h"
+#include "mqtt/modules/can_mqtt.h"
+#include "mqtt/modules/motor_mqtt.h"
 #include "touch_btn/touch_event_hub.h"
 #include "handle/handle_event_hub.h"
 #include "handle/handle_config.h"
@@ -45,6 +47,8 @@ struct DeepDogMqtt::Impl {
     DeepDogLedMqtt led{&client};
     DeepDogServoMqtt servo{&client};
     DeepDogGimbalMqtt gimbal{&client};
+    DeepDogCanMqtt can{&client};
+    DeepDogMotorMqtt motor{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
     TouchEventHub* touch_hub = nullptr;
@@ -73,6 +77,8 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         led.OnConnected();
         servo.OnConnected();
         gimbal.OnConnected();
+        can.OnConnected();
+        motor.OnConnected();
     } else {
         device.OnDisconnected();
         stream.OnDisconnected();
@@ -84,6 +90,8 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         led.OnDisconnected();
         servo.OnDisconnected();
         gimbal.OnDisconnected();
+        can.OnDisconnected();
+        motor.OnDisconnected();
     }
 }
 
@@ -96,6 +104,8 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     handle.OnMessage(topic, payload);
     servo.OnMessage(topic, payload);
     gimbal.OnMessage(topic, payload);
+    can.OnMessage(topic, payload);
+    motor.OnMessage(topic, payload);
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
@@ -214,6 +224,12 @@ void DeepDogMqtt::SetHandleHub(HandleEventHub* hub) {
     }
 }
 
+void DeepDogMqtt::SetDeepMotor(DeepMotor* motor) {
+    if (impl_) {
+        impl_->motor.SetMotor(motor);
+    }
+}
+
 bool DeepDogMqtt::IsRunning() const {
     return impl_ && impl_->started;
 }
@@ -311,6 +327,8 @@ bool DeepDogMqtt::Start() {
     impl_->led.SetEnabled(caps.led);
     impl_->servo.SetEnabled(caps.servo);
     impl_->gimbal.SetEnabled(caps.gimbal);
+    impl_->can.SetEnabled(caps.can);
+    impl_->motor.SetEnabled(caps.motor);
 
     impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
     impl_->client.SetMessageCallback(
@@ -321,9 +339,10 @@ bool DeepDogMqtt::Start() {
     impl_->started = true;
     ESP_LOGI(TAG,
              "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d servo=%d "
-             "gimbal=%d handle=%d",
+             "gimbal=%d handle=%d can=%d motor=%d",
              ok ? 1 : 0, caps.stream ? 1 : 0, caps.face ? 1 : 0, caps.track ? 1 : 0, caps.imu ? 1 : 0,
-             caps.led ? 1 : 0, caps.servo ? 1 : 0, caps.gimbal ? 1 : 0, caps.handle ? 1 : 0);
+             caps.led ? 1 : 0, caps.servo ? 1 : 0, caps.gimbal ? 1 : 0, caps.handle ? 1 : 0,
+             caps.can ? 1 : 0, caps.motor ? 1 : 0);
     return ok;
 }
 
@@ -331,6 +350,8 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
+    impl_->motor.Stop();
+    impl_->can.Stop();
     impl_->gimbal.Stop();
     impl_->servo.Stop();
     impl_->led.Stop();
@@ -360,6 +381,7 @@ void DeepDogMqtt::SetTouchComboRecognizer(TouchComboRecognizer*) {}
 void DeepDogMqtt::NotifyTouchCombo(const char*) {}
 void DeepDogMqtt::SetLedControl(LedStripControl*) {}
 void DeepDogMqtt::SetHandleHub(HandleEventHub*) {}
+void DeepDogMqtt::SetDeepMotor(DeepMotor*) {}
 bool DeepDogMqtt::Start() { return false; }
 void DeepDogMqtt::Stop() {}
 bool DeepDogMqtt::IsRunning() const { return false; }

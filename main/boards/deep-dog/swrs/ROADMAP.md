@@ -1,6 +1,6 @@
 # deep-dog 可追溯路线图
 
-> 权威交付顺序。需求正文在 `dog/`、`vision/`、`mqtt/`、`input/`；本文件只维护**序号、依赖、状态、验收指针**。  
+> 权威交付顺序。需求正文在 `dog/`、`vision/`、`mqtt/`、`input/`、`motor/`；本文件只维护**序号、依赖、状态、验收指针**。  
 > 板型定位：**可裁剪全功能模块板**（狗控可选，见 [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md)）。
 
 ## 交付顺序（拍板）
@@ -34,6 +34,11 @@
 | V-C03 | MQTT 推流开关 | [mqtt/modules/02-stream](./mqtt/modules/02-stream.md) | C02、**M01** | **固件已实现**（device+stream）；实机 MQTTX 待勾 |
 | V-C04 | MQTT 云台 | [mqtt/modules/09-gimbal](./mqtt/modules/09-gimbal.md) | stream 客户端、**M01** | 更后（协议已细化） |
 | **I-HANDLE** | 手柄双源输入 | [input/](./input/) · [11-handle](./mqtt/modules/11-handle.md) · [`handle/`](../handle/) | **M01**；BT 需 Bluepad32+BTstack | **wifi ✅**；BT 适配已落地（默认关）；分区已扩 |
+| **I08b** | 通用轴映射 | [input/I08b](./input/I08b-axis-mapping.md) | I08a | 本轮落地 |
+| **MOT-01** | CAN 硬件剖面 | [motor/01](./motor/01-can-hw-profile.md) | — | 本轮落地 |
+| **MOT-02** | CAN MQTT 透传 | [motor/02](./motor/02-can-mqtt.md) · [12-can](./mqtt/modules/12-can.md) | MOT-01、M01 | 本轮落地 |
+| **MOT-03** | 电机 MQTT | [motor/03](./motor/03-motor-mqtt.md) · [14-motor](./mqtt/modules/14-motor.md) | MOT-01、M01 | 本轮落地 |
+| **MOT-04/05** | motor catalog + 轴样例 | [motor/04](./motor/04-handle-motor-catalog.md) · [05](./motor/05-analog-axis-sample.md) | I08b、MOT-03 | 本轮落地 |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |
 
 ## 依赖关系

@@ -484,7 +484,8 @@ void DeepDogHandleMqtt::HandleCmd(const std::string& payload) {
         if (cJSON_IsBool(p)) {
             persist = cJSON_IsTrue(p);
         }
-        if (!HandleKeymapSetFromJson(bindings, merge, persist)) {
+        const cJSON* axis_bindings = cJSON_GetObjectItem(root, "axis_bindings");
+        if (!HandleKeymapSetFromJson(bindings, axis_bindings, merge, persist)) {
             ESP_LOGW(TAG, "set_keymap failed");
         }
         PublishKeymap();

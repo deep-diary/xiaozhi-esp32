@@ -8,7 +8,8 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | 代码 | 优先 `main/boards/deep-dog/` |
 | **权威顺序** | [ROADMAP.md](./ROADMAP.md) |
 | **MQTT** | [mqtt/](./mqtt/)（M01 总览 + modules 前端详情页 + YAML） |
-| **控制输入** | [input/](./input/)（手柄双源；I-HANDLE） |
+| **控制输入** | [input/](./input/)（手柄双源；I-HANDLE；I08b 轴映射） |
+| **电机 / CAN** | [motor/](./motor/)（单电机联调；MOT） |
 
 ## 定位
 
@@ -27,6 +28,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | [ROADMAP.md](./ROADMAP.md) | 可追溯总表 |
 | [mqtt/](./mqtt/) | MQTT：M01、frontend、modules、YAML |
 | [input/](./input/) | 控制输入（手柄双源：Bluepad32 / PC MQTT 桥） |
+| [motor/](./motor/) | CAN / 单电机调试（MOT；手柄 catalog 见 04） |
 | [dog/](./dog/) | 四足运动 |
 | [vision/](./vision/) | HTTP / Immich / MediaMTX / Kiosk |
 | [vision/infra.md](./vision/infra.md) | MediaMTX、EMQX、Immich（无明文密钥） |
@@ -39,7 +41,8 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | V-S01～S06 | HTTP 视觉 Server | 主体 ✅ |
 | V-C01～C02 | MediaMTX + 设备推流 | C02 固件已实现 |
 | **M01** + modules | MQTT 契约与前端规格 | **文档 ✅** |
-| **I-HANDLE** | 手柄双源（Xbox BT / PC→MQTT） | [input/](./input/) **文档 ✅**；固件 planned |
+| **I-HANDLE** | 手柄双源（Xbox BT / PC→MQTT） | [input/](./input/) **文档 ✅**；wifi/keymap 已落地 |
+| **MOT** | CAN + 单电机 + 手柄 motor/轴 | [motor/](./motor/) · I08b | 本轮落地 |
 | V-C03 | 推流 MQTT | [modules/02-stream](./mqtt/modules/02-stream.md) 待办 |
 | V-C04 | 云台 MQTT | [modules/09-gimbal](./mqtt/modules/09-gimbal.md) 更后 |
 | V-P01 | Kiosk | 更后 |

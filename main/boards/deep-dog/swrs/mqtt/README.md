@@ -23,6 +23,7 @@
 | 11 | [handle](./modules/11-handle.md)（双源；架构见 [../input/](../input/)） |
 | 12 | [can](./modules/12-can.md) |
 | 13 | [person](./modules/13-person.md) |
+| 14 | [motor](./modules/14-motor.md)（单电机；MOT-03） |
 
 IA：**入口卡 → 详情页**。卡上不做完整控制；模块 Topic 仅在详情页订阅。  
 **Face + Track 同页**：设备页只出「人脸」卡；`/modules/track` redirect 到 `/modules/face#track`。

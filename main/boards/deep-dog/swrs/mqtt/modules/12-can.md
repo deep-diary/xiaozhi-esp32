@@ -5,7 +5,8 @@
 | module_id | `can` |
 | capabilities | `can` |
 | 路由建议 | `/device/:deviceId/modules/can` |
-| 契约 | ready（字段）；实现 planned |
+| 契约 | ready；固件本轮落地（MOT-02） |
+| 需求 | [swrs/motor/02](../../motor/02-can-mqtt.md) |
 | YAML | `can/cmd`、`can/status`、`can/frames`、`can/tx` |
 | 硬件 | GPIO38/48 TWAI（sparkbot 原 UART 脚） |
 | 网页对齐 | deep-trace `80-can-web-tunnel` |
@@ -77,7 +78,7 @@
 
 ## 固件实现
 
-- planned；挂钩 `ESP32Can` 嗅探/打包；见 [can/README](../../../can/README.md)。
+- `mqtt/modules/can_mqtt.*`；挂钩 `ESP32Can` 嗅探/打包；见 [can/README](../../../can/README.md)。
 
 ## 验收
 

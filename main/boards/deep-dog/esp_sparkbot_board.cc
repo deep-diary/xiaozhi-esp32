@@ -46,11 +46,13 @@
 
 #if DEEP_DOG_CAN_ENABLE
 #include "can/can_config.h"
+#include "can/can_frame_hub.h"
 #include "can/ESP32-TWAI-CAN.hpp"
 #endif
 #if DEEP_DOG_MOTOR_ENABLE
 #include "motor/deep_motor.h"
 #include "motor/deep_motor_control.h"
+#include "motor/motor_access.h"
 #endif
 #if DEEP_DOG_DOG_ENABLE
 #include "leg/leg_control.h"
@@ -313,6 +315,7 @@ private:
         CanFrame frame;
         while (1) {
             if (ESP32Can.readFrame(&frame, 50)) {
+                DeepDogCanNotifyFrame(&frame, 0);
 #if DEEP_DOG_CAN_RX_HEX_LOG
                 ESP_LOGI(TAG, "CAN RX ext id=0x%08lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
                          (unsigned long)frame.identifier, (unsigned)frame.data_length_code, frame.data[0],
@@ -751,6 +754,12 @@ public:
 #endif
 #if DEEP_DOG_MOTOR_ENABLE
         deep_motor_ = new DeepMotor(nullptr);
+        DeepDogMotorSet(deep_motor_);
+#if DEEP_DOG_MQTT_ENABLE
+        if (board_mqtt_) {
+            board_mqtt_->SetDeepMotor(deep_motor_);
+        }
+#endif
 #if DEEP_DOG_CAN_ENABLE
         xTaskCreate(CanRxTask, "can_rx", CAN_RX_TASK_STACK, deep_motor_, CAN_RX_TASK_PRIO, &can_rx_task_handle_);
 #endif

@@ -14,7 +14,9 @@ public:
 
 private:
     void Fire(const HandleActionBinding_t& act, bool hold);
+    void FireContinuous(const HandleAxisBinding_t& act, float u);
     void OnKeyEdge(HandleKeyIndex_t key, bool now, bool prev);
+    void ProcessAxes(const HandleSnapshot& snap);
 
     HandleEventHub* hub_ = nullptr;
     bool prev_[HANDLE_KEY_COUNT] {};

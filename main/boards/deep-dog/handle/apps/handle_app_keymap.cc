@@ -2,6 +2,7 @@
 
 #include "gimbal/Gimbal.h"
 
+#include <cmath>
 #include <esp_log.h>
 
 #if DEEP_DOG_LED_ENABLE
@@ -9,7 +10,49 @@
 #include "led/led_strip_control.h"
 #endif
 
+#if DEEP_DOG_MOTOR_ENABLE
+#include "motor/deep_motor.h"
+#include "motor/motor_access.h"
+#include "motor/protocol_motor.h"
+#endif
+
+#ifndef DEEP_DOG_HANDLE_AXIS_DEADZONE
+#define DEEP_DOG_HANDLE_AXIS_DEADZONE 0.08f
+#endif
+
+#ifndef DEEP_DOG_HANDLE_MOTOR_NUDGE_RAD
+#define DEEP_DOG_HANDLE_MOTOR_NUDGE_RAD 0.2f
+#endif
+
+#ifndef DEEP_DOG_HANDLE_MOTOR_DEFAULT_SPEED
+#define DEEP_DOG_HANDLE_MOTOR_DEFAULT_SPEED 5.0f
+#endif
+
 #define TAG "handle_app_keymap"
+
+namespace {
+
+uint8_t ResolveMotorId(uint8_t mid) {
+    return mid == 0 ? 1 : mid;
+}
+
+float ApplyDeadzone(float u, float dz) {
+    const float d = dz > 0.f ? dz : DEEP_DOG_HANDLE_AXIS_DEADZONE;
+    if (fabsf(u) < d) {
+        return 0.f;
+    }
+    const float sign = u < 0.f ? -1.f : 1.f;
+    const float mag = (fabsf(u) - d) / (1.f - d);
+    return sign * mag;
+}
+
+#if DEEP_DOG_MOTOR_ENABLE
+DeepMotor* MotorOrNull() {
+    return DeepDogMotorGet();
+}
+#endif
+
+}  // namespace
 
 HandleAppKeyMap::HandleAppKeyMap(HandleEventHub* hub) : hub_(hub) {
     HandleKeymapInit();
@@ -19,6 +62,50 @@ void HandleAppKeyMap::Fire(const HandleActionBinding_t& act, bool hold) {
     if (act.id == HK_ACT_NONE) {
         return;
     }
+
+#if DEEP_DOG_MOTOR_ENABLE
+    if (act.id >= HK_ACT_MOTOR_ENABLE && act.id <= HK_ACT_MOTOR_NUDGE_NEG) {
+        DeepMotor* motor = MotorOrNull();
+        if (!motor) {
+            ESP_LOGW(TAG, "motor action ignored (no DeepMotor)");
+            return;
+        }
+        const uint8_t mid = ResolveMotorId(act.motor_id);
+        motor->registerMotor(mid);
+        switch (act.id) {
+            case HK_ACT_MOTOR_ENABLE:
+                (void)motor->initializeMotor(mid, DEEP_DOG_HANDLE_MOTOR_DEFAULT_SPEED);
+                ESP_LOGI(TAG, "motor.enable id=%u", mid);
+                break;
+            case HK_ACT_MOTOR_DISABLE:
+                MotorProtocol::resetMotor(mid);
+                motor->invalidateMotorCommandCache(mid);
+                ESP_LOGI(TAG, "motor.disable id=%u", mid);
+                break;
+            case HK_ACT_MOTOR_POS_ZERO:
+                (void)motor->setMotorPosition(mid, 0.f, DEEP_DOG_HANDLE_MOTOR_DEFAULT_SPEED);
+                break;
+            case HK_ACT_MOTOR_NUDGE_POS: {
+                float cur = 0.f;
+                (void)motor->getMotorTargetAngle(mid, &cur);
+                (void)motor->setMotorPosition(mid, cur + DEEP_DOG_HANDLE_MOTOR_NUDGE_RAD,
+                                              DEEP_DOG_HANDLE_MOTOR_DEFAULT_SPEED);
+                break;
+            }
+            case HK_ACT_MOTOR_NUDGE_NEG: {
+                float cur = 0.f;
+                (void)motor->getMotorTargetAngle(mid, &cur);
+                (void)motor->setMotorPosition(mid, cur - DEEP_DOG_HANDLE_MOTOR_NUDGE_RAD,
+                                              DEEP_DOG_HANDLE_MOTOR_DEFAULT_SPEED);
+                break;
+            }
+            default:
+                break;
+        }
+        (void)hold;
+        return;
+    }
+#endif
 
     if (act.id >= HK_ACT_GIMBAL_LEFT && act.id <= HK_ACT_GIMBAL_TILT_SPEED_DOWN) {
 #if DEEP_DOG_GIMBAL_ENABLE
@@ -111,7 +198,43 @@ void HandleAppKeyMap::Fire(const HandleActionBinding_t& act, bool hold) {
     }
 #else
     (void)hold;
-    ESP_LOGD(TAG, "led action id=%d ignored (led off)", static_cast<int>(act.id));
+#endif
+}
+
+void HandleAppKeyMap::FireContinuous(const HandleAxisBinding_t& act, float u) {
+    if (act.id == HK_ACT_NONE) {
+        return;
+    }
+#if DEEP_DOG_MOTOR_ENABLE
+    if (act.id == HK_ACT_MOTOR_POS_NORM || act.id == HK_ACT_MOTOR_VEL_NORM) {
+        DeepMotor* motor = MotorOrNull();
+        if (!motor) {
+            return;
+        }
+        const uint8_t mid = ResolveMotorId(act.motor_id);
+        motor->registerMotor(mid);
+        const float scale = act.scale != 0.f ? act.scale : 1.f;
+        if (act.id == HK_ACT_MOTOR_POS_NORM) {
+            float uu = u;
+            if (uu > 1.f) {
+                uu = 1.f;
+            }
+            if (uu < -1.f) {
+                uu = -1.f;
+            }
+            const float pos = uu * P_MAX * scale;
+            (void)motor->setMotorPosition(mid, pos, DEEP_DOG_HANDLE_MOTOR_DEFAULT_SPEED);
+        } else {
+            float uu = fabsf(u);
+            if (uu > 1.f) {
+                uu = 1.f;
+            }
+            (void)motor->setMotorSpeedLimit(mid, uu * V_MAX * scale);
+        }
+        return;
+    }
+#else
+    (void)u;
 #endif
 }
 
@@ -120,14 +243,12 @@ void HandleAppKeyMap::OnKeyEdge(HandleKeyIndex_t key, bool now, bool prev) {
     const HandleKeyBinding_t& bind = st->keys[key];
 
     if (now && !prev) {
-        /* rising: press once; start hold if configured */
         Fire(bind.press, false);
         if (bind.hold.id != HK_ACT_NONE) {
             Fire(bind.hold, true);
             hold_active_[key] = true;
         }
     } else if (!now && prev) {
-        /* falling: stop jog if hold was active */
         if (hold_active_[key]) {
             hold_active_[key] = false;
 #if DEEP_DOG_GIMBAL_ENABLE
@@ -142,13 +263,40 @@ void HandleAppKeyMap::OnKeyEdge(HandleKeyIndex_t key, bool now, bool prev) {
     }
 }
 
+void HandleAppKeyMap::ProcessAxes(const HandleSnapshot& snap) {
+    const HandleKeymapState_t* st = HandleKeymapGet();
+    const float raw[HANDLE_AXIS_COUNT] = {
+        snap.axes.lx, snap.axes.ly, snap.axes.rx, snap.axes.ry, snap.buttons.l2, snap.buttons.r2,
+    };
+    for (int i = 0; i < HANDLE_AXIS_COUNT; ++i) {
+        const HandleAxisBinding_t& bind = st->axes[i];
+        if (bind.id == HK_ACT_NONE) {
+            continue;
+        }
+        float u = raw[i];
+        if (i <= HANDLE_AXIS_RY) {
+            u = ApplyDeadzone(u, bind.deadzone);
+        } else {
+            /* triggers [0,1]: small deadzone near 0 */
+            const float d = bind.deadzone > 0.f ? bind.deadzone : DEEP_DOG_HANDLE_AXIS_DEADZONE;
+            if (u < d) {
+                u = 0.f;
+            } else {
+                u = (u - d) / (1.f - d);
+            }
+        }
+        FireContinuous(bind, u);
+    }
+}
+
 void HandleAppKeyMap::OnSnapshot(const HandleSnapshot& snap) {
     if (!hub_ || !hub_->AppsEnabled()) {
         return;
     }
     const HandleProfile_t profile = HandleKeymapProfile();
-    if (profile != HANDLE_PROFILE_LED_DEMO && profile != HANDLE_PROFILE_GIMBAL) {
-        /* stop any lingering hold jogs when leaving keymap profiles */
+    const bool keymap_active = profile == HANDLE_PROFILE_LED_DEMO || profile == HANDLE_PROFILE_GIMBAL ||
+                               profile == HANDLE_PROFILE_MOTOR;
+    if (!keymap_active) {
         for (int i = 0; i < HANDLE_KEY_COUNT; ++i) {
             if (hold_active_[i]) {
                 hold_active_[i] = false;
@@ -200,4 +348,5 @@ void HandleAppKeyMap::OnSnapshot(const HandleSnapshot& snap) {
         OnKeyEdge(static_cast<HandleKeyIndex_t>(i), cur[i], prev_[i]);
         prev_[i] = cur[i];
     }
+    ProcessAxes(snap);
 }

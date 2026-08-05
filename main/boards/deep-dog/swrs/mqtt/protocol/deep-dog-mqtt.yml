@@ -69,8 +69,8 @@ modules:
     note: >
       Dual-source v0.1: onboard Bluepad32+BTstack Xbox BLE (source=bt) and PC MQTT
       bridge (source=wifi, handle/input). Hub+App layering in swrs/input/;
-      keymap+profile (I08a) selects HandleApp class; press/hold bindings;
-      profiles led_demo|gimbal|dog|off.
+      keymap+profile (I08a/I08b) selects HandleApp class; press/hold + axis_bindings;
+      profiles led_demo|gimbal|motor|dog|off.
     ref: main/boards/deep-dog/swrs/input/
     impl: modules/11-handle
   touch:
@@ -79,16 +79,26 @@ modules:
     note: "Driver + touch_mqtt; touch/status thresholds+calib; touch/cmd set/calibrate/reset"
     ref: main/boards/deep-dog/touch_btn/
   can:
-    status: defined
+    status: ready
     required: false
     note: >
       TWAI tunnel to MQTT for web frame table. Pins GPIO38/48 from esp-sparkbot UART
       reused as CAN_TX/RX on deep-dog. Align web UI with deep-trace 80-can-web-tunnel.
     ref: main/boards/deep-dog/can/
+    impl: modules/12-can
     pins:
       tx_gpio: 38
       rx_gpio: 48
       sparkbot_was: "UART_ECHO_TXD/RXD"
+  motor:
+    status: ready
+    required: false
+    depends: [can]
+    note: >
+      Single-motor semantic control via DeepMotor (position/enable/MIT). Complements
+      can/* raw tunnel. Handle profile=motor catalog in swrs/motor/04 + I08b axes.
+    ref: main/boards/deep-dog/motor/
+    impl: modules/14-motor
   person:
     status: reserved
     required: false
@@ -553,9 +563,9 @@ topics:
       rumble = board BT Xbox (I02, lean profile); output = PC-bridge DS4 LED+rumble
       or Xbox pygame rumble (I09, daily profile). Device may PUBLISH output (alerts);
       bridge SUB and applies.
-      Keymap (I08a): set_keymap/get_keymap/reset_keymap/set_profile;
+      Keymap (I08a/I08b): set_keymap/get_keymap/reset_keymap/set_profile;
       profile selects which HandleApp class drives actuators
-      (led_demo|gimbal|dog|off). Bindings are per-key press+hold.
+      (led_demo|gimbal|motor|dog|off). Discrete press+hold + axis_bindings.
     payload:
       action:
         type: enum
@@ -592,7 +602,7 @@ topics:
       persist: { type: bool, optional: true, note: "keymap/profile; default true" }
       profile:
         type: enum
-        values: [led_demo, gimbal, dog, off]
+        values: [led_demo, gimbal, motor, dog, off]
         optional: true
         note: "set_profile; App-class slice (I08a §0)"
       bindings:
@@ -601,6 +611,12 @@ topics:
         note: >
           set_keymap; keys a|b|x|y|l1|r1|start|select|dpad_*|l3|r3;
           value = {press:{id,...}, hold:{id,...}} or legacy flat {id,...}=press only
+      axis_bindings:
+        type: object
+        optional: true
+        note: >
+          set_keymap (I08b); keys lx|ly|rx|ry|l2|r2;
+          value = {id, optional motor_id|scale|deadzone}
       ts: { type: int }
 
   handle/keymap:
@@ -610,26 +626,33 @@ topics:
     retain: true
     when: on_change_or_reconnect_or_get
     note: >
-      I08a schema_ver 3: press/hold; bindable_keys list; catalog filtered by profile
-      (led_demo→led.*; gimbal→gimbal.*; dog/off→none only).
-      set_profile always loads that app's default bindings.
+      I08a/I08b schema_ver 5: press/hold + axis_bindings; bindable_keys/axes;
+      catalog filtered by profile (led_demo|gimbal|motor|dog|off).
+      set_profile always loads that app's default key+axis bindings.
     payload:
       schema_ver: { type: int }
       ok: { type: bool }
-      profile: { type: enum, values: [led_demo, gimbal, dog, off] }
+      profile: { type: enum, values: [led_demo, gimbal, motor, dog, off] }
       persist: { type: bool }
       source: { type: enum, values: [nvs, default, mqtt] }
       bindable_keys:
         type: array
         item: { type: string }
         note: "all remappable bool keys for UI"
+      bindable_axes:
+        type: array
+        item: { type: string }
+        note: "lx|ly|rx|ry|l2|r2"
       bindings:
         type: object
         note: "each bindable key → {press,hold} with {id, optional params}"
+      axis_bindings:
+        type: object
+        note: "each bindable axis → {id, optional params}"
       catalog:
         type: array
-        item: { type: string }
-        note: "action ids for current profile only (+ none)"
+        item: { type: [string, object] }
+        note: "action ids or {id,kind,value_domain} for current profile (+ none)"
       warnings:
         type: array
         item: { type: string }
@@ -949,6 +972,52 @@ topics:
           rtr: { type: bool, optional: true }
           dlc: { type: int, range: [0, 8] }
           data_hex: { type: string }
+      ts: { type: int }
+
+  # ---- motor (DeepMotor semantic control) ----
+  motor/cmd:
+    module: motor
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    note: "Enable/position/MIT for one motor_id; see modules/14-motor"
+    payload:
+      motor_id: { type: int, range: [1, 255] }
+      enable: { type: bool, optional: true }
+      reset: { type: bool, optional: true }
+      position_rad: { type: float, optional: true, note: "clamp ±12.57" }
+      speed_limit: { type: float, optional: true }
+      iq_ref: { type: float, optional: true }
+      mit:
+        type: object
+        optional: true
+        fields:
+          position_rad: { type: float }
+          velocity_rad_s: { type: float, optional: true }
+          kp: { type: float, optional: true }
+          kd: { type: float, optional: true }
+          torque_ff: { type: float, optional: true }
+      ts: { type: int, optional: true }
+
+  motor/status:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: true
+    note: "Registered motors feedback snapshot"
+    payload:
+      ok: { type: bool }
+      motors:
+        type: array
+        item:
+          id: { type: int }
+          position_rad: { type: float }
+          speed_rad_s: { type: float }
+          torque_nm: { type: float }
+          temperature: { type: float, optional: true }
+          fault: { type: bool, optional: true }
+          target_rad: { type: float, optional: true }
       ts: { type: int }
 
   # ---- reserved ----

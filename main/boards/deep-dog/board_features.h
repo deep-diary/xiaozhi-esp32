@@ -11,12 +11,12 @@
  *       LED_AVAILABLE → LED（EXT_PIN=LED，DIN=gpio_a）
  */
 
-/* -------- 总线 / 驱动（CAN 等默认关；舵机见下方 PWM） -------- */
+/* -------- 总线 / 驱动（单电机默认开 CAN+MOTOR；舵机见下方 PWM） -------- */
 #ifndef DEEP_DOG_CAN_ENABLE
-#define DEEP_DOG_CAN_ENABLE 0
+#define DEEP_DOG_CAN_ENABLE 1
 #endif
 #ifndef DEEP_DOG_MOTOR_ENABLE
-#define DEEP_DOG_MOTOR_ENABLE 0
+#define DEEP_DOG_MOTOR_ENABLE 1
 #endif
 #ifndef DEEP_DOG_UART_ENABLE
 #define DEEP_DOG_UART_ENABLE 0
@@ -39,12 +39,12 @@
 #define DEEP_DOG_ARM_ENABLE 0
 #endif
 
-/* -------- PWM 产品（需 EXT_PIN=PWM；默认开云台，裸舵机调试互斥） -------- */
+/* -------- PWM 产品（需 EXT_PIN=PWM；CAN 剖面下自动钳 0） -------- */
 #ifndef DEEP_DOG_SERVO_ENABLE
 #define DEEP_DOG_SERVO_ENABLE 0
 #endif
 #ifndef DEEP_DOG_GIMBAL_ENABLE
-#define DEEP_DOG_GIMBAL_ENABLE 1
+#define DEEP_DOG_GIMBAL_ENABLE 0
 #endif
 
 /* -------- 非引出脚功能 -------- */

@@ -54,7 +54,12 @@
 #define DEEP_DOG_HANDLE_STATUS_MIN_INTERVAL_MS 25
 #endif
 
-/** 左摇杆死区 */
+/** 左摇杆死区（dog App） */
 #ifndef DEEP_DOG_HANDLE_STICK_DEADZONE
 #define DEEP_DOG_HANDLE_STICK_DEADZONE 0.25f
+#endif
+
+/** keymap 轴映射死区（I08b；可被 binding.deadzone 覆盖） */
+#ifndef DEEP_DOG_HANDLE_AXIS_DEADZONE
+#define DEEP_DOG_HANDLE_AXIS_DEADZONE 0.08f
 #endif

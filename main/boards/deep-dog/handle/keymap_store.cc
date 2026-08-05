@@ -10,8 +10,8 @@
 #define TAG "handle_keymap"
 #define NVS_NS "h_keymap"
 #define NVS_KEY "blob"
-/** v4: gimbal defaults — face keys dir, dpad speed */
-#define SCHEMA_VER 4
+/** v5: motor profile + axis_bindings (I08b) */
+#define SCHEMA_VER 5
 
 namespace {
 
@@ -19,6 +19,7 @@ namespace {
 struct NvsAction {
     uint8_t id;
     uint8_t r, g, b, brightness;
+    uint8_t motor_id;
 };
 
 struct NvsKey {
@@ -26,10 +27,18 @@ struct NvsKey {
     NvsAction hold;
 };
 
+struct NvsAxis {
+    uint8_t id;
+    uint8_t motor_id;
+    int16_t scale_x100;
+    uint8_t deadzone_x100;
+};
+
 struct NvsBlob {
     uint8_t ver;
     uint8_t profile;
     NvsKey keys[HANDLE_KEY_COUNT];
+    NvsAxis axes[HANDLE_AXIS_COUNT];
 };
 #pragma pack(pop)
 
@@ -37,13 +46,24 @@ HandleKeymapState_t s_state;
 bool s_inited = false;
 
 HandleActionBinding_t MakeAct(HandleActionId_t id, uint8_t r = 0, uint8_t g = 0, uint8_t b = 0,
-                              uint8_t br = 64) {
+                              uint8_t br = 64, uint8_t motor_id = 0) {
     HandleActionBinding_t a {};
     a.id = id;
     a.r = r;
     a.g = g;
     a.b = b;
     a.brightness = br;
+    a.motor_id = motor_id;
+    return a;
+}
+
+HandleAxisBinding_t MakeAxis(HandleActionId_t id, uint8_t motor_id = 0, float scale = 1.f,
+                             float deadzone = 0.f) {
+    HandleAxisBinding_t a {};
+    a.id = id;
+    a.motor_id = motor_id;
+    a.scale = scale;
+    a.deadzone = deadzone;
     return a;
 }
 
@@ -54,8 +74,15 @@ void ClearAllKeys(HandleKeymapState_t* st) {
     }
 }
 
+void ClearAllAxes(HandleKeymapState_t* st) {
+    for (int i = 0; i < HANDLE_AXIS_COUNT; ++i) {
+        st->axes[i] = MakeAxis(HK_ACT_NONE);
+    }
+}
+
 void ApplyLedDemoDefaults(HandleKeymapState_t* st) {
     ClearAllKeys(st);
+    ClearAllAxes(st);
     st->keys[HANDLE_KEY_A].press = MakeAct(HK_ACT_LED_STATIC, 255, 0, 0, 64);
     st->keys[HANDLE_KEY_B].press = MakeAct(HK_ACT_LED_STATIC, 0, 0, 255, 64);
     st->keys[HANDLE_KEY_X].press = MakeAct(HK_ACT_LED_BREATHE, 0, 64, 0, 64);
@@ -64,7 +91,7 @@ void ApplyLedDemoDefaults(HandleKeymapState_t* st) {
 
 void ApplyGimbalDefaults(HandleKeymapState_t* st) {
     ClearAllKeys(st);
-    /* 面键：press 点动 / hold 连动；左侧十字键：press 调速 */
+    ClearAllAxes(st);
     st->keys[HANDLE_KEY_A].press = MakeAct(HK_ACT_GIMBAL_LEFT);
     st->keys[HANDLE_KEY_A].hold = MakeAct(HK_ACT_GIMBAL_LEFT);
     st->keys[HANDLE_KEY_B].press = MakeAct(HK_ACT_GIMBAL_RIGHT);
@@ -79,6 +106,17 @@ void ApplyGimbalDefaults(HandleKeymapState_t* st) {
     st->keys[HANDLE_KEY_DPAD_DOWN].press = MakeAct(HK_ACT_GIMBAL_TILT_SPEED_DOWN);
 }
 
+void ApplyMotorDefaults(HandleKeymapState_t* st) {
+    ClearAllKeys(st);
+    ClearAllAxes(st);
+    st->keys[HANDLE_KEY_A].press = MakeAct(HK_ACT_MOTOR_ENABLE);
+    st->keys[HANDLE_KEY_B].press = MakeAct(HK_ACT_MOTOR_DISABLE);
+    st->keys[HANDLE_KEY_X].press = MakeAct(HK_ACT_MOTOR_POS_ZERO);
+    st->keys[HANDLE_KEY_DPAD_RIGHT].press = MakeAct(HK_ACT_MOTOR_NUDGE_POS);
+    st->keys[HANDLE_KEY_DPAD_LEFT].press = MakeAct(HK_ACT_MOTOR_NUDGE_NEG);
+    st->axes[HANDLE_AXIS_RX] = MakeAxis(HK_ACT_MOTOR_POS_NORM);
+}
+
 void ApplyProfileDefaults(HandleKeymapState_t* st, HandleProfile_t profile) {
     st->schema_ver = SCHEMA_VER;
     st->profile = profile;
@@ -90,12 +128,34 @@ void ApplyProfileDefaults(HandleKeymapState_t* st, HandleProfile_t profile) {
         case HANDLE_PROFILE_GIMBAL:
             ApplyGimbalDefaults(st);
             break;
+        case HANDLE_PROFILE_MOTOR:
+            ApplyMotorDefaults(st);
+            break;
         case HANDLE_PROFILE_DOG:
         case HANDLE_PROFILE_OFF:
         default:
             ClearAllKeys(st);
+            ClearAllAxes(st);
             break;
     }
+}
+
+void PackAction(NvsAction* dst, const HandleActionBinding_t& src) {
+    dst->id = static_cast<uint8_t>(src.id);
+    dst->r = src.r;
+    dst->g = src.g;
+    dst->b = src.b;
+    dst->brightness = src.brightness;
+    dst->motor_id = src.motor_id;
+}
+
+void UnpackAction(HandleActionBinding_t* dst, const NvsAction& src) {
+    dst->id = static_cast<HandleActionId_t>(src.id);
+    dst->r = src.r;
+    dst->g = src.g;
+    dst->b = src.b;
+    dst->brightness = src.brightness;
+    dst->motor_id = src.motor_id;
 }
 
 bool SaveNvs(const HandleKeymapState_t* st) {
@@ -103,16 +163,14 @@ bool SaveNvs(const HandleKeymapState_t* st) {
     blob.ver = SCHEMA_VER;
     blob.profile = static_cast<uint8_t>(st->profile);
     for (int i = 0; i < HANDLE_KEY_COUNT; ++i) {
-        blob.keys[i].press.id = static_cast<uint8_t>(st->keys[i].press.id);
-        blob.keys[i].press.r = st->keys[i].press.r;
-        blob.keys[i].press.g = st->keys[i].press.g;
-        blob.keys[i].press.b = st->keys[i].press.b;
-        blob.keys[i].press.brightness = st->keys[i].press.brightness;
-        blob.keys[i].hold.id = static_cast<uint8_t>(st->keys[i].hold.id);
-        blob.keys[i].hold.r = st->keys[i].hold.r;
-        blob.keys[i].hold.g = st->keys[i].hold.g;
-        blob.keys[i].hold.b = st->keys[i].hold.b;
-        blob.keys[i].hold.brightness = st->keys[i].hold.brightness;
+        PackAction(&blob.keys[i].press, st->keys[i].press);
+        PackAction(&blob.keys[i].hold, st->keys[i].hold);
+    }
+    for (int i = 0; i < HANDLE_AXIS_COUNT; ++i) {
+        blob.axes[i].id = static_cast<uint8_t>(st->axes[i].id);
+        blob.axes[i].motor_id = st->axes[i].motor_id;
+        blob.axes[i].scale_x100 = static_cast<int16_t>(st->axes[i].scale * 100.f);
+        blob.axes[i].deadzone_x100 = static_cast<uint8_t>(st->axes[i].deadzone * 100.f);
     }
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
@@ -148,16 +206,17 @@ bool LoadNvs(HandleKeymapState_t* st) {
         if (blob.keys[i].press.id >= HK_ACT_COUNT || blob.keys[i].hold.id >= HK_ACT_COUNT) {
             return false;
         }
-        st->keys[i].press.id = static_cast<HandleActionId_t>(blob.keys[i].press.id);
-        st->keys[i].press.r = blob.keys[i].press.r;
-        st->keys[i].press.g = blob.keys[i].press.g;
-        st->keys[i].press.b = blob.keys[i].press.b;
-        st->keys[i].press.brightness = blob.keys[i].press.brightness;
-        st->keys[i].hold.id = static_cast<HandleActionId_t>(blob.keys[i].hold.id);
-        st->keys[i].hold.r = blob.keys[i].hold.r;
-        st->keys[i].hold.g = blob.keys[i].hold.g;
-        st->keys[i].hold.b = blob.keys[i].hold.b;
-        st->keys[i].hold.brightness = blob.keys[i].hold.brightness;
+        UnpackAction(&st->keys[i].press, blob.keys[i].press);
+        UnpackAction(&st->keys[i].hold, blob.keys[i].hold);
+    }
+    for (int i = 0; i < HANDLE_AXIS_COUNT; ++i) {
+        if (blob.axes[i].id >= HK_ACT_COUNT) {
+            return false;
+        }
+        st->axes[i].id = static_cast<HandleActionId_t>(blob.axes[i].id);
+        st->axes[i].motor_id = blob.axes[i].motor_id;
+        st->axes[i].scale = blob.axes[i].scale_x100 / 100.f;
+        st->axes[i].deadzone = blob.axes[i].deadzone_x100 / 100.f;
     }
     return true;
 }
@@ -199,6 +258,10 @@ void ParseActionObject(const cJSON* obj, HandleActionBinding_t* out, bool* ok_fl
     if (cJSON_IsNumber(j)) {
         out->brightness = static_cast<uint8_t>(j->valueint);
     }
+    j = cJSON_GetObjectItem(obj, "motor_id");
+    if (cJSON_IsNumber(j) && j->valueint > 0 && j->valueint < 256) {
+        out->motor_id = static_cast<uint8_t>(j->valueint);
+    }
 }
 
 void ParseKeyBinding(const cJSON* obj, HandleKeyBinding_t* out, bool* ok_flag) {
@@ -224,6 +287,41 @@ void ParseKeyBinding(const cJSON* obj, HandleKeyBinding_t* out, bool* ok_flag) {
     ParseActionObject(obj, &out->press, ok_flag);
 }
 
+void ParseAxisBinding(const cJSON* obj, HandleAxisBinding_t* out, bool* ok_flag) {
+    if (!out) {
+        return;
+    }
+    *out = MakeAxis(HK_ACT_NONE);
+    if (!cJSON_IsObject(obj)) {
+        return;
+    }
+    const cJSON* id_j = cJSON_GetObjectItem(obj, "id");
+    if (!cJSON_IsString(id_j) || !id_j->valuestring) {
+        return;
+    }
+    HandleActionId_t id = HK_ACT_NONE;
+    if (!HandleKeymapParseAction(id_j->valuestring, &id)) {
+        ESP_LOGW(TAG, "unknown axis action id=%s", id_j->valuestring);
+        if (ok_flag) {
+            *ok_flag = false;
+        }
+        return;
+    }
+    out->id = id;
+    const cJSON* j = cJSON_GetObjectItem(obj, "motor_id");
+    if (cJSON_IsNumber(j) && j->valueint > 0 && j->valueint < 256) {
+        out->motor_id = static_cast<uint8_t>(j->valueint);
+    }
+    j = cJSON_GetObjectItem(obj, "scale");
+    if (cJSON_IsNumber(j)) {
+        out->scale = static_cast<float>(j->valuedouble);
+    }
+    j = cJSON_GetObjectItem(obj, "deadzone");
+    if (cJSON_IsNumber(j)) {
+        out->deadzone = static_cast<float>(j->valuedouble);
+    }
+}
+
 cJSON* ActionToJson(const HandleActionBinding_t& a) {
     cJSON* o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "id", HandleKeymapActionName(a.id));
@@ -234,21 +332,57 @@ cJSON* ActionToJson(const HandleActionBinding_t& a) {
         cJSON_AddNumberToObject(o, "b", a.b);
         cJSON_AddNumberToObject(o, "brightness", a.brightness);
     }
+    if (a.motor_id != 0) {
+        cJSON_AddNumberToObject(o, "motor_id", a.motor_id);
+    }
+    return o;
+}
+
+cJSON* AxisToJson(const HandleAxisBinding_t& a) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "id", HandleKeymapActionName(a.id));
+    if (a.motor_id != 0) {
+        cJSON_AddNumberToObject(o, "motor_id", a.motor_id);
+    }
+    if (a.scale != 1.f) {
+        cJSON_AddNumberToObject(o, "scale", a.scale);
+    }
+    if (a.deadzone > 0.f) {
+        cJSON_AddNumberToObject(o, "deadzone", a.deadzone);
+    }
+    return o;
+}
+
+cJSON* CatalogItem(const char* id, const char* kind, const char* domain = nullptr) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "id", id);
+    cJSON_AddStringToObject(o, "kind", kind);
+    if (domain) {
+        cJSON_AddStringToObject(o, "value_domain", domain);
+    }
     return o;
 }
 
 void AppendCatalogForProfile(cJSON* catalog, HandleProfile_t profile) {
-    cJSON_AddItemToArray(catalog, cJSON_CreateString("none"));
+    cJSON_AddItemToArray(catalog, CatalogItem("none", "both"));
     if (profile == HANDLE_PROFILE_LED_DEMO) {
         for (int i = HK_ACT_LED_OFF; i <= HK_ACT_LED_SYSTEM; ++i) {
-            cJSON_AddItemToArray(catalog,
-                                 cJSON_CreateString(HandleKeymapActionName(static_cast<HandleActionId_t>(i))));
+            cJSON_AddItemToArray(
+                catalog, CatalogItem(HandleKeymapActionName(static_cast<HandleActionId_t>(i)), "edge"));
         }
     } else if (profile == HANDLE_PROFILE_GIMBAL) {
         for (int i = HK_ACT_GIMBAL_LEFT; i <= HK_ACT_GIMBAL_TILT_SPEED_DOWN; ++i) {
-            cJSON_AddItemToArray(catalog,
-                                 cJSON_CreateString(HandleKeymapActionName(static_cast<HandleActionId_t>(i))));
+            cJSON_AddItemToArray(
+                catalog, CatalogItem(HandleKeymapActionName(static_cast<HandleActionId_t>(i)), "edge"));
         }
+    } else if (profile == HANDLE_PROFILE_MOTOR) {
+        cJSON_AddItemToArray(catalog, CatalogItem("motor.enable", "edge"));
+        cJSON_AddItemToArray(catalog, CatalogItem("motor.disable", "edge"));
+        cJSON_AddItemToArray(catalog, CatalogItem("motor.pos_zero", "edge"));
+        cJSON_AddItemToArray(catalog, CatalogItem("motor.nudge_pos", "edge"));
+        cJSON_AddItemToArray(catalog, CatalogItem("motor.nudge_neg", "edge"));
+        cJSON_AddItemToArray(catalog, CatalogItem("motor.pos_norm", "axis", "signed"));
+        cJSON_AddItemToArray(catalog, CatalogItem("motor.vel_norm", "axis", "signed"));
     }
 }
 
@@ -263,6 +397,9 @@ bool HandleKeymapActionInProfile(HandleActionId_t id, HandleProfile_t profile) {
     }
     if (profile == HANDLE_PROFILE_GIMBAL) {
         return id >= HK_ACT_GIMBAL_LEFT && id <= HK_ACT_GIMBAL_TILT_SPEED_DOWN;
+    }
+    if (profile == HANDLE_PROFILE_MOTOR) {
+        return id >= HK_ACT_MOTOR_ENABLE && id <= HK_ACT_MOTOR_VEL_NORM;
     }
     return false;
 }
@@ -299,7 +436,6 @@ bool HandleKeymapSetProfile(HandleProfile_t profile, bool persist) {
     if (!s_inited) {
         HandleKeymapInit();
     }
-    /* 切换应用：始终加载该应用默认功能绑定 */
     ApplyProfileDefaults(&s_state, profile);
     s_state.source = "mqtt";
     s_state.persist = persist ? SaveNvs(&s_state) : false;
@@ -325,29 +461,47 @@ bool HandleKeymapReset(bool persist) {
     return true;
 }
 
-bool HandleKeymapSetFromJson(const cJSON* bindings, bool merge, bool persist) {
+bool HandleKeymapSetFromJson(const cJSON* bindings, const cJSON* axis_bindings, bool merge, bool persist) {
     if (!s_inited) {
         HandleKeymapInit();
-    }
-    if (!cJSON_IsObject(bindings)) {
-        return false;
     }
     bool ok = true;
     if (!merge) {
         ClearAllKeys(&s_state);
+        ClearAllAxes(&s_state);
     }
-    const cJSON* child = nullptr;
-    cJSON_ArrayForEach(child, bindings) {
-        if (!child->string) {
-            continue;
+    if (cJSON_IsObject(bindings)) {
+        const cJSON* child = nullptr;
+        cJSON_ArrayForEach(child, bindings) {
+            if (!child->string) {
+                continue;
+            }
+            HandleKeyIndex_t ki;
+            if (!HandleKeymapParseKey(child->string, &ki)) {
+                ESP_LOGW(TAG, "ignore unknown key=%s", child->string);
+                ok = false;
+                continue;
+            }
+            ParseKeyBinding(child, &s_state.keys[ki], &ok);
         }
-        HandleKeyIndex_t ki;
-        if (!HandleKeymapParseKey(child->string, &ki)) {
-            ESP_LOGW(TAG, "ignore unknown key=%s", child->string);
-            ok = false;
-            continue;
+    }
+    if (cJSON_IsObject(axis_bindings)) {
+        const cJSON* child = nullptr;
+        cJSON_ArrayForEach(child, axis_bindings) {
+            if (!child->string) {
+                continue;
+            }
+            HandleAxisIndex_t ai;
+            if (!HandleKeymapParseAxis(child->string, &ai)) {
+                ESP_LOGW(TAG, "ignore unknown axis=%s", child->string);
+                ok = false;
+                continue;
+            }
+            ParseAxisBinding(child, &s_state.axes[ai], &ok);
         }
-        ParseKeyBinding(child, &s_state.keys[ki], &ok);
+    }
+    if (!cJSON_IsObject(bindings) && !cJSON_IsObject(axis_bindings)) {
+        return false;
     }
     s_state.ok = ok;
     s_state.source = "mqtt";
@@ -373,6 +527,12 @@ cJSON* HandleKeymapBuildJson(void) {
         cJSON_AddItemToArray(bindable, cJSON_CreateString(HandleKeymapKeyName(static_cast<HandleKeyIndex_t>(i))));
     }
 
+    cJSON* bindable_axes = cJSON_AddArrayToObject(root, "bindable_axes");
+    for (int i = 0; i < HANDLE_AXIS_COUNT; ++i) {
+        cJSON_AddItemToArray(bindable_axes,
+                             cJSON_CreateString(HandleKeymapAxisName(static_cast<HandleAxisIndex_t>(i))));
+    }
+
     cJSON* bindings = cJSON_CreateObject();
     for (int i = 0; i < HANDLE_KEY_COUNT; ++i) {
         cJSON* key = cJSON_CreateObject();
@@ -381,6 +541,13 @@ cJSON* HandleKeymapBuildJson(void) {
         cJSON_AddItemToObject(bindings, HandleKeymapKeyName(static_cast<HandleKeyIndex_t>(i)), key);
     }
     cJSON_AddItemToObject(root, "bindings", bindings);
+
+    cJSON* axis_bindings = cJSON_CreateObject();
+    for (int i = 0; i < HANDLE_AXIS_COUNT; ++i) {
+        cJSON_AddItemToObject(axis_bindings, HandleKeymapAxisName(static_cast<HandleAxisIndex_t>(i)),
+                              AxisToJson(st->axes[i]));
+    }
+    cJSON_AddItemToObject(root, "axis_bindings", axis_bindings);
 
     cJSON* catalog = cJSON_AddArrayToObject(root, "catalog");
     AppendCatalogForProfile(catalog, st->profile);
@@ -397,6 +564,8 @@ const char* HandleKeymapProfileName(HandleProfile_t p) {
             return "led_demo";
         case HANDLE_PROFILE_GIMBAL:
             return "gimbal";
+        case HANDLE_PROFILE_MOTOR:
+            return "motor";
         case HANDLE_PROFILE_DOG:
             return "dog";
         case HANDLE_PROFILE_OFF:
@@ -416,6 +585,10 @@ bool HandleKeymapParseProfile(const char* s, HandleProfile_t* out) {
     }
     if (strcmp(s, "gimbal") == 0) {
         *out = HANDLE_PROFILE_GIMBAL;
+        return true;
+    }
+    if (strcmp(s, "motor") == 0) {
+        *out = HANDLE_PROFILE_MOTOR;
         return true;
     }
     if (strcmp(s, "dog") == 0) {
@@ -461,6 +634,20 @@ const char* HandleKeymapActionName(HandleActionId_t id) {
             return "gimbal.tilt_speed_up";
         case HK_ACT_GIMBAL_TILT_SPEED_DOWN:
             return "gimbal.tilt_speed_down";
+        case HK_ACT_MOTOR_ENABLE:
+            return "motor.enable";
+        case HK_ACT_MOTOR_DISABLE:
+            return "motor.disable";
+        case HK_ACT_MOTOR_POS_ZERO:
+            return "motor.pos_zero";
+        case HK_ACT_MOTOR_NUDGE_POS:
+            return "motor.nudge_pos";
+        case HK_ACT_MOTOR_NUDGE_NEG:
+            return "motor.nudge_neg";
+        case HK_ACT_MOTOR_POS_NORM:
+            return "motor.pos_norm";
+        case HK_ACT_MOTOR_VEL_NORM:
+            return "motor.vel_norm";
         default:
             return "none";
     }
@@ -521,6 +708,38 @@ bool HandleKeymapParseKey(const char* s, HandleKeyIndex_t* out) {
     for (int i = 0; i < HANDLE_KEY_COUNT; ++i) {
         if (strcmp(s, HandleKeymapKeyName(static_cast<HandleKeyIndex_t>(i))) == 0) {
             *out = static_cast<HandleKeyIndex_t>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+const char* HandleKeymapAxisName(HandleAxisIndex_t a) {
+    switch (a) {
+        case HANDLE_AXIS_LX:
+            return "lx";
+        case HANDLE_AXIS_LY:
+            return "ly";
+        case HANDLE_AXIS_RX:
+            return "rx";
+        case HANDLE_AXIS_RY:
+            return "ry";
+        case HANDLE_AXIS_L2:
+            return "l2";
+        case HANDLE_AXIS_R2:
+            return "r2";
+        default:
+            return "";
+    }
+}
+
+bool HandleKeymapParseAxis(const char* s, HandleAxisIndex_t* out) {
+    if (!s || !out) {
+        return false;
+    }
+    for (int i = 0; i < HANDLE_AXIS_COUNT; ++i) {
+        if (strcmp(s, HandleKeymapAxisName(static_cast<HandleAxisIndex_t>(i))) == 0) {
+            *out = static_cast<HandleAxisIndex_t>(i);
             return true;
         }
     }

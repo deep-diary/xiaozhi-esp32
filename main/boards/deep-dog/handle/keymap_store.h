@@ -13,6 +13,7 @@ extern "C" {
 typedef enum {
     HANDLE_PROFILE_LED_DEMO = 0,
     HANDLE_PROFILE_GIMBAL,
+    HANDLE_PROFILE_MOTOR,
     HANDLE_PROFILE_DOG,
     HANDLE_PROFILE_OFF,
 } HandleProfile_t;
@@ -36,6 +37,17 @@ typedef enum {
     HANDLE_KEY_COUNT
 } HandleKeyIndex_t;
 
+/** 可绑定轴（I08b） */
+typedef enum {
+    HANDLE_AXIS_LX = 0,
+    HANDLE_AXIS_LY,
+    HANDLE_AXIS_RX,
+    HANDLE_AXIS_RY,
+    HANDLE_AXIS_L2,
+    HANDLE_AXIS_R2,
+    HANDLE_AXIS_COUNT
+} HandleAxisIndex_t;
+
 /** Catalog action ids (stored as small ints) */
 typedef enum {
     HK_ACT_NONE = 0,
@@ -53,12 +65,20 @@ typedef enum {
     HK_ACT_GIMBAL_PAN_SPEED_DOWN,
     HK_ACT_GIMBAL_TILT_SPEED_UP,
     HK_ACT_GIMBAL_TILT_SPEED_DOWN,
+    HK_ACT_MOTOR_ENABLE,
+    HK_ACT_MOTOR_DISABLE,
+    HK_ACT_MOTOR_POS_ZERO,
+    HK_ACT_MOTOR_NUDGE_POS,
+    HK_ACT_MOTOR_NUDGE_NEG,
+    HK_ACT_MOTOR_POS_NORM,
+    HK_ACT_MOTOR_VEL_NORM,
     HK_ACT_COUNT
 } HandleActionId_t;
 
 typedef struct {
     HandleActionId_t id;
     uint8_t r, g, b, brightness;
+    uint8_t motor_id; /* 0 → default 1 */
 } HandleActionBinding_t;
 
 typedef struct {
@@ -67,29 +87,31 @@ typedef struct {
 } HandleKeyBinding_t;
 
 typedef struct {
+    HandleActionId_t id;
+    uint8_t motor_id; /* 0 → default 1 */
+    float scale;      /* default 1 */
+    float deadzone;   /* 0 → use firmware default */
+} HandleAxisBinding_t;
+
+typedef struct {
     int schema_ver;
     HandleProfile_t profile;
     bool persist;
     const char* source;  // "nvs" | "default" | "mqtt"
     bool ok;
     HandleKeyBinding_t keys[HANDLE_KEY_COUNT];
+    HandleAxisBinding_t axes[HANDLE_AXIS_COUNT];
 } HandleKeymapState_t;
 
 void HandleKeymapInit(void);
 const HandleKeymapState_t* HandleKeymapGet(void);
 HandleProfile_t HandleKeymapProfile(void);
 
-/**
- * 切换 App 剖面：始终加载该应用默认绑定表（覆盖当前表）。
- * persist=true 时写入 NVS。
- */
 bool HandleKeymapSetProfile(HandleProfile_t profile, bool persist);
-/** 恢复当前 profile 的出厂默认绑定（不改 profile） */
 bool HandleKeymapReset(bool persist);
-/** merge bindings from JSON object; returns false if parse failed hard */
-bool HandleKeymapSetFromJson(const cJSON* bindings, bool merge, bool persist);
+/** merge discrete + optional axis bindings from JSON objects */
+bool HandleKeymapSetFromJson(const cJSON* bindings, const cJSON* axis_bindings, bool merge, bool persist);
 
-/** Build handle/keymap JSON object (caller cJSON_Delete)；catalog 按当前 profile 过滤 */
 cJSON* HandleKeymapBuildJson(void);
 
 const char* HandleKeymapProfileName(HandleProfile_t p);
@@ -98,8 +120,9 @@ const char* HandleKeymapActionName(HandleActionId_t id);
 bool HandleKeymapParseAction(const char* s, HandleActionId_t* out);
 const char* HandleKeymapKeyName(HandleKeyIndex_t k);
 bool HandleKeymapParseKey(const char* s, HandleKeyIndex_t* out);
+const char* HandleKeymapAxisName(HandleAxisIndex_t a);
+bool HandleKeymapParseAxis(const char* s, HandleAxisIndex_t* out);
 
-/** action 是否属于给定 profile 的 catalog（none 始终 true） */
 bool HandleKeymapActionInProfile(HandleActionId_t id, HandleProfile_t profile);
 
 #ifdef __cplusplus
