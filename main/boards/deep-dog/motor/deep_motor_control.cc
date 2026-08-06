@@ -7,6 +7,8 @@
 #include "motor_config.h"
 #include "config.h"
 #include <esp_log.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define TAG "DeepMotorControl"
 
@@ -639,8 +641,12 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
             ESP_LOGW(TAG, "电机ID %d 未注册", motor_id);
             return std::string("电机ID " + std::to_string(motor_id) + " 未注册");
         }
+
+        const uint8_t mid = static_cast<uint8_t>(motor_id);
+        (void)deep_motor->requestMotorSoftwareVersion(mid);
+        vTaskDelay(pdMS_TO_TICKS(80));
         
-        char version[16]; // 版本号缓冲区
+        char version[16];
         if (deep_motor->getMotorSoftwareVersion(motor_id, version, sizeof(version))) {
             std::string result = "电机ID " + std::to_string(motor_id) + " 软件版本: " + std::string(version);
             ESP_LOGI(TAG, "获取电机ID %d 软件版本成功: %s", motor_id, version);

@@ -465,6 +465,7 @@ public:
      * @return true 成功, false 失败（电机未注册）
      */
     bool getMotorSoftwareVersion(uint8_t motor_id, char* version, size_t buffer_size) const;
+    bool requestMotorSoftwareVersion(uint8_t motor_id);
 
     MotorInitState getMotorInitState(uint8_t motor_id) const;
     bool isMotorReady(uint8_t motor_id) const;

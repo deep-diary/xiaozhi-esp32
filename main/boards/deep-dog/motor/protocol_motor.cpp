@@ -5,26 +5,45 @@
 #include "protocol_motor.h"
 #include "motor_config.h"
 #include <esp_log.h>
+#include <cstdio>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 static const char* TAG = "MotorProtocol";
 
-// 将软件版本号转为字符串格式（假设前4字节为ASCII码，后4字节为日期，最后1字节为版本号）
+// EL05 版本应答：data[3..6] 大端四段；亦兼容 8 字节 ASCII 旧格式
 static inline void RX_DATA_DISASSEMBLE_VERSION_STR(const uint8_t data[8], char* out_str, size_t out_len) {
-    // 例子：0x32 0x30 0x32 0x35 0x31 0x30 0x30 0x30 0x07
-    // 前4字节为ASCII码，后4字节为日期，最后1字节为版本号
-    // 例如："20251007"
-    if (out_len < 9) { // 8位数字+1终止符
-        if (out_len > 0) out_str[0] = '\0';
+    if (out_str == nullptr || out_len == 0) {
         return;
     }
-    // 假设data[0]~data[3]为年份，data[4]~data[7]为日期
-    // 但实际例子是8字节数字字符串
+    if (data[0] == 0x00 && data[1] == 0xC4 && data[2] == 0x56) {
+        snprintf(out_str, out_len, "%u.%u.%u.%u",
+                 (unsigned)data[3], (unsigned)data[4], (unsigned)data[5], (unsigned)data[6]);
+        return;
+    }
+    if (out_len < 9) {
+        out_str[0] = '\0';
+        return;
+    }
     for (int i = 0; i < 8; ++i) {
         out_str[i] = (char)data[i];
     }
     out_str[8] = '\0';
+}
+
+static inline void parseMotorIdFieldsFromCanId(const CanFrame& can_frame, motor_status_t* status) {
+    if (status == nullptr) {
+        return;
+    }
+    status->master_id = RX_29ID_DISASSEMBLE_MASTER_ID(can_frame.identifier);
+    status->motor_id = RX_29ID_DISASSEMBLE_MOTOR_ID(can_frame.identifier);
+    status->error_status = RX_29ID_DISASSEMBLE_ERR_STA(can_frame.identifier);
+    status->hall_error = RX_29ID_DISASSEMBLE_HALL_ERR(can_frame.identifier);
+    status->magnet_error = RX_29ID_DISASSEMBLE_MAGNET_ERR(can_frame.identifier);
+    status->temp_error = RX_29ID_DISASSEMBLE_TEMP_ERR(can_frame.identifier);
+    status->current_error = RX_29ID_DISASSEMBLE_CURRENT_ERR(can_frame.identifier);
+    status->voltage_error = RX_29ID_DISASSEMBLE_VOLTAGE_ERR(can_frame.identifier);
+    status->mode_status = (motor_mode_t)RX_29ID_DISASSEMBLE_MODE_STA(can_frame.identifier);
 }
 
 
@@ -422,15 +441,12 @@ void MotorProtocol::parseFeedbackPayload(const CanFrame& can_frame, motor_status
     if (status == nullptr) {
         return;
     }
-    status->master_id = RX_29ID_DISASSEMBLE_MASTER_ID(can_frame.identifier);
-    status->motor_id = RX_29ID_DISASSEMBLE_MOTOR_ID(can_frame.identifier);
-    status->error_status = RX_29ID_DISASSEMBLE_ERR_STA(can_frame.identifier);
-    status->hall_error = RX_29ID_DISASSEMBLE_HALL_ERR(can_frame.identifier);
-    status->magnet_error = RX_29ID_DISASSEMBLE_MAGNET_ERR(can_frame.identifier);
-    status->temp_error = RX_29ID_DISASSEMBLE_TEMP_ERR(can_frame.identifier);
-    status->current_error = RX_29ID_DISASSEMBLE_CURRENT_ERR(can_frame.identifier);
-    status->voltage_error = RX_29ID_DISASSEMBLE_VOLTAGE_ERR(can_frame.identifier);
-    status->mode_status = (motor_mode_t)RX_29ID_DISASSEMBLE_MODE_STA(can_frame.identifier);
+    if (isSoftwareVersionResponse(can_frame)) {
+        parseMotorIdFieldsFromCanId(can_frame, status);
+        RX_DATA_DISASSEMBLE_VERSION_STR(can_frame.data, status->version, sizeof(status->version));
+        return;
+    }
+    parseMotorIdFieldsFromCanId(can_frame, status);
 
     const uint16_t raw_a = RX_DATA_DISASSEMBLE_CUR_ANGLE(can_frame.data);
     const uint16_t raw_s = RX_DATA_DISASSEMBLE_CUR_SPEED(can_frame.data);
@@ -482,18 +498,16 @@ void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* st
     switch (cmd_type) {
         case MOTOR_CMD_FEEDBACK:
         case MOTOR_CMD_ACTIVE_REPORT:
+            if (isSoftwareVersionResponse(can_frame)) {
+                parseMotorIdFieldsFromCanId(can_frame, status);
+                RX_DATA_DISASSEMBLE_VERSION_STR(can_frame.data, status->version, sizeof(status->version));
+                ESP_LOGI(TAG, "电机%d 软件版本(EL05): %s", status->motor_id, status->version);
+                break;
+            }
             parseFeedbackPayload(can_frame, status);
             break;
         case MOTOR_CMD_VERSION:
-            status->master_id = RX_29ID_DISASSEMBLE_MASTER_ID(can_frame.identifier);
-            status->motor_id = RX_29ID_DISASSEMBLE_MOTOR_ID(can_frame.identifier);
-            status->error_status = RX_29ID_DISASSEMBLE_ERR_STA(can_frame.identifier);
-            status->hall_error = RX_29ID_DISASSEMBLE_HALL_ERR(can_frame.identifier);
-            status->magnet_error = RX_29ID_DISASSEMBLE_MAGNET_ERR(can_frame.identifier);
-            status->temp_error = RX_29ID_DISASSEMBLE_TEMP_ERR(can_frame.identifier);
-            status->current_error = RX_29ID_DISASSEMBLE_CURRENT_ERR(can_frame.identifier);
-            status->voltage_error = RX_29ID_DISASSEMBLE_VOLTAGE_ERR(can_frame.identifier);
-            status->mode_status = (motor_mode_t)RX_29ID_DISASSEMBLE_MODE_STA(can_frame.identifier);
+            parseMotorIdFieldsFromCanId(can_frame, status);
             RX_DATA_DISASSEMBLE_VERSION_STR(can_frame.data, status->version, sizeof(status->version));
             ESP_LOGI(TAG, "电机%d软件版本原始数据: %02X %02X %02X %02X %02X %02X %02X %02X", 
                      status->motor_id,
@@ -504,6 +518,26 @@ void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* st
         default:
             break;
     }
+}
+
+bool MotorProtocol::requestSoftwareVersion(uint8_t motor_id) {
+    if (motor_id == 0 || motor_id > 127) {
+        return false;
+    }
+    CanFrame frame {};
+    memset(&frame, 0, sizeof(frame));
+    frame.identifier = buildCanId(motor_id, MOTOR_CMD_RESET);
+    frame.extd = 1;
+    frame.data_length_code = 8;
+    frame.data[0] = 0x00;
+    frame.data[1] = 0xC4;
+    return sendCanFrame(frame);
+}
+
+bool MotorProtocol::isSoftwareVersionResponse(const CanFrame& can_frame) {
+    const uint8_t cmd_type = RX_29ID_DISASSEMBLE_CMD_TYPE(can_frame.identifier);
+    return (cmd_type == MOTOR_CMD_FEEDBACK || cmd_type == MOTOR_CMD_ACTIVE_REPORT) &&
+           can_frame.data[0] == 0x00 && can_frame.data[1] == 0xC4 && can_frame.data[2] == 0x56;
 }
 
 bool MotorProtocol::sendGetDeviceIdProbe(uint8_t motor_id) {

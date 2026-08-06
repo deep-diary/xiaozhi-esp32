@@ -2,6 +2,11 @@
 
 #include <string>
 
+#include "config.h"
+#if DEEP_DOG_MOTOR_ENABLE
+#include "motor/protocol_motor.h"
+#endif
+
 class DeepDogMqttClient;
 class DeepMotor;
 
@@ -20,6 +25,8 @@ public:
     void OnMessage(const std::string& topic, const std::string& payload);
 
     bool PublishStatus(bool force = true);
+
+    static void OnMotorDiscovered(uint8_t motor_id, const motor_status_t& status, void* user_data);
 
 private:
     static void StatusTimerCb(void* arg);

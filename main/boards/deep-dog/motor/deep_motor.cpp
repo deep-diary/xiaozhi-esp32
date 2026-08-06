@@ -91,7 +91,8 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
         ESP_LOGI(TAG, "LED功能未启用（led_strip为nullptr）");
     }
     
-    ESP_LOGI(TAG, "深度电机管理器初始化完成，最大支持 %d 个电机", MAX_MOTOR_COUNT);
+    ESP_LOGI(TAG, "深度电机管理器初始化完成，最大支持 %d 个电机；init_async=%d",
+             MAX_MOTOR_COUNT, DEEP_DOG_MOTOR_INIT_ASYNC);
 }
 
 DeepMotor::~DeepMotor() {
@@ -209,28 +210,31 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
     // 解析电机状态数据
     MotorProtocol::parseMotorData(can_frame, &motor_statuses_[motor_index]);
 
-    // 状态帧（类型 2 / 24）更新反馈计数与 LED 等
+    // 状态帧（类型 2 / 24）更新反馈计数与 LED 等（版本应答 00 C4 56 除外）
     const bool is_status_frame =
-        (cmd_type == MOTOR_CMD_FEEDBACK || cmd_type == MOTOR_CMD_ACTIVE_REPORT);
+        (cmd_type == MOTOR_CMD_FEEDBACK || cmd_type == MOTOR_CMD_ACTIVE_REPORT) &&
+        !MotorProtocol::isSoftwareVersionResponse(can_frame);
     if (is_status_frame) {
         motor_statuses_[motor_index].has_feedback = true;
         motor_statuses_[motor_index].feedback_seq++;
 
-        // 扭矩观测/碰撞保护：仅在初始化成功后启用，避免把 set_zero 前的脏反馈计入峰值
-        if (torque_observe_enabled_[motor_index]) {
+        // 历史最大 |扭矩|：始终记录（供上位机显示）；碰撞保护仍仅在 init ready 后启用
+        {
             const float abs_t = fabsf(motor_statuses_[motor_index].current_torque);
-            if (abs_t > motor_statuses_[motor_index].max_abs_torque + DEEP_DOG_TORQUE_MAX_LOG_DELTA_NM) {
-                motor_statuses_[motor_index].max_abs_torque = abs_t;
+            if (torque_observe_enabled_[motor_index] &&
+                abs_t > motor_statuses_[motor_index].max_abs_torque + DEEP_DOG_TORQUE_MAX_LOG_DELTA_NM) {
                 ESP_LOGW(TAG, "电机%u 观测到更大 |扭矩|=%.3f N·m (limit=%.2f，0=仅观测)",
                          (unsigned)motor_id, (double)abs_t, (double)DEEP_DOG_TORQUE_LIMIT_NM);
-            } else if (abs_t > motor_statuses_[motor_index].max_abs_torque) {
+            }
+            if (abs_t > motor_statuses_[motor_index].max_abs_torque) {
                 motor_statuses_[motor_index].max_abs_torque = abs_t;
             }
-
-            if (DEEP_DOG_TORQUE_LIMIT_NM > 0.0f && abs_t > DEEP_DOG_TORQUE_LIMIT_NM) {
+            if (torque_observe_enabled_[motor_index] &&
+                DEEP_DOG_TORQUE_LIMIT_NM > 0.0f && abs_t > DEEP_DOG_TORQUE_LIMIT_NM) {
                 if (!motor_statuses_[motor_index].collision) {
                     motor_statuses_[motor_index].collision = true;
-                    ESP_LOGE(TAG, "电机%u 触发碰撞/堵转保护：|扭矩|=%.3f > limit=%.2f N·m，将拒绝后续下发并建议整机失能",
+                    ESP_LOGE(TAG,
+                             "电机%u 触发碰撞/堵转保护：|扭矩|=%.3f > limit=%.2f N·m，将拒绝后续下发并建议整机失能",
                              (unsigned)motor_id, (double)abs_t, (double)DEEP_DOG_TORQUE_LIMIT_NM);
                 }
             }
@@ -960,12 +964,23 @@ bool DeepMotor::getMotorSoftwareVersion(uint8_t motor_id, char* version, size_t 
         return false;
     }
     
-    // 复制版本号字符串
+    if (motor_statuses_[motor_index].version[0] == '\0') {
+        return false;
+    }
+
     strncpy(version, motor_statuses_[motor_index].version, buffer_size - 1);
-    version[buffer_size - 1] = '\0'; // 确保字符串以null结尾
+    version[buffer_size - 1] = '\0';
     
     ESP_LOGI(TAG, "电机ID %d 软件版本: %s", motor_id, version);
     return true;
+}
+
+bool DeepMotor::requestMotorSoftwareVersion(uint8_t motor_id) {
+    if (!isMotorRegistered(motor_id)) {
+        ESP_LOGW(TAG, "requestMotorSoftwareVersion: 电机 %u 未注册", (unsigned)motor_id);
+        return false;
+    }
+    return MotorProtocol::requestSoftwareVersion(motor_id);
 }
 
 const char* DeepMotor::initStateToString(MotorInitState state) {

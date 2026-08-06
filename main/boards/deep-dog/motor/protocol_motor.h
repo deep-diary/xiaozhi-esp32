@@ -138,7 +138,7 @@ typedef struct {
     /** 碰撞/堵转保护标志：一旦置位，发送侧应拒绝下发并停扭保护（latch，需重新 init/清除） */
     bool collision;
     float current_temp;        // 当前温度 (°C)
-    char version[9];          // 软件版本号
+    char version[16];          // 软件版本号（EL05：四段或 8 字节 ASCII）
     /** 是否已收到通信类型 0 应答（获取设备 ID） */
     bool has_device_id;
     /** 64 位 MCU 唯一标识符（通信类型 0 应答 data 区，大端序） */
@@ -323,6 +323,14 @@ public:
      * @return true 发送成功
      */
     static bool sendGetDeviceIdProbe(uint8_t motor_id);
+
+    /**
+     * @brief 通信类型 4 + data 00 C4：读取软件版本（应答为类型 2，data 00 C4 56 + 版本号）
+     */
+    static bool requestSoftwareVersion(uint8_t motor_id);
+
+    /** 是否为 EL05 软件版本应答帧（类型 2/24，data 以 00 C4 56 开头） */
+    static bool isSoftwareVersionResponse(const CanFrame& can_frame);
 
     /**
      * @brief 批量发送通信类型 0 探测帧，只发不等；应答由 CanRxTask 统一收帧解析。

@@ -63,6 +63,15 @@
 | `motors[].temperature` | float | 可选 |
 | `motors[].fault` | bool | 可选 |
 | `motors[].target_rad` | float | 可选软件目标 |
+| `motors[].max_abs_torque` | float | 历史最大 \|扭矩\|（N·m） |
+| `motors[].has_device_id` | bool | 是否已收到通信类型 0 应答 |
+| `motors[].mcu_uid_hex` | string | 16 位十六进制 MCU UID |
+| `motors[].version` | string | EL05 软件版本（扫描后自动查询） |
+| `motors[].has_feedback` | bool | 是否收到过反馈帧 |
+| `motors[].feedback_seq` | int | 反馈帧计数 |
+| `motors[].mode_status` | string | `reset` / `calibrate` / `run` |
+| `motors[].master_id` | int | 主站 CAN ID |
+| `motors[].collision` | bool | 堵转/碰撞 latch |
 | `ts` | int | Unix 秒 |
 
 以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。

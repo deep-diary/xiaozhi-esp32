@@ -54,6 +54,49 @@ const char* InitStateStr(MotorInitState st) {
     }
 }
 
+const char* ModeStatusStr(motor_mode_t mode) {
+    switch (mode) {
+        case MOTOR_MODE_RESET:
+            return "reset";
+        case MOTOR_MODE_CALIBRATE:
+            return "calibrate";
+        case MOTOR_MODE_RUN:
+            return "run";
+        default:
+            return "unknown";
+    }
+}
+
+void AppendMotorStatusFields(cJSON* m, const motor_status_t& st) {
+    cJSON_AddNumberToObject(m, "position_rad", st.current_angle);
+    cJSON_AddNumberToObject(m, "speed_rad_s", st.current_speed);
+    cJSON_AddNumberToObject(m, "torque_nm", st.current_torque);
+    cJSON_AddNumberToObject(m, "temperature", st.current_temp);
+    cJSON_AddNumberToObject(m, "max_abs_torque", st.max_abs_torque);
+    cJSON_AddBoolToObject(m, "fault", st.error_status != 0);
+    cJSON_AddNumberToObject(m, "error_status", st.error_status);
+    cJSON_AddBoolToObject(m, "hall_error", st.hall_error != 0);
+    cJSON_AddBoolToObject(m, "magnet_error", st.magnet_error != 0);
+    cJSON_AddBoolToObject(m, "temp_error", st.temp_error != 0);
+    cJSON_AddBoolToObject(m, "current_error", st.current_error != 0);
+    cJSON_AddBoolToObject(m, "voltage_error", st.voltage_error != 0);
+    cJSON_AddBoolToObject(m, "collision", st.collision);
+    cJSON_AddBoolToObject(m, "has_feedback", st.has_feedback);
+    cJSON_AddNumberToObject(m, "feedback_seq", static_cast<double>(st.feedback_seq));
+    cJSON_AddNumberToObject(m, "master_id", st.master_id);
+    cJSON_AddStringToObject(m, "mode_status", ModeStatusStr(st.mode_status));
+    cJSON_AddBoolToObject(m, "has_device_id", st.has_device_id);
+    if (st.has_device_id) {
+        char uid_hex[17];
+        snprintf(uid_hex, sizeof(uid_hex), "%016llX", static_cast<unsigned long long>(st.mcu_uid));
+        cJSON_AddStringToObject(m, "mcu_uid_hex", uid_hex);
+        cJSON_AddStringToObject(m, "mcu_uid", uid_hex);
+    }
+    if (st.version[0] != '\0') {
+        cJSON_AddStringToObject(m, "version", st.version);
+    }
+}
+
 void EnsureMotorRegistered(DeepMotor* motor, uint8_t motor_id) {
     if (!motor->isMotorRegistered(motor_id)) {
         (void)motor->registerMotor(motor_id);
@@ -91,9 +134,30 @@ DeepDogMotorMqtt::~DeepDogMotorMqtt() {
 
 void DeepDogMotorMqtt::SetMotor(DeepMotor* motor) {
 #if DEEP_DOG_MOTOR_ENABLE
+    if (motor_ && motor_ != motor) {
+        motor_->setMotorDiscoveryCallback(nullptr, nullptr);
+    }
     motor_ = motor;
+    if (motor_) {
+        motor_->setMotorDiscoveryCallback(&DeepDogMotorMqtt::OnMotorDiscovered, this);
+    }
 #else
     (void)motor;
+#endif
+}
+
+void DeepDogMotorMqtt::OnMotorDiscovered(uint8_t motor_id, const motor_status_t& status, void* user_data) {
+    (void)status;
+#if DEEP_DOG_MOTOR_ENABLE
+    auto* self = static_cast<DeepDogMotorMqtt*>(user_data);
+    (void)MotorProtocol::requestSoftwareVersion(motor_id);
+    ESP_LOGI(TAG, "扫描发现电机 %u，已请求软件版本", (unsigned)motor_id);
+    if (self) {
+        self->PublishStatus(true);
+    }
+#else
+    (void)motor_id;
+    (void)user_data;
 #endif
 }
 
@@ -186,11 +250,7 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
             cJSON* m = cJSON_CreateObject();
             cJSON_AddNumberToObject(m, "id", mid);
             cJSON_AddStringToObject(m, "init_state", InitStateStr(motor->getMotorInitState(mid)));
-            cJSON_AddNumberToObject(m, "position_rad", st.current_angle);
-            cJSON_AddNumberToObject(m, "speed_rad_s", st.current_speed);
-            cJSON_AddNumberToObject(m, "torque_nm", st.current_torque);
-            cJSON_AddNumberToObject(m, "temperature", st.current_temp);
-            cJSON_AddBoolToObject(m, "fault", st.error_status != 0);
+            AppendMotorStatusFields(m, st);
             float target = 0.f;
             if (motor->getMotorTargetAngle(mid, &target)) {
                 cJSON_AddNumberToObject(m, "target_rad", target);
