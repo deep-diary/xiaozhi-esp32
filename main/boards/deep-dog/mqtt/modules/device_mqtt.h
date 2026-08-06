@@ -19,6 +19,7 @@ struct DeepDogCapabilities {
     bool can = false;
     bool arm = false;
     bool uart = false;
+    bool ws_mcp = false;
 };
 
 /** device/info（retain）+ device/status 心跳 */
@@ -29,6 +30,7 @@ public:
 
     void SetCapabilities(const DeepDogCapabilities& caps) { caps_ = caps; }
     void SetHttpPort(int port) { http_port_ = port; }
+    void SetWsMcpEndpoint(int port, const char* path);
     const DeepDogCapabilities& capabilities() const { return caps_; }
 
     void OnConnected();
@@ -45,4 +47,6 @@ private:
     DeepDogCapabilities caps_{};
     esp_timer_handle_t status_timer_ = nullptr;
     int http_port_ = 8080;
+    int ws_mcp_port_ = 0;
+    const char* ws_mcp_path_ = "/ws";
 };

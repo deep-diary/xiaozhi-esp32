@@ -20,6 +20,7 @@ Deep-Dog **单电机调试与 CAN 总线**需求入口。四足整机运控仍�
 | [05-analog-axis-sample](./05-analog-axis-sample.md) | 轴归一化样例；框架权威在 I08b |
 | [06-bus-scan-get-device-id](./06-bus-scan-get-device-id.md) | 通信类型 0 总线扫描（异步发现 + mcu_uid） |
 | [07-active-report-frame](./07-active-report-frame.md) | 通信类型 24 主动上报开关与 RX 解析 |
+| [08-local-websocket-mcp-bridge](./08-local-websocket-mcp-bridge.md) | 本地 WS→MCP 与 MQTT 并存评估 |
 | [VERIFY](./VERIFY.md) | 实机验收清单 |
 
 ## 边界

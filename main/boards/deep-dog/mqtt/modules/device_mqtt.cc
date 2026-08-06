@@ -113,6 +113,11 @@ void DeepDogDeviceMqtt::StatusTimerCb(void* arg) {
     }
 }
 
+void DeepDogDeviceMqtt::SetWsMcpEndpoint(int port, const char* path) {
+    ws_mcp_port_ = port;
+    ws_mcp_path_ = (path && path[0]) ? path : "/ws";
+}
+
 void DeepDogDeviceMqtt::OnConnected() {
     PublishInfo();
     PublishStatus();
@@ -155,6 +160,10 @@ bool DeepDogDeviceMqtt::PublishInfo() {
         cJSON_AddStringToObject(root, "ip", ip.c_str());
     }
     cJSON_AddNumberToObject(root, "http_port", http_port_);
+    if (ws_mcp_port_ > 0) {
+        cJSON_AddNumberToObject(root, "ws_mcp_port", ws_mcp_port_);
+        cJSON_AddStringToObject(root, "ws_mcp_path", ws_mcp_path_);
+    }
     cJSON_AddStringToObject(root, "reset_reason", ResetReasonString());
 
     cJSON* power = cJSON_AddObjectToObject(root, "power");
@@ -180,6 +189,7 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     cJSON_AddBoolToObject(caps, "can", caps_.can);
     cJSON_AddBoolToObject(caps, "arm", caps_.arm);
     cJSON_AddBoolToObject(caps, "uart", caps_.uart);
+    cJSON_AddBoolToObject(caps, "ws_mcp", caps_.ws_mcp);
     const int64_t ts = UnixTs();
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", IsoTs(ts).c_str());

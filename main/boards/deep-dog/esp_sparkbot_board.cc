@@ -119,6 +119,10 @@
 #include "dog/dog_control.h"
 #endif
 #endif
+#if DEEP_DOG_WS_MCP_ENABLE
+#include "ws-mcp/ws_mcp_config.h"
+#include "ws-mcp/deep_dog_ws_mcp_server.h"
+#endif
 #if DEEP_DOG_VISION_HUB_ENABLE
 #include "vision/vision_frame_hub.h"
 #endif
@@ -277,6 +281,9 @@ private:
 #endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE
     std::unique_ptr<DeepDogHttpServer> http_server_;
+#endif
+#if DEEP_DOG_WS_MCP_ENABLE
+    std::unique_ptr<DeepDogWsMcpServer> ws_mcp_server_;
 #endif
 #if DEEP_DOG_MQTT_ENABLE
     std::unique_ptr<DeepDogMqtt> board_mqtt_;
@@ -730,6 +737,27 @@ private:
 #endif
     }
 
+#if DEEP_DOG_WS_MCP_ENABLE
+    void InitializeWsMcpServer() {
+        ws_mcp_server_ = std::make_unique<DeepDogWsMcpServer>();
+        if (!ws_mcp_server_->Start(DEEP_DOG_WS_MCP_PORT)) {
+            ESP_LOGW(TAG, "WS MCP 服务启动失败（检查端口 %d）", DEEP_DOG_WS_MCP_PORT);
+            ws_mcp_server_.reset();
+            return;
+        }
+        Application::GetInstance().RegisterMcpBroadcastCallback([this](const std::string& payload) {
+            if (ws_mcp_server_) {
+                ws_mcp_server_->BroadcastMessage(payload);
+            }
+        });
+#if DEEP_DOG_MQTT_ENABLE
+        if (board_mqtt_) {
+            board_mqtt_->SetWsMcpEndpoint(DEEP_DOG_WS_MCP_PORT, DEEP_DOG_WS_MCP_PATH);
+        }
+#endif
+    }
+#endif
+
 public:
     DeepDog() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
@@ -870,6 +898,9 @@ public:
                 ESP_LOGW(TAG, "HTTP 控制/MJPEG 服务启动失败（可检查端口占用）");
             }
         }
+#endif
+#if DEEP_DOG_WS_MCP_ENABLE
+        InitializeWsMcpServer();
 #endif
 #if DEEP_DOG_MQTT_ENABLE
         if (board_mqtt_ && !board_mqtt_->IsRunning()) {

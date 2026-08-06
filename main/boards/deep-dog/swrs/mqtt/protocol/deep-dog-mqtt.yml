@@ -998,6 +998,8 @@ topics:
           kp: { type: float, optional: true }
           kd: { type: float, optional: true }
           torque_ff: { type: float, optional: true }
+      set_zero: { type: bool, optional: true }
+      teaching: { type: string, optional: true, note: "start|stop|play" }
       ts: { type: int, optional: true }
 
   motor/status:
@@ -1005,19 +1007,34 @@ topics:
     dir: uplink
     qos: 0
     retain: true
-    note: "Registered motors feedback snapshot"
+    note: "Registered motors full motor_status_t snapshot"
     payload:
       ok: { type: bool }
       motors:
         type: array
         item:
           id: { type: int }
+          master_id: { type: int, optional: true }
           position_rad: { type: float }
           speed_rad_s: { type: float }
           torque_nm: { type: float }
           temperature: { type: float, optional: true }
           fault: { type: bool, optional: true }
+          error_status: { type: int, optional: true }
+          hall_error: { type: bool, optional: true }
+          magnet_error: { type: bool, optional: true }
+          temp_error: { type: bool, optional: true }
+          current_error: { type: bool, optional: true }
+          voltage_error: { type: bool, optional: true }
+          mode_status: { type: string, optional: true }
+          has_feedback: { type: bool, optional: true }
+          feedback_seq: { type: int, optional: true }
+          max_abs_torque: { type: float, optional: true }
+          collision: { type: bool, optional: true }
           target_rad: { type: float, optional: true }
+          has_device_id: { type: bool, optional: true }
+          mcu_uid: { type: string, optional: true }
+          version: { type: string, optional: true }
       ts: { type: int }
 
   # ---- reserved ----

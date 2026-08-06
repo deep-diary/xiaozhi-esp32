@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 
 #define TAG "dog_mqtt_motor"
@@ -37,6 +38,62 @@ float ClampPos(float v) {
     return v;
 #endif
 }
+
+#if DEEP_DOG_MOTOR_ENABLE
+const char* ModeStatusString(motor_mode_t mode) {
+    switch (mode) {
+        case MOTOR_MODE_RESET:
+            return "reset";
+        case MOTOR_MODE_CALIBRATE:
+            return "calibrate";
+        case MOTOR_MODE_RUN:
+            return "run";
+        default:
+            return "unknown";
+    }
+}
+
+cJSON* BuildMotorStatusJson(uint8_t mid, const motor_status_t& st, DeepMotor* motor) {
+    cJSON* m = cJSON_CreateObject();
+    if (!m) {
+        return nullptr;
+    }
+    cJSON_AddNumberToObject(m, "id", mid);
+    cJSON_AddNumberToObject(m, "master_id", st.master_id);
+    cJSON_AddNumberToObject(m, "position_rad", st.current_angle);
+    cJSON_AddNumberToObject(m, "speed_rad_s", st.current_speed);
+    cJSON_AddNumberToObject(m, "torque_nm", st.current_torque);
+    cJSON_AddNumberToObject(m, "temperature", st.current_temp);
+    cJSON_AddBoolToObject(m, "fault", st.error_status != 0);
+    cJSON_AddNumberToObject(m, "error_status", st.error_status);
+    cJSON_AddBoolToObject(m, "hall_error", st.hall_error != 0);
+    cJSON_AddBoolToObject(m, "magnet_error", st.magnet_error != 0);
+    cJSON_AddBoolToObject(m, "temp_error", st.temp_error != 0);
+    cJSON_AddBoolToObject(m, "current_error", st.current_error != 0);
+    cJSON_AddBoolToObject(m, "voltage_error", st.voltage_error != 0);
+    cJSON_AddStringToObject(m, "mode_status", ModeStatusString(st.mode_status));
+    cJSON_AddBoolToObject(m, "has_feedback", st.has_feedback);
+    cJSON_AddNumberToObject(m, "feedback_seq", static_cast<double>(st.feedback_seq));
+    cJSON_AddNumberToObject(m, "max_abs_torque", st.max_abs_torque);
+    cJSON_AddBoolToObject(m, "collision", st.collision);
+    cJSON_AddBoolToObject(m, "has_device_id", st.has_device_id);
+    if (motor) {
+        float target = 0.f;
+        if (motor->getMotorTargetAngle(mid, &target)) {
+            cJSON_AddNumberToObject(m, "target_rad", target);
+        }
+    }
+    if (st.has_device_id) {
+        char uid_hex[17];
+        snprintf(uid_hex, sizeof(uid_hex), "%016llX", (unsigned long long)st.mcu_uid);
+        cJSON_AddStringToObject(m, "mcu_uid", uid_hex);
+    }
+    if (st.version[0] != '\0') {
+        cJSON_AddStringToObject(m, "version", st.version);
+    }
+    return m;
+}
+#endif
 
 }  // namespace
 
@@ -105,22 +162,9 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
             if (!motor->getMotorStatus(mid, &st)) {
                 continue;
             }
-            cJSON* m = cJSON_CreateObject();
-            cJSON_AddNumberToObject(m, "id", mid);
-            cJSON_AddNumberToObject(m, "position_rad", st.current_angle);
-            cJSON_AddNumberToObject(m, "speed_rad_s", st.current_speed);
-            cJSON_AddNumberToObject(m, "torque_nm", st.current_torque);
-            cJSON_AddNumberToObject(m, "temperature", st.current_temp);
-            cJSON_AddBoolToObject(m, "fault", st.error_status != 0);
-            float target = 0.f;
-            if (motor->getMotorTargetAngle(mid, &target)) {
-                cJSON_AddNumberToObject(m, "target_rad", target);
-            }
-            if (st.has_device_id) {
-                char uid_hex[17];
-                snprintf(uid_hex, sizeof(uid_hex), "%016llX",
-                         (unsigned long long)st.mcu_uid);
-                cJSON_AddStringToObject(m, "mcu_uid", uid_hex);
+            cJSON* m = BuildMotorStatusJson(mid, st, motor);
+            if (!m) {
+                continue;
             }
             cJSON_AddItemToArray(arr, m);
         }
@@ -213,6 +257,22 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
         const float kd = cJSON_IsNumber(mkd) ? static_cast<float>(mkd->valuedouble) : 1.f;
         const float tau = cJSON_IsNumber(mt) ? static_cast<float>(mt->valuedouble) : 0.f;
         (void)motor->setMotorMitCommand(motor_id, p, v, kp, kd, tau);
+    }
+
+    const cJSON* set_zero = cJSON_GetObjectItem(root, "set_zero");
+    if (cJSON_IsTrue(set_zero)) {
+        (void)MotorProtocol::setMotorZero(motor_id);
+    }
+
+    const cJSON* teaching = cJSON_GetObjectItem(root, "teaching");
+    if (cJSON_IsString(teaching) && teaching->valuestring) {
+        if (strcmp(teaching->valuestring, "start") == 0) {
+            (void)motor->startTeaching(motor_id);
+        } else if (strcmp(teaching->valuestring, "stop") == 0) {
+            (void)motor->stopTeaching();
+        } else if (strcmp(teaching->valuestring, "play") == 0) {
+            (void)motor->executeTeaching(motor_id);
+        }
     }
 
     cJSON_Delete(root);

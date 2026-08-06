@@ -44,6 +44,8 @@
 | `speed_limit` | float | 否 | 限速 rad/s |
 | `iq_ref` | float | 否 | 电流环目标 |
 | `mit` | object | 否 | `{ position_rad, velocity_rad_s, kp, kd, torque_ff }` |
+| `set_zero` | bool | 否 | `true` → `MotorProtocol::setMotorZero` |
+| `teaching` | string | 否 | `"start"` / `"stop"` / `"play"`（示教录制） |
 | `ts` | int | 否 | Unix 秒 |
 
 ### `motor/status`
@@ -53,12 +55,27 @@
 | `ok` | bool | 栈就绪 |
 | `motors` | array | 已注册电机快照 |
 | `motors[].id` | int | motor_id |
+| `motors[].master_id` | int | 主站 ID |
 | `motors[].position_rad` | float | 实际角 |
 | `motors[].speed_rad_s` | float | 实际速 |
 | `motors[].torque_nm` | float | 实际矩 |
-| `motors[].temperature` | float | 可选 |
-| `motors[].fault` | bool | 可选 |
-| `motors[].target_rad` | float | 可选软件目标 |
+| `motors[].temperature` | float | 温度 °C |
+| `motors[].fault` | bool | `error_status != 0` |
+| `motors[].error_status` | int | 原始故障码 |
+| `motors[].hall_error` | bool | 霍尔故障 |
+| `motors[].magnet_error` | bool | 磁编故障 |
+| `motors[].temp_error` | bool | 过温 |
+| `motors[].current_error` | bool | 过流 |
+| `motors[].voltage_error` | bool | 过压/欠压 |
+| `motors[].mode_status` | string | `reset` / `calibrate` / `run` |
+| `motors[].has_feedback` | bool | 是否收到过反馈帧 |
+| `motors[].feedback_seq` | int | 反馈帧计数 |
+| `motors[].max_abs_torque` | float | 观测最大 \|扭矩\| |
+| `motors[].collision` | bool | 堵转/碰撞 latch |
+| `motors[].target_rad` | float | 可选软件目标角 |
+| `motors[].has_device_id` | bool | 是否已获取设备 ID |
+| `motors[].mcu_uid` | string | 16 位 hex（有 ID 时） |
+| `motors[].version` | string | 软件版本（非空时） |
 | `ts` | int | Unix 秒 |
 
 以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。

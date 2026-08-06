@@ -17,8 +17,11 @@
 
 | Topic | 方向 | 用途 |
 |-------|------|------|
-| `motor/status` | ↑ retain | 已注册电机角/速/矩/故障 |
-| `motor/cmd` | ↓ 稀疏 | enable / disable / reset / position / speed_limit / iq_ref / MIT |
+| `motor/status` | ↑ retain | 已注册电机 **完整** `motor_status_t` 快照（见 14-motor 字段表） |
+| `motor/cmd` | ↓ 稀疏 | enable / reset / position / speed_limit / iq_ref / MIT / set_zero / teaching |
+| `motor/scan` | ↓ | 异步总线 ID 扫描（见 MOT-06） |
+| `motor/scan_result` | ↑ | 扫描启动 / 发现事件 |
+| `motor/report_start` / `motor/report_stop` | ↓ | 主动上报 T24 开关（见 MOT-07） |
 
 位置量程：`P_MIN`～`P_MAX` = **±12.57 rad**（协议常量）。
 

@@ -156,6 +156,17 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         return std::string("获取电机ID " + std::to_string(motor_id) + " 状态失败");
     });
 
+    // CAN 总线电机 ID 扫描（通信类型 0，异步发现）
+    mcp_server.AddTool("self.motor.scan_bus", "扫描 CAN 总线电机 ID（通信类型 0 探测，异步注册）",
+                        PropertyList(), [deep_motor](const PropertyList&) -> ReturnValue {
+        if (!deep_motor) {
+            return std::string("DeepMotor 未初始化");
+        }
+        deep_motor->sendBusScanProbes();
+        ESP_LOGI(TAG, "已发送 ID 1–127 探测帧");
+        return std::string("已发送 ID 1–127 探测帧，应答由 CAN RX 异步注册");
+    });
+
     // 获取所有已注册电机ID工具
     // mcp_server.AddTool("self.motor.list", "获取所有已注册电机ID", PropertyList(), [deep_motor](const PropertyList&) -> ReturnValue {
     //     if (!deep_motor) {

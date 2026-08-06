@@ -59,6 +59,8 @@ struct DeepDogMqtt::Impl {
     DeepDogImuSwitch* imu_switch = nullptr;
 #endif
     int http_port = DEEP_DOG_HTTP_SERVER_PORT;
+    int ws_mcp_port = 0;
+    const char* ws_mcp_path = "/ws";
     bool started = false;
 
     void OnConnection(bool connected);
@@ -138,6 +140,14 @@ void DeepDogMqtt::SetHttpPort(int port) {
     if (impl_) {
         impl_->http_port = port;
         impl_->device.SetHttpPort(port);
+    }
+}
+
+void DeepDogMqtt::SetWsMcpEndpoint(int port, const char* path) {
+    if (impl_) {
+        impl_->ws_mcp_port = port;
+        impl_->ws_mcp_path = path;
+        impl_->device.SetWsMcpEndpoint(port, path);
     }
 }
 
@@ -306,9 +316,17 @@ bool DeepDogMqtt::Start() {
 #else
     caps.handle = false;
 #endif
+#if DEEP_DOG_WS_MCP_ENABLE
+    caps.ws_mcp = true;
+#else
+    caps.ws_mcp = false;
+#endif
 
     impl_->device.SetCapabilities(caps);
     impl_->device.SetHttpPort(impl_->http_port);
+    if (impl_->ws_mcp_port > 0) {
+        impl_->device.SetWsMcpEndpoint(impl_->ws_mcp_port, impl_->ws_mcp_path);
+    }
     impl_->stream.SetEnabled(caps.stream);
     impl_->stream.SetVisionHub(impl_->hub);
     impl_->stream.SetHttpServer(impl_->http);
@@ -373,6 +391,7 @@ DeepDogMqtt::~DeepDogMqtt() = default;
 void DeepDogMqtt::SetVisionHub(VisionFrameHub*) {}
 void DeepDogMqtt::SetHttpServer(DeepDogHttpServer*) {}
 void DeepDogMqtt::SetHttpPort(int) {}
+void DeepDogMqtt::SetWsMcpEndpoint(int, const char*) {}
 void DeepDogMqtt::SetImuSensor(DeepDogImuSensor*) {}
 void DeepDogMqtt::SetImuSwitch(DeepDogImuSwitch*) {}
 void DeepDogMqtt::SetTouchHub(TouchEventHub*) {}

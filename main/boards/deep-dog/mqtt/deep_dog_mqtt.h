@@ -27,6 +27,7 @@ public:
     void SetVisionHub(VisionFrameHub* hub);
     void SetHttpServer(DeepDogHttpServer* http);
     void SetHttpPort(int port);
+    void SetWsMcpEndpoint(int port, const char* path);
     void SetImuSensor(DeepDogImuSensor* sensor);
     void SetImuSwitch(DeepDogImuSwitch* hub);
     void SetTouchHub(TouchEventHub* hub);
