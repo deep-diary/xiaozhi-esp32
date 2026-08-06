@@ -58,6 +58,12 @@
 #define RX_29ID_DISASSEMBLE_MODE_STA(id)        (uint8_t)(((id)>>22)&0x03)
 #define RX_29ID_DISASSEMBLE_CMD_TYPE(id)        (uint8_t)(((id)>>24)&0x1F)  // 只取5位，不是8位
 
+/** 通信类型 0 应答帧：bit0-7=0xFE，bit8-23=电机 CAN_ID（与反馈帧布局不同） */
+#define MOTOR_GET_ID_RSP_MARKER                 0xFE
+#define RX_29ID_IS_GET_DEVICE_ID_RSP(id) \
+    (RX_29ID_DISASSEMBLE_CMD_TYPE(id) == 0 && ((id) & 0xFF) == MOTOR_GET_ID_RSP_MARKER)
+#define RX_29ID_DISASSEMBLE_GET_ID_MOTOR_ID(id) (uint8_t)(((id) >> 8) & 0xFF)
+
 // 宏定义用于解析数据
 #define RX_DATA_DISASSEMBLE_CUR_ANGLE(data)     (uint16_t)((data[0]<<8)|data[1])
 #define RX_DATA_DISASSEMBLE_CUR_SPEED(data)     (uint16_t)((data[2]<<8)|data[3])
@@ -81,13 +87,15 @@ typedef enum {
 
 // 电机控制命令类型
 typedef enum {
+    MOTOR_CMD_GET_DEVICE_ID = 0, // 获取设备 ID（通信类型 0）
     MOTOR_CMD_FEEDBACK = 0x02,   // 反馈帧
     MOTOR_CMD_ENABLE = 3,      // 使能
     MOTOR_CMD_RESET = 4,       // 停止
     MOTOR_CMD_SET_ZERO = 6,    // 设置零点
     MOTOR_CMD_CONTROL = 1,     // 运控模式
     MOTOR_CMD_SET_PARAM = 18,  // 设置参数
-    MOTOR_CMD_VERSION = 0x17   // 获取软件版本号
+    MOTOR_CMD_VERSION = 0x17,  // 获取软件版本号
+    MOTOR_CMD_ACTIVE_REPORT = 0x18  // 主动上报帧（通信类型 24）
 } motor_cmd_t;
 
 // 参数类型定义
@@ -131,6 +139,10 @@ typedef struct {
     bool collision;
     float current_temp;        // 当前温度 (°C)
     char version[9];          // 软件版本号
+    /** 是否已收到通信类型 0 应答（获取设备 ID） */
+    bool has_device_id;
+    /** 64 位 MCU 唯一标识符（通信类型 0 应答 data 区，大端序） */
+    uint64_t mcu_uid;
 } motor_status_t;
 
 class MotorProtocol {
@@ -254,8 +266,16 @@ public:
     /**
      * @brief 周期性「状态查询」占位：发送 SET_PARAM 写 RUN_MODE，与当前工程协议一致以触发/维持反馈。
      *        由 config.h `DEEP_DOG_USE_MIT_WALK` 决定写 **运控(MIT)** 还是 **位置模式**（非独立读寄存器帧）。
+     *        旧式 API，推荐新代码使用 setActiveReportSwitch。
      */
     static bool sendRunModeForStatusQuery(uint8_t motor_id);
+
+    /**
+     * @brief 通信类型 24：开启/关闭电机主动上报（开启后约 10ms 周期推送状态帧）
+     * @param motor_id 电机 ID
+     * @param enable true 开启，false 关闭
+     */
+    static bool setActiveReportSwitch(uint8_t motor_id, bool enable);
 
     /**
      * @brief 设置电机参数
@@ -297,6 +317,21 @@ public:
      */
     static bool stopSinSignal(uint8_t motor_id);
 
+    /**
+     * @brief 发送通信类型 0 探测帧（获取设备 ID），只发不等。
+     * @param motor_id 目标电机 CAN_ID（1～127）
+     * @return true 发送成功
+     */
+    static bool sendGetDeviceIdProbe(uint8_t motor_id);
+
+    /**
+     * @brief 批量发送通信类型 0 探测帧，只发不等；应答由 CanRxTask 统一收帧解析。
+     * @param id_min 起始 ID（含）
+     * @param id_max 结束 ID（含）
+     * @return 成功发送的帧数
+     */
+    static uint8_t sendGetDeviceIdProbes(uint8_t id_min, uint8_t id_max);
+
 private:
     /**
      * @brief 构建CAN帧ID（非运控：主机号 MOTOR_MASTER_ID 在 bit8–15）
@@ -324,6 +359,9 @@ private:
      * @return 转换后的整数
      */
     static uint16_t floatToUint16(float value, float min_val, float max_val, int bits);
+
+    /** 解析类型 2 / 24 共用的 ID 位域与 8 字节角速矩温数据区 */
+    static void parseFeedbackPayload(const CanFrame& can_frame, motor_status_t* status);
 };
 
 #endif // _PROTOCOL_MOTOR_H__

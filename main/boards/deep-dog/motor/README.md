@@ -15,7 +15,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `protocol_motor.h` / `protocol_motor.cpp` | 29 位扩展帧 ID、参数索引（`PARAM_LOC_REF`、`PARAM_LIMIT_SPD`、`PARAM_IQ_REF` 等）、`initializeMotor`、`setPosition`/`setPositionOnly`、`setSpeed`、`setCurrent`、`controlMotor`、反馈解析 `parseMotorData`；**`sendRunModeForStatusQuery`**：按 `DEEP_DOG_USE_MIT_WALK` 周期性写 RUN_MODE（MIT 或位置）以配合反馈 |
+| `protocol_motor.h` / `protocol_motor.cpp` | 29 位扩展帧 ID、参数索引、`initializeMotor`、`setPosition`/`setSpeed`/`controlMotor`、反馈解析 `parseMotorData`；**`setActiveReportSwitch`**（T24 主动上报）；**`sendRunModeForStatusQuery`**（旧式 RUN_MODE 触发反馈，保留兼容） |
 | `deep_motor.h` / `deep_motor.cpp` | 多电机注册表、`motor_status_t[]` 反馈、`MotorCommandCache` 下发去重、`processCanFrame`、位置/限速/IQ 下发封装 |
 | `deep_motor_control.cc` / `deep_motor_control.h` | MCP 工具注册（`self.can.*`、`self.motor.*`），供语音/调试 |
 | `deep_motor_led_state.*` | 角度 LED 指示（需灯带） |
@@ -26,8 +26,23 @@
 
 ### 反馈（实际量，来自 CAN 反馈帧）
 
-`motor_status_t`（见 `protocol_motor.h`）包含：`current_angle`（rad）、`current_speed`（rad/s）、`current_torque`（N·m）、温度、错误位、模式等。  
+`motor_status_t`（见 `protocol_motor.h`）包含：`current_angle`（rad）、`current_speed`（rad/s）、`current_torque`（N·m）、温度、错误位、模式、`has_device_id` / `mcu_uid`（通信类型 0 扫描应答）等。  
 `DeepMotor::processCanFrame` 解析后写入对应槽位。
+
+### 总线扫描（通信类型 0 · 异步）
+
+- **发送**：`DeepMotor::sendBusScanProbes()` → `MotorProtocol::sendGetDeviceIdProbes()`，只发不等（dlc=8，data 全 0）。
+- **接收**：`CanRxTask` → `processCanFrame` → `parseMotorData(cmd=0)`，自动 `registerMotorId` 并写入 `mcu_uid`。
+- **MQTT**：`motor/scan` 触发探测；`motor/scan_result` 先发 `{started:true}`，发现后发 `{event:"discovered", id, mcu_uid}`。
+- 需求文档：[swrs/motor/06-bus-scan-get-device-id.md](../swrs/motor/06-bus-scan-get-device-id.md)
+
+### 主动上报（通信类型 24）
+
+- **开启/关闭**：`MotorProtocol::setActiveReportSwitch(id, enable)`，data=`01 02 03 04 05 06 F_CMD 00`；开启后电机约 10ms 周期推送 cmd=0x18 状态帧。
+- **管理层**：`DeepMotor::requestActiveReport` / `releaseActiveReport`（引用计数，避免 init 与 MQTT 互相关闭）。
+- **MQTT**：`motor/report_start` → 对已注册电机 `requestActiveReport`；`motor/report_stop` → `releaseActiveReport`。
+- **旧式 API**：`sendRunModeForStatusQuery` 仍保留，新代码请用 T24。
+- 需求文档：[swrs/motor/07-active-report-frame.md](../swrs/motor/07-active-report-frame.md)
 
 便捷读取：
 

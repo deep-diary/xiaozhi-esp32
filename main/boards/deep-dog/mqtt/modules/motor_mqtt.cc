@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 
 #define TAG "dog_mqtt_motor"
@@ -68,6 +69,9 @@ DeepDogMotorMqtt::~DeepDogMotorMqtt() {
 void DeepDogMotorMqtt::SetMotor(DeepMotor* motor) {
 #if DEEP_DOG_MOTOR_ENABLE
     motor_ = motor;
+    if (motor_) {
+        motor_->setMotorDiscoveryCallback(&DeepDogMotorMqtt::DiscoveryCb, this);
+    }
 #else
     (void)motor;
 #endif
@@ -111,6 +115,12 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
             float target = 0.f;
             if (motor->getMotorTargetAngle(mid, &target)) {
                 cJSON_AddNumberToObject(m, "target_rad", target);
+            }
+            if (st.has_device_id) {
+                char uid_hex[17];
+                snprintf(uid_hex, sizeof(uid_hex), "%016llX",
+                         (unsigned long long)st.mcu_uid);
+                cJSON_AddStringToObject(m, "mcu_uid", uid_hex);
             }
             cJSON_AddItemToArray(arr, m);
         }
@@ -210,6 +220,42 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
 #endif
 }
 
+void DeepDogMotorMqtt::DiscoveryCb(uint8_t motor_id, const motor_status_t& status, void* user_data) {
+    auto* self = static_cast<DeepDogMotorMqtt*>(user_data);
+    if (!self) {
+        return;
+    }
+    self->PublishDiscoveryEvent(motor_id, status);
+    self->PublishStatus(true);
+}
+
+void DeepDogMotorMqtt::PublishDiscoveryEvent(uint8_t motor_id, const motor_status_t& status) {
+#if !DEEP_DOG_MOTOR_ENABLE
+    (void)motor_id;
+    (void)status;
+#else
+    if (!enabled_ || !connected_ || !client_) {
+        return;
+    }
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "event", "discovered");
+    cJSON_AddNumberToObject(root, "id", motor_id);
+    if (status.has_device_id) {
+        char uid_hex[17];
+        snprintf(uid_hex, sizeof(uid_hex), "%016llX",
+                 (unsigned long long)status.mcu_uid);
+        cJSON_AddStringToObject(root, "mcu_uid", uid_hex);
+    }
+    cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+    char* s = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (s) {
+        client_->Publish("motor/scan_result", s, 0, false);
+        cJSON_free(s);
+    }
+#endif
+}
+
 void DeepDogMotorMqtt::OnConnected() {
 #if !DEEP_DOG_MOTOR_ENABLE
     return;
@@ -221,7 +267,13 @@ void DeepDogMotorMqtt::OnConnected() {
     if (!motor_) {
         motor_ = DeepDogMotorGet();
     }
+    if (motor_) {
+        motor_->setMotorDiscoveryCallback(&DeepDogMotorMqtt::DiscoveryCb, this);
+    }
     client_->Subscribe("motor/cmd", 1);
+    client_->Subscribe("motor/scan", 1);
+    client_->Subscribe("motor/report_start", 1);
+    client_->Subscribe("motor/report_stop", 1);
     PublishStatus(true);
     if (status_timer_) {
         esp_timer_start_periodic(static_cast<esp_timer_handle_t>(status_timer_), 500000);
@@ -252,6 +304,53 @@ void DeepDogMotorMqtt::OnMessage(const std::string& topic, const std::string& pa
     }
     if (client_ && topic == client_->Topic("motor/cmd")) {
         ApplyCmd(payload.c_str());
+        return;
+    }
+    if (client_ && topic == client_->Topic("motor/scan")) {
+        DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
+        if (!motor) {
+            return;
+        }
+        motor->sendBusScanProbes();
+        cJSON* root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "started", true);
+        cJSON* range = cJSON_AddArrayToObject(root, "range");
+        cJSON_AddItemToArray(range, cJSON_CreateNumber(1));
+        cJSON_AddItemToArray(range, cJSON_CreateNumber(127));
+        cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+        char* s = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        if (s) {
+            client_->Publish("motor/scan_result", s, 0, false);
+            cJSON_free(s);
+        }
+        return;
+    }
+    if (client_ && topic == client_->Topic("motor/report_start")) {
+        DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
+        if (!motor) {
+            return;
+        }
+        int8_t ids[MAX_MOTOR_COUNT];
+        const uint8_t n = motor->getRegisteredMotorIds(ids, MAX_MOTOR_COUNT);
+        for (uint8_t i = 0; i < n; ++i) {
+            motor->requestActiveReport(static_cast<uint8_t>(ids[i]));
+        }
+        report_active_ = true;
+        PublishStatus(true);
+        return;
+    }
+    if (client_ && topic == client_->Topic("motor/report_stop")) {
+        DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
+        if (motor) {
+            int8_t ids[MAX_MOTOR_COUNT];
+            const uint8_t n = motor->getRegisteredMotorIds(ids, MAX_MOTOR_COUNT);
+            for (uint8_t i = 0; i < n; ++i) {
+                motor->releaseActiveReport(static_cast<uint8_t>(ids[i]));
+            }
+        }
+        report_active_ = false;
+        return;
     }
 #endif
 }

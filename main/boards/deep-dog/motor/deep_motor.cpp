@@ -9,6 +9,33 @@
 
 static const char* TAG = "DeepMotor";
 
+namespace {
+
+/** initializeMotor 期间自动 request/release 主动上报 */
+class ActiveReportGuard {
+public:
+    ActiveReportGuard(DeepMotor* motor, uint8_t motor_id) : motor_(motor), motor_id_(motor_id), active_(false) {
+        if (motor_ != nullptr) {
+            active_ = motor_->requestActiveReport(motor_id_);
+        }
+    }
+    ~ActiveReportGuard() {
+        if (active_ && motor_ != nullptr) {
+            motor_->releaseActiveReport(motor_id_);
+        }
+    }
+
+    ActiveReportGuard(const ActiveReportGuard&) = delete;
+    ActiveReportGuard& operator=(const ActiveReportGuard&) = delete;
+
+private:
+    DeepMotor* motor_;
+    uint8_t motor_id_;
+    bool active_;
+};
+
+}  // namespace
+
 /** 去重容差：与 float 量化及总线噪声匹配 */
 static constexpr float kMotorEpsPosRad = 1e-5f;
 static constexpr float kMotorEpsSpd = 1e-4f;
@@ -35,6 +62,7 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
         motor_cmd_cache_[i].position_known = false;
         motor_cmd_cache_[i].speed_known = false;
         motor_cmd_cache_[i].iq_known = false;
+        active_report_refcount_[i] = 0;
     }
     
     // 初始化录制数据数组
@@ -43,6 +71,8 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
     // 初始化回调函数
     data_callback_ = nullptr;
     callback_user_data_ = nullptr;
+    discovery_callback_ = nullptr;
+    discovery_user_data_ = nullptr;
     
     // 初始化LED状态管理器
     if (led_strip != nullptr) {
@@ -77,6 +107,13 @@ DeepMotor::~DeepMotor() {
         vTaskDelete(execute_task_handle_);
         execute_task_handle_ = nullptr;
     }
+
+    for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
+        if (active_report_refcount_[i] > 0 && registered_motor_ids_[i] != MOTOR_ID_UNREGISTERED) {
+            (void)MotorProtocol::setActiveReportSwitch(static_cast<uint8_t>(registered_motor_ids_[i]), false);
+        }
+        active_report_refcount_[i] = 0;
+    }
     
     // 清理LED状态管理器
     if (led_state_manager_ != nullptr) {
@@ -93,10 +130,50 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
         return false;
     }
     
-    // 解析电机ID和主机ID
     uint8_t cmd_type = RX_29ID_DISASSEMBLE_CMD_TYPE(can_frame.identifier);
-    // 如果不是反馈帧或者版本查询帧则直接返回，因为其他命令帧解析出来的motor_id是不对的
-    if (cmd_type != MOTOR_CMD_FEEDBACK && cmd_type != MOTOR_CMD_VERSION) {
+
+    // 通信类型 0：获取设备 ID 应答（ID 布局与反馈帧不同）
+    if (cmd_type == MOTOR_CMD_GET_DEVICE_ID) {
+        if (!RX_29ID_IS_GET_DEVICE_ID_RSP(can_frame.identifier)) {
+            return false;
+        }
+        const uint8_t motor_id = RX_29ID_DISASSEMBLE_GET_ID_MOTOR_ID(can_frame.identifier);
+        if (motor_id == 0 || motor_id > 127) {
+            return false;
+        }
+
+        motor_status_t parsed {};
+        MotorProtocol::parseMotorData(can_frame, &parsed);
+        if (!parsed.has_device_id) {
+            return false;
+        }
+
+        int8_t motor_index = findMotorIndex(motor_id);
+        if (motor_index == -1) {
+            if (!registerMotorId(motor_id)) {
+                ESP_LOGE(TAG, "注册电机ID %d 失败，已达到最大数量限制", motor_id);
+                return false;
+            }
+            motor_index = findMotorIndex(motor_id);
+            ESP_LOGI(TAG, "扫描发现电机 ID=%d，当前已注册 %d 个电机", motor_id, registered_count_);
+            if (led_state_manager_) {
+                led_state_manager_->EnableAngleIndicator(motor_id, true);
+            }
+        }
+
+        motor_statuses_[motor_index].mcu_uid = parsed.mcu_uid;
+        motor_statuses_[motor_index].has_device_id = true;
+        motor_statuses_[motor_index].master_id = parsed.master_id;
+
+        if (discovery_callback_) {
+            discovery_callback_(motor_id, motor_statuses_[motor_index], discovery_user_data_);
+        }
+        return true;
+    }
+
+    // 反馈帧、主动上报帧或版本查询帧
+    if (cmd_type != MOTOR_CMD_FEEDBACK && cmd_type != MOTOR_CMD_ACTIVE_REPORT &&
+        cmd_type != MOTOR_CMD_VERSION) {
         return false;
     }
 
@@ -129,8 +206,10 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
     // 解析电机状态数据
     MotorProtocol::parseMotorData(can_frame, &motor_statuses_[motor_index]);
 
-    // 只有反馈帧才更新活跃电机ID和LED状态
-    if (cmd_type == MOTOR_CMD_FEEDBACK) {
+    // 状态帧（类型 2 / 24）更新反馈计数与 LED 等
+    const bool is_status_frame =
+        (cmd_type == MOTOR_CMD_FEEDBACK || cmd_type == MOTOR_CMD_ACTIVE_REPORT);
+    if (is_status_frame) {
         motor_statuses_[motor_index].has_feedback = true;
         motor_statuses_[motor_index].feedback_seq++;
 
@@ -243,6 +322,8 @@ bool DeepMotor::registerMotorId(uint8_t motor_id) {
             motor_statuses_[i].motor_id = motor_id;
             motor_statuses_[i].has_feedback = false;
             motor_statuses_[i].feedback_seq = 0;
+            motor_statuses_[i].has_device_id = false;
+            motor_statuses_[i].mcu_uid = 0;
             motor_statuses_[i].max_abs_torque = 0.0f;
             motor_statuses_[i].collision = false;
             torque_observe_enabled_[i] = false;
@@ -253,6 +334,7 @@ bool DeepMotor::registerMotorId(uint8_t motor_id) {
             motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
             motor_cmd_cache_[i].iq_ref = 0.0f;
             motor_target_angles_[i] = 0.0f;
+            active_report_refcount_[i] = 0;
 
             return true;
         }
@@ -390,6 +472,49 @@ bool DeepMotor::registerMotor(uint8_t motor_id) {
     return registerMotorId(motor_id);
 }
 
+void DeepMotor::sendBusScanProbes(uint8_t id_min, uint8_t id_max) {
+    MotorProtocol::sendGetDeviceIdProbes(id_min, id_max);
+}
+
+bool DeepMotor::requestActiveReport(uint8_t motor_id) {
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        ESP_LOGW(TAG, "requestActiveReport: 电机 %u 未注册", (unsigned)motor_id);
+        return false;
+    }
+    if (active_report_refcount_[idx] == 0) {
+        if (!MotorProtocol::setActiveReportSwitch(motor_id, true)) {
+            ESP_LOGW(TAG, "电机%u 开启主动上报 CAN 发送失败", (unsigned)motor_id);
+        }
+    }
+    if (active_report_refcount_[idx] < 255) {
+        active_report_refcount_[idx]++;
+    }
+    return true;
+}
+
+bool DeepMotor::releaseActiveReport(uint8_t motor_id) {
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return false;
+    }
+    if (active_report_refcount_[idx] == 0) {
+        return true;
+    }
+    active_report_refcount_[idx]--;
+    if (active_report_refcount_[idx] == 0) {
+        if (!MotorProtocol::setActiveReportSwitch(motor_id, false)) {
+            ESP_LOGW(TAG, "电机%u 关闭主动上报 CAN 发送失败", (unsigned)motor_id);
+        }
+    }
+    return true;
+}
+
+void DeepMotor::setMotorDiscoveryCallback(MotorDiscoveryCallback callback, void* user_data) {
+    discovery_callback_ = callback;
+    discovery_user_data_ = user_data;
+}
+
 bool DeepMotor::isMotorRegistered(uint8_t motor_id) const {
     return findMotorIndex(motor_id) != -1;
 }
@@ -400,6 +525,9 @@ uint8_t DeepMotor::getRegisteredCount() const {
 
 void DeepMotor::clearAllMotors() {
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
+        if (active_report_refcount_[i] > 0 && registered_motor_ids_[i] != MOTOR_ID_UNREGISTERED) {
+            (void)MotorProtocol::setActiveReportSwitch(static_cast<uint8_t>(registered_motor_ids_[i]), false);
+        }
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
         motor_statuses_[i].max_abs_torque = 0.0f;
@@ -412,6 +540,7 @@ void DeepMotor::clearAllMotors() {
         motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
         motor_cmd_cache_[i].iq_ref = 0.0f;
         motor_target_angles_[i] = 0.0f;
+        active_report_refcount_[i] = 0;
     }
     registered_count_ = 0;
     active_motor_id_ = -1;
@@ -462,28 +591,20 @@ void DeepMotor::printAllMotorStatus() const {
 // 静态任务函数实现
 void DeepMotor::initStatusTask(void* parameter) {
     DeepMotor* motor_manager = static_cast<DeepMotor*>(parameter);
-    int8_t motor_id = motor_manager->active_motor_id_;
-    
-    ESP_LOGI(TAG, "初始化状态查询任务启动，电机ID: %d", motor_id);
-    
+    (void)motor_manager;
+    ESP_LOGI(TAG, "初始化状态任务运行中（依赖 T24 主动上报）");
+
     while (true) {
-        if (motor_id != MOTOR_ID_UNREGISTERED) {
-            (void)MotorProtocol::sendRunModeForStatusQuery(static_cast<uint8_t>(motor_id));
-        }
         vTaskDelay(pdMS_TO_TICKS(INIT_STATUS_RATE_MS));
     }
 }
 
 void DeepMotor::recordingTask(void* parameter) {
     DeepMotor* motor_manager = static_cast<DeepMotor*>(parameter);
-    int8_t motor_id = motor_manager->active_motor_id_;
-    
-    ESP_LOGI(TAG, "录制任务启动，电机ID: %d", motor_id);
-    
+    (void)motor_manager;
+    ESP_LOGI(TAG, "录制任务运行中（依赖 T24 主动上报）");
+
     while (motor_manager->teaching_mode_) {
-        if (motor_id != MOTOR_ID_UNREGISTERED) {
-            (void)MotorProtocol::sendRunModeForStatusQuery(static_cast<uint8_t>(motor_id));
-        }
         vTaskDelay(pdMS_TO_TICKS(TEACHING_SAMPLE_RATE_MS));
     }
     
@@ -545,12 +666,15 @@ bool DeepMotor::startTeaching(uint8_t motor_id) {
     
     // 4. 设置活跃电机ID
     setActiveMotorId(motor_id);
+
+    (void)requestActiveReport(motor_id);
     
     // 5. 创建录制任务
     BaseType_t ret = xTaskCreate(recordingTask, "recording_task", 4096, this, 5, &teaching_task_handle_);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "创建录制任务失败");
         teaching_mode_ = false;
+        (void)releaseActiveReport(motor_id);
         return false;
     }
     
@@ -565,6 +689,10 @@ bool DeepMotor::stopTeaching() {
     }
     
     ESP_LOGI(TAG, "结束录制模式，共记录 %d 个录制点", teaching_point_count_);
+
+    if (active_motor_id_ != MOTOR_ID_UNREGISTERED) {
+        (void)releaseActiveReport(static_cast<uint8_t>(active_motor_id_));
+    }
     
     // 1. 终止录制任务
     if (teaching_task_handle_ != nullptr) {
@@ -649,11 +777,14 @@ bool DeepMotor::startInitStatusTask(uint8_t motor_id) {
     
     // 设置活跃电机ID
     setActiveMotorId(motor_id);
+
+    (void)requestActiveReport(motor_id);
     
     // 创建初始化状态查询任务
     BaseType_t ret = xTaskCreate(initStatusTask, "init_status_task", 4096, this, 3, &init_status_task_handle_);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "创建初始化状态查询任务失败");
+        (void)releaseActiveReport(motor_id);
         return false;
     }
     
@@ -665,6 +796,10 @@ bool DeepMotor::stopInitStatusTask() {
     if (init_status_task_handle_ == nullptr) {
         ESP_LOGW(TAG, "初始化状态查询任务不存在");
         return false;
+    }
+
+    if (active_motor_id_ != MOTOR_ID_UNREGISTERED) {
+        (void)releaseActiveReport(static_cast<uint8_t>(active_motor_id_));
     }
     
     vTaskDelete(init_status_task_handle_);
@@ -847,6 +982,8 @@ bool DeepMotor::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
             torque_observe_enabled_[idx] = false;
         }
     }
+
+    ActiveReportGuard active_report_guard(this, motor_id);
 
     ESP_LOGI(TAG, "电机%u 初始化：reset×2 -> set_zero(最多5轮等待反馈) -> mode -> enable -> 校验零位反馈", (unsigned)motor_id);
 

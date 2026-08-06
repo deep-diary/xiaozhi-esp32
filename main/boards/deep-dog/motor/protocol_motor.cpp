@@ -269,6 +269,26 @@ bool MotorProtocol::sendRunModeForStatusQuery(uint8_t motor_id) {
 #endif
 }
 
+bool MotorProtocol::setActiveReportSwitch(uint8_t motor_id, bool enable) {
+    if (motor_id == 0 || motor_id > 127) {
+        return false;
+    }
+    CanFrame frame {};
+    frame.identifier = buildCanId(motor_id, MOTOR_CMD_ACTIVE_REPORT);
+    frame.extd = 1;
+    frame.data_length_code = 8;
+    frame.data[0] = 0x01;
+    frame.data[1] = 0x02;
+    frame.data[2] = 0x03;
+    frame.data[3] = 0x04;
+    frame.data[4] = 0x05;
+    frame.data[5] = 0x06;
+    frame.data[6] = enable ? 0x01 : 0x00;
+    frame.data[7] = 0x00;
+    ESP_LOGI(TAG, "电机%u 主动上报: %s", (unsigned)motor_id, enable ? "开启" : "关闭");
+    return sendCanFrame(frame);
+}
+
 bool MotorProtocol::setMotorParameter(uint8_t motor_id, motor_param_t param, float value) {
     CanFrame frame;
     memset(&frame, 0, sizeof(frame));
@@ -398,12 +418,12 @@ uint16_t MotorProtocol::floatToUint16(float value, float min_val, float max_val,
     return (uint16_t)((value - offset) * ((float)((1 << bits) - 1)) / span);
 }
 
-void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* status) {
-    const uint8_t cmd_type = RX_29ID_DISASSEMBLE_CMD_TYPE(can_frame.identifier);
+void MotorProtocol::parseFeedbackPayload(const CanFrame& can_frame, motor_status_t* status) {
+    if (status == nullptr) {
+        return;
+    }
     status->master_id = RX_29ID_DISASSEMBLE_MASTER_ID(can_frame.identifier);
     status->motor_id = RX_29ID_DISASSEMBLE_MOTOR_ID(can_frame.identifier);
-    ESP_LOGD(TAG, "电机%d命令类型: %d", status->motor_id, cmd_type);
-
     status->error_status = RX_29ID_DISASSEMBLE_ERR_STA(can_frame.identifier);
     status->hall_error = RX_29ID_DISASSEMBLE_HALL_ERR(can_frame.identifier);
     status->magnet_error = RX_29ID_DISASSEMBLE_MAGNET_ERR(can_frame.identifier);
@@ -411,27 +431,70 @@ void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* st
     status->current_error = RX_29ID_DISASSEMBLE_CURRENT_ERR(can_frame.identifier);
     status->voltage_error = RX_29ID_DISASSEMBLE_VOLTAGE_ERR(can_frame.identifier);
     status->mode_status = (motor_mode_t)RX_29ID_DISASSEMBLE_MODE_STA(can_frame.identifier);
-    
-    // 解析数据
-    switch (cmd_type) {
-        case MOTOR_CMD_FEEDBACK: {
-            // 与运控指令相同：8 字节内各量 16 位大端、线性映射（EL05）
-            const uint16_t raw_a = RX_DATA_DISASSEMBLE_CUR_ANGLE(can_frame.data);
-            const uint16_t raw_s = RX_DATA_DISASSEMBLE_CUR_SPEED(can_frame.data);
-            const uint16_t raw_t = RX_DATA_DISASSEMBLE_CUR_TORQUE(can_frame.data);
-            const float span_p = (P_MAX - P_MIN);
-            const float span_v = (V_MAX - V_MIN);
-            const float span_t = (T_FF_MAX - T_FF_MIN);
-            status->current_angle = P_MIN + (float)raw_a * span_p / 65535.0f;
-            status->current_speed = V_MIN + (float)raw_s * span_v / 65535.0f;
-            status->current_torque = T_FF_MIN + (float)raw_t * span_t / 65535.0f;
-            status->current_temp = RX_DATA_DISASSEMBLE_CUR_TEMP(can_frame.data) / 10.0f;
-            break;
+
+    const uint16_t raw_a = RX_DATA_DISASSEMBLE_CUR_ANGLE(can_frame.data);
+    const uint16_t raw_s = RX_DATA_DISASSEMBLE_CUR_SPEED(can_frame.data);
+    const uint16_t raw_t = RX_DATA_DISASSEMBLE_CUR_TORQUE(can_frame.data);
+    const float span_p = (P_MAX - P_MIN);
+    const float span_v = (V_MAX - V_MIN);
+    const float span_t = (T_FF_MAX - T_FF_MIN);
+    status->current_angle = P_MIN + (float)raw_a * span_p / 65535.0f;
+    status->current_speed = V_MIN + (float)raw_s * span_v / 65535.0f;
+    status->current_torque = T_FF_MIN + (float)raw_t * span_t / 65535.0f;
+    status->current_temp = RX_DATA_DISASSEMBLE_CUR_TEMP(can_frame.data) / 10.0f;
+}
+
+void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* status) {
+    if (status == nullptr) {
+        return;
+    }
+
+    const uint8_t cmd_type = RX_29ID_DISASSEMBLE_CMD_TYPE(can_frame.identifier);
+
+    // 通信类型 0 应答：ID 布局与反馈帧不同，单独解析
+    if (cmd_type == MOTOR_CMD_GET_DEVICE_ID) {
+        if (!RX_29ID_IS_GET_DEVICE_ID_RSP(can_frame.identifier)) {
+            ESP_LOGW(TAG, "忽略无效的设备 ID 应答帧: id=0x%08lX",
+                     (unsigned long)can_frame.identifier);
+            return;
         }
+        const uint8_t motor_id = RX_29ID_DISASSEMBLE_GET_ID_MOTOR_ID(can_frame.identifier);
+        if (motor_id == 0 || motor_id > 127) {
+            ESP_LOGW(TAG, "设备 ID 应答 motor_id 超出范围: %u", (unsigned)motor_id);
+            return;
+        }
+        status->motor_id = motor_id;
+        status->master_id = MOTOR_GET_ID_RSP_MARKER;
+        status->mcu_uid = 0;
+        for (int i = 0; i < 8; ++i) {
+            status->mcu_uid = (status->mcu_uid << 8) | can_frame.data[i];
+        }
+        status->has_device_id = true;
+        ESP_LOGI(TAG, "电机%d MCU UID: %02X%02X%02X%02X%02X%02X%02X%02X",
+                 motor_id,
+                 can_frame.data[0], can_frame.data[1], can_frame.data[2], can_frame.data[3],
+                 can_frame.data[4], can_frame.data[5], can_frame.data[6], can_frame.data[7]);
+        return;
+    }
+
+    ESP_LOGD(TAG, "电机命令类型: %d", cmd_type);
+
+    switch (cmd_type) {
+        case MOTOR_CMD_FEEDBACK:
+        case MOTOR_CMD_ACTIVE_REPORT:
+            parseFeedbackPayload(can_frame, status);
+            break;
         case MOTOR_CMD_VERSION:
+            status->master_id = RX_29ID_DISASSEMBLE_MASTER_ID(can_frame.identifier);
+            status->motor_id = RX_29ID_DISASSEMBLE_MOTOR_ID(can_frame.identifier);
+            status->error_status = RX_29ID_DISASSEMBLE_ERR_STA(can_frame.identifier);
+            status->hall_error = RX_29ID_DISASSEMBLE_HALL_ERR(can_frame.identifier);
+            status->magnet_error = RX_29ID_DISASSEMBLE_MAGNET_ERR(can_frame.identifier);
+            status->temp_error = RX_29ID_DISASSEMBLE_TEMP_ERR(can_frame.identifier);
+            status->current_error = RX_29ID_DISASSEMBLE_CURRENT_ERR(can_frame.identifier);
+            status->voltage_error = RX_29ID_DISASSEMBLE_VOLTAGE_ERR(can_frame.identifier);
+            status->mode_status = (motor_mode_t)RX_29ID_DISASSEMBLE_MODE_STA(can_frame.identifier);
             RX_DATA_DISASSEMBLE_VERSION_STR(can_frame.data, status->version, sizeof(status->version));
-            // 打印 can_frame.data
-            // 以16进制显示版本号原始数据
             ESP_LOGI(TAG, "电机%d软件版本原始数据: %02X %02X %02X %02X %02X %02X %02X %02X", 
                      status->motor_id,
                      can_frame.data[0], can_frame.data[1], can_frame.data[2], can_frame.data[3],
@@ -441,6 +504,40 @@ void MotorProtocol::parseMotorData(const CanFrame& can_frame, motor_status_t* st
         default:
             break;
     }
+}
+
+bool MotorProtocol::sendGetDeviceIdProbe(uint8_t motor_id) {
+    if (motor_id == 0 || motor_id > 127) {
+        return false;
+    }
+    CanFrame query {};
+    query.identifier = buildCanId(motor_id, MOTOR_CMD_GET_DEVICE_ID);
+    query.extd = 1;
+    query.data_length_code = 8;
+    memset(query.data, 0, sizeof(query.data));
+    return sendCanFrame(query);
+}
+
+uint8_t MotorProtocol::sendGetDeviceIdProbes(uint8_t id_min, uint8_t id_max) {
+    if (id_min == 0) {
+        id_min = 1;
+    }
+    if (id_max > 127) {
+        id_max = 127;
+    }
+    if (id_min > id_max) {
+        return 0;
+    }
+
+    uint8_t sent = 0;
+    ESP_LOGI(TAG, "发送设备 ID 探测帧 (ID %u~%u)", (unsigned)id_min, (unsigned)id_max);
+    for (uint16_t mid = id_min; mid <= id_max; ++mid) {
+        if (sendGetDeviceIdProbe(static_cast<uint8_t>(mid))) {
+            ++sent;
+        }
+    }
+    ESP_LOGI(TAG, "设备 ID 探测帧发送完成，成功 %u 帧", (unsigned)sent);
+    return sent;
 }
 
 #endif  // DEEP_DOG_MOTOR_ENABLE

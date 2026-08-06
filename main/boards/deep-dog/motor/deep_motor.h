@@ -66,6 +66,9 @@ private:
         bool iq_known;
     };
     MotorCommandCache motor_cmd_cache_[MAX_MOTOR_COUNT];
+
+    /** 主动上报（T24）引用计数：0→1 发开启，1→0 发关闭 */
+    uint8_t active_report_refcount_[MAX_MOTOR_COUNT];
     
     // 当前活跃电机ID
     int8_t active_motor_id_;
@@ -99,10 +102,13 @@ private:
     
     // 回调函数类型定义
     typedef void (*MotorDataCallback)(uint8_t motor_id, float position, void* user_data);
+    typedef void (*MotorDiscoveryCallback)(uint8_t motor_id, const motor_status_t& status, void* user_data);
     
     // 回调函数相关
     MotorDataCallback data_callback_;
     void* callback_user_data_;
+    MotorDiscoveryCallback discovery_callback_;
+    void* discovery_user_data_;
     
     // LED状态管理器
     DeepMotorLedState* led_state_manager_;
@@ -224,6 +230,28 @@ public:
      * @return true 成功, false 失败（已满或已存在）
      */
     bool registerMotor(uint8_t motor_id);
+
+    /**
+     * @brief 异步发送总线扫描探测帧（通信类型 0），只发不等；应答由 processCanFrame 解析注册。
+     * @param id_min 起始电机 ID（默认 1）
+     * @param id_max 结束电机 ID（默认 127）
+     */
+    void sendBusScanProbes(uint8_t id_min = 1, uint8_t id_max = 127);
+
+    /**
+     * @brief 请求开启主动上报（引用计数 +1，0→1 时发 T24 开启帧）
+     */
+    bool requestActiveReport(uint8_t motor_id);
+
+    /**
+     * @brief 释放主动上报（引用计数 -1，1→0 时发 T24 关闭帧）
+     */
+    bool releaseActiveReport(uint8_t motor_id);
+
+    /**
+     * @brief 设置电机发现回调（通信类型 0 应答首次注册或更新 mcu_uid 时触发）
+     */
+    void setMotorDiscoveryCallback(MotorDiscoveryCallback callback, void* user_data = nullptr);
     
     /**
      * @brief 检查电机是否已注册
