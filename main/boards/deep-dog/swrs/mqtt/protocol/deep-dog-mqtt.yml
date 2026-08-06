@@ -998,43 +998,58 @@ topics:
           kp: { type: float, optional: true }
           kd: { type: float, optional: true }
           torque_ff: { type: float, optional: true }
-      set_zero: { type: bool, optional: true }
-      teaching: { type: string, optional: true, note: "start|stop|play" }
+      mcp_call:
+        type: object
+        optional: true
+        note: "Invoke self.motor.* / self.can.* MCP tool (MOT-10)"
+        fields:
+          name: { type: string }
+          arguments: { type: object, optional: true }
       ts: { type: int, optional: true }
+
+  motor/tools:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: true
+    note: "MCP tool catalog for motor debug page"
+    payload:
+      tools: { type: array }
+      ts: { type: int }
+
+  motor/mcp_result:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: false
+    note: "Result of motor/cmd mcp_call"
+    payload:
+      name: { type: string }
+      ok: { type: bool }
+      result: { type: object, optional: true }
+      text: { type: string, optional: true }
+      error: { type: string, optional: true }
+      ts: { type: int }
 
   motor/status:
     module: motor
     dir: uplink
     qos: 0
     retain: true
-    note: "Registered motors full motor_status_t snapshot"
+    note: "Registered motors feedback snapshot"
     payload:
       ok: { type: bool }
       motors:
         type: array
         item:
           id: { type: int }
-          master_id: { type: int, optional: true }
+          init_state: { type: string, optional: true, note: "none|initializing|ready|failed" }
           position_rad: { type: float }
           speed_rad_s: { type: float }
           torque_nm: { type: float }
           temperature: { type: float, optional: true }
           fault: { type: bool, optional: true }
-          error_status: { type: int, optional: true }
-          hall_error: { type: bool, optional: true }
-          magnet_error: { type: bool, optional: true }
-          temp_error: { type: bool, optional: true }
-          current_error: { type: bool, optional: true }
-          voltage_error: { type: bool, optional: true }
-          mode_status: { type: string, optional: true }
-          has_feedback: { type: bool, optional: true }
-          feedback_seq: { type: int, optional: true }
-          max_abs_torque: { type: float, optional: true }
-          collision: { type: bool, optional: true }
           target_rad: { type: float, optional: true }
-          has_device_id: { type: bool, optional: true }
-          mcu_uid: { type: string, optional: true }
-          version: { type: string, optional: true }
       ts: { type: int }
 
   # ---- reserved ----

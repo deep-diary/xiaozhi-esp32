@@ -35,6 +35,14 @@
 #define TEACHING_SAMPLE_RATE_MS 50     // 录制采样间隔(ms)
 #define INIT_STATUS_RATE_MS 200       // 初始化状态查询间隔(ms)
 
+/** 电机初始化生命周期（MOT-09 异步 init） */
+enum class MotorInitState : uint8_t {
+    None = 0,
+    Initializing,
+    Ready,
+    Failed,
+};
+
 // 宏定义用于解析29位ID
 #define RX_29ID_DISASSEMBLE_MOTOR_ID(id)        (uint8_t)(((id)>>8)&0xFF)
 #define RX_29ID_DISASSEMBLE_MASTER_ID(id)       (uint8_t)((id)&0xFF)
@@ -52,6 +60,10 @@ private:
 
     // 仅在该电机初始化成功后才允许统计 max_abs_torque / collision，避免把初始化前脏反馈记入峰值
     bool torque_observe_enabled_[MAX_MOTOR_COUNT];
+
+    /** 异步初始化状态（与 registered_motor_ids_ 索引对齐） */
+    MotorInitState motor_init_state_[MAX_MOTOR_COUNT];
+    int64_t motor_init_started_us_[MAX_MOTOR_COUNT];
 
     /**
      * 最近一次成功下发到驱动器的指令缓存（用于去重：与协议 PARAM_* 一致时再发则跳过）。
@@ -94,6 +106,10 @@ private:
     
     // 注册新电机ID
     bool registerMotorId(uint8_t motor_id);
+
+    void pollAsyncInitCompletion(int8_t motor_index, uint8_t motor_id);
+    bool sendInitCommandsAfterReset(uint8_t motor_id, float target_velocity_rad_s);
+    static const char* initStateToString(MotorInitState state);
     
     // 静态任务函数
     static void initStatusTask(void* parameter);
@@ -450,10 +466,20 @@ public:
      */
     bool getMotorSoftwareVersion(uint8_t motor_id, char* version, size_t buffer_size) const;
 
+    MotorInitState getMotorInitState(uint8_t motor_id) const;
+    bool isMotorReady(uint8_t motor_id) const;
+    void resetMotorInitState(uint8_t motor_id);
+
+    /**
+     * @brief 异步初始化：发指令后在 RX 环判定零位（MOT-09）
+     */
+    bool beginInitializeMotor(uint8_t motor_id, float target_velocity_rad_s = 0.0f);
+
     /**
      * @brief 初始化单个电机（带“置零后反馈校验”与失败立即失能保护）
      * - reset×2 → set_zero×3 → 设置运行模式 → enable
-     * - 之后主动触发若干次状态查询以拉取反馈，必须收到反馈且实际角在零位附近，否则立即 reset（停扭）并返回失败
+     * - 同步模式：必须收到反馈且实际角在零位附近，否则 reset 并返回失败
+     * - 异步模式：委托 beginInitializeMotor
      */
     bool initializeMotor(uint8_t motor_id, float target_velocity_rad_s = 0.0f);
 };

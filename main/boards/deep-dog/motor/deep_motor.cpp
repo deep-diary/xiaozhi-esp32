@@ -5,6 +5,7 @@
 #include "deep_motor.h"
 #include "motor_config.h"
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <math.h>
 
 static const char* TAG = "DeepMotor";
@@ -55,6 +56,8 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
         memset(&motor_statuses_[i], 0, sizeof(motor_status_t));
         torque_observe_enabled_[i] = false;
+        motor_init_state_[i] = MotorInitState::None;
+        motor_init_started_us_[i] = 0;
         motor_target_angles_[i] = 0.0f;
         motor_cmd_cache_[i].position_rad = 0.0f;
         motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
@@ -259,6 +262,8 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
             
             led_state_manager_->SetMotorAngleState(motor_id, led_state);
         }
+
+        pollAsyncInitCompletion(motor_index, motor_id);
     }
     
     // 调用回调函数（用于机械臂录制）
@@ -335,6 +340,8 @@ bool DeepMotor::registerMotorId(uint8_t motor_id) {
             motor_cmd_cache_[i].iq_ref = 0.0f;
             motor_target_angles_[i] = 0.0f;
             active_report_refcount_[i] = 0;
+            motor_init_state_[i] = MotorInitState::None;
+            motor_init_started_us_[i] = 0;
 
             return true;
         }
@@ -466,7 +473,7 @@ uint8_t DeepMotor::getRegisteredMotorIds(int8_t* motor_ids, uint8_t max_count) c
 
 bool DeepMotor::registerMotor(uint8_t motor_id) {
     if (findMotorIndex(motor_id) != -1) {
-        ESP_LOGI(TAG, "电机ID %d 已注册", motor_id);
+        ESP_LOGD(TAG, "电机ID %d 已注册", motor_id);
         return true;
     }
     return registerMotorId(motor_id);
@@ -961,7 +968,182 @@ bool DeepMotor::getMotorSoftwareVersion(uint8_t motor_id, char* version, size_t 
     return true;
 }
 
+const char* DeepMotor::initStateToString(MotorInitState state) {
+    switch (state) {
+        case MotorInitState::Initializing:
+            return "initializing";
+        case MotorInitState::Ready:
+            return "ready";
+        case MotorInitState::Failed:
+            return "failed";
+        case MotorInitState::None:
+        default:
+            return "none";
+    }
+}
+
+MotorInitState DeepMotor::getMotorInitState(uint8_t motor_id) const {
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return MotorInitState::None;
+    }
+    return motor_init_state_[idx];
+}
+
+bool DeepMotor::isMotorReady(uint8_t motor_id) const {
+    return getMotorInitState(motor_id) == MotorInitState::Ready;
+}
+
+void DeepMotor::resetMotorInitState(uint8_t motor_id) {
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return;
+    }
+    if (motor_init_state_[idx] == MotorInitState::Initializing) {
+        (void)releaseActiveReport(motor_id);
+    }
+    motor_init_state_[idx] = MotorInitState::None;
+    motor_init_started_us_[idx] = 0;
+    torque_observe_enabled_[idx] = false;
+}
+
+void DeepMotor::pollAsyncInitCompletion(int8_t motor_index, uint8_t motor_id) {
+    if (motor_index < 0) {
+        return;
+    }
+    MotorInitState& st = motor_init_state_[motor_index];
+    if (st != MotorInitState::Initializing) {
+        return;
+    }
+
+    const int64_t elapsed_ms = (esp_timer_get_time() - motor_init_started_us_[motor_index]) / 1000LL;
+    if (elapsed_ms > DEEP_DOG_MOTOR_INIT_TIMEOUT_MS) {
+        ESP_LOGE(TAG, "电机%u 异步 init 超时 (%lld ms)，reset 停扭", (unsigned)motor_id, (long long)elapsed_ms);
+        st = MotorInitState::Failed;
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        (void)releaseActiveReport(motor_id);
+        return;
+    }
+
+    const motor_status_t& ms = motor_statuses_[motor_index];
+    if (!ms.has_feedback) {
+        return;
+    }
+
+    if (fabsf(ms.current_angle) <= DEEP_DOG_MOTOR_INIT_ZERO_TOL_RAD) {
+        st = MotorInitState::Ready;
+        torque_observe_enabled_[motor_index] = true;
+        motor_statuses_[motor_index].max_abs_torque = 0.0f;
+        motor_statuses_[motor_index].collision = false;
+        (void)releaseActiveReport(motor_id);
+        ESP_LOGI(TAG, "电机%u 异步 init 成功：pos=%.4f rad (elapsed %lld ms)", (unsigned)motor_id,
+                 (double)ms.current_angle, (long long)elapsed_ms);
+    }
+}
+
+bool DeepMotor::sendInitCommandsAfterReset(uint8_t motor_id, float target_velocity_rad_s) {
+    (void)target_velocity_rad_s;
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        if (!MotorProtocol::setMotorZero(motor_id)) {
+            ESP_LOGW(TAG, "电机%u set_zero 第%d次发送失败", (unsigned)motor_id, attempt + 1);
+        }
+        vTaskDelay(pdMS_TO_TICKS(8));
+    }
+    (void)MotorProtocol::sendRunModeForStatusQuery(motor_id);
+    vTaskDelay(pdMS_TO_TICKS(8));
+    (void)MotorProtocol::sendRunModeForStatusQuery(motor_id);
+
+#if DEEP_DOG_USE_MIT_WALK
+    if (!MotorProtocol::setMotorControlMode(motor_id)) {
+        ESP_LOGE(TAG, "电机%u 设置运控模式失败", (unsigned)motor_id);
+        return false;
+    }
+#else
+    if (!MotorProtocol::setMotorPositionMode(motor_id)) {
+        ESP_LOGE(TAG, "电机%u 设置位置模式失败", (unsigned)motor_id);
+        return false;
+    }
+#endif
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    if (!MotorProtocol::enableMotor(motor_id)) {
+        ESP_LOGE(TAG, "电机%u enable 失败", (unsigned)motor_id);
+        return false;
+    }
+
+#if DEEP_DOG_USE_MIT_WALK
+    if (!MotorProtocol::controlMotor(motor_id, 0.0f, 0.0f, DEEP_DOG_MIT_INIT_HOLD_KP, DEEP_DOG_MIT_INIT_HOLD_KD,
+                                     DEEP_DOG_MIT_DEFAULT_TAU_FF)) {
+        ESP_LOGE(TAG, "电机%u MIT init 保持帧发送失败", (unsigned)motor_id);
+        return false;
+    }
+#endif
+    return true;
+}
+
+bool DeepMotor::beginInitializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
+    (void)target_velocity_rad_s;
+    if (!isMotorRegistered(motor_id)) {
+        ESP_LOGW(TAG, "beginInitializeMotor: motor %u 未注册，尝试注册", (unsigned)motor_id);
+        if (!registerMotor(motor_id)) {
+            return false;
+        }
+    }
+
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return false;
+    }
+
+    invalidateMotorCommandCache(motor_id);
+    motor_statuses_[idx].collision = false;
+    motor_statuses_[idx].max_abs_torque = 0.0f;
+    torque_observe_enabled_[idx] = false;
+    motor_init_state_[idx] = MotorInitState::None;
+    motor_init_started_us_[idx] = 0;
+
+    ESP_LOGI(TAG, "电机%u 异步初始化：reset×2 -> set_zero -> mode -> enable（RX 环判定零位）", (unsigned)motor_id);
+
+    bool reset_ok = false;
+    for (int k = 0; k < 2; ++k) {
+        if (MotorProtocol::resetMotor(motor_id)) {
+            reset_ok = true;
+        }
+        if (k == 0) {
+            vTaskDelay(pdMS_TO_TICKS(8));
+        }
+    }
+    if (!reset_ok) {
+        ESP_LOGE(TAG, "电机%u reset 失败", (unsigned)motor_id);
+        motor_init_state_[idx] = MotorInitState::Failed;
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    motor_statuses_[idx].has_feedback = false;
+    motor_statuses_[idx].feedback_seq = 0;
+    motor_statuses_[idx].current_angle = 0.0f;
+    motor_statuses_[idx].current_speed = 0.0f;
+    motor_statuses_[idx].current_torque = 0.0f;
+
+    if (!sendInitCommandsAfterReset(motor_id, target_velocity_rad_s)) {
+        (void)MotorProtocol::resetMotor(motor_id);
+        motor_init_state_[idx] = MotorInitState::Failed;
+        return false;
+    }
+
+    (void)requestActiveReport(motor_id);
+    motor_init_state_[idx] = MotorInitState::Initializing;
+    motor_init_started_us_[idx] = esp_timer_get_time();
+    return true;
+}
+
 bool DeepMotor::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
+#if DEEP_DOG_MOTOR_INIT_ASYNC
+    return beginInitializeMotor(motor_id, target_velocity_rad_s);
+#else
     (void)target_velocity_rad_s;  // 预留：未来可用于 MIT 首帧速度意图/软启动
     if (!isMotorRegistered(motor_id)) {
         ESP_LOGW(TAG, "initializeMotor: motor %u 未注册，尝试注册", (unsigned)motor_id);
@@ -1152,9 +1334,11 @@ bool DeepMotor::initializeMotor(uint8_t motor_id, float target_velocity_rad_s) {
             torque_observe_enabled_[idx] = true;
             motor_statuses_[idx].max_abs_torque = 0.0f;
             motor_statuses_[idx].collision = false;
+            motor_init_state_[idx] = MotorInitState::Ready;
         }
     }
     return true;
+#endif  // !DEEP_DOG_MOTOR_INIT_ASYNC
 }
 
 bool DeepMotor::setMotorTargetAngle(uint8_t motor_id, float target_angle) {

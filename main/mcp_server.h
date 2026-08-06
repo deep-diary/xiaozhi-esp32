@@ -326,6 +326,16 @@ public:
     void ParseMessage(const cJSON* json);
     void ParseMessage(const std::string& message);
 
+    /** 同步调用已注册工具（MQTT/调试桥用，不走 Application::Schedule） */
+    struct InvokeResult {
+        bool ok = false;
+        std::string result_json;
+        std::string error_message;
+    };
+    InvokeResult InvokeToolSync(const std::string& tool_name, const cJSON* tool_arguments);
+    /** 将 name 以 prefix 开头的工具 schema 追加到 JSON array */
+    void AppendToolsToJsonArray(cJSON* tools_array, const char* name_prefix) const;
+
 private:
     McpServer();
     ~McpServer();

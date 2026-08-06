@@ -95,4 +95,20 @@
 #define MOTOR_SPEED_MIN 0
 #endif
 
+/**
+ * 异步初始化（旧固件无主动上报时推荐）：
+ * 1=发指令后不阻塞等零位，RX 环判定 ready；0=同步阻塞校验（旧行为）
+ */
+#ifndef DEEP_DOG_MOTOR_INIT_ASYNC
+#define DEEP_DOG_MOTOR_INIT_ASYNC 1
+#endif
+
+#ifndef DEEP_DOG_MOTOR_INIT_ZERO_TOL_RAD
+#define DEEP_DOG_MOTOR_INIT_ZERO_TOL_RAD 0.15f
+#endif
+
+#ifndef DEEP_DOG_MOTOR_INIT_TIMEOUT_MS
+#define DEEP_DOG_MOTOR_INIT_TIMEOUT_MS 30000
+#endif
+
 #endif  // _DEEP_DOG_MOTOR_CONFIG_H_

@@ -6,6 +6,9 @@
 #include "config.h"
 #include "net/net_config.h"
 #include "mcp_server.h"
+#if DEEP_DOG_WS_MCP_ENABLE
+#include "ws-mcp/deep_dog_ws_mcp_server.h"
+#endif
 #include "settings.h"
 #include "touch_btn/touch_button_controller.h"
 #include "touch_btn/touch_event_hub.h"
@@ -118,10 +121,6 @@
 #if DEEP_DOG_DOG_ENABLE
 #include "dog/dog_control.h"
 #endif
-#endif
-#if DEEP_DOG_WS_MCP_ENABLE
-#include "ws-mcp/ws_mcp_config.h"
-#include "ws-mcp/deep_dog_ws_mcp_server.h"
 #endif
 #if DEEP_DOG_VISION_HUB_ENABLE
 #include "vision/vision_frame_hub.h"
@@ -281,9 +280,6 @@ private:
 #endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE
     std::unique_ptr<DeepDogHttpServer> http_server_;
-#endif
-#if DEEP_DOG_WS_MCP_ENABLE
-    std::unique_ptr<DeepDogWsMcpServer> ws_mcp_server_;
 #endif
 #if DEEP_DOG_MQTT_ENABLE
     std::unique_ptr<DeepDogMqtt> board_mqtt_;
@@ -737,27 +733,6 @@ private:
 #endif
     }
 
-#if DEEP_DOG_WS_MCP_ENABLE
-    void InitializeWsMcpServer() {
-        ws_mcp_server_ = std::make_unique<DeepDogWsMcpServer>();
-        if (!ws_mcp_server_->Start(DEEP_DOG_WS_MCP_PORT)) {
-            ESP_LOGW(TAG, "WS MCP 服务启动失败（检查端口 %d）", DEEP_DOG_WS_MCP_PORT);
-            ws_mcp_server_.reset();
-            return;
-        }
-        Application::GetInstance().RegisterMcpBroadcastCallback([this](const std::string& payload) {
-            if (ws_mcp_server_) {
-                ws_mcp_server_->BroadcastMessage(payload);
-            }
-        });
-#if DEEP_DOG_MQTT_ENABLE
-        if (board_mqtt_) {
-            board_mqtt_->SetWsMcpEndpoint(DEEP_DOG_WS_MCP_PORT, DEEP_DOG_WS_MCP_PATH);
-        }
-#endif
-    }
-#endif
-
 public:
     DeepDog() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
@@ -899,13 +874,25 @@ public:
             }
         }
 #endif
-#if DEEP_DOG_WS_MCP_ENABLE
-        InitializeWsMcpServer();
-#endif
 #if DEEP_DOG_MQTT_ENABLE
         if (board_mqtt_ && !board_mqtt_->IsRunning()) {
             if (!board_mqtt_->Start()) {
                 ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
+            }
+        }
+#endif
+#if DEEP_DOG_WS_MCP_ENABLE
+        {
+            static DeepDogWsMcpServer ws_mcp;
+            if (ws_mcp.Start()) {
+                ESP_LOGI(TAG, "WS MCP on port %u path %s", (unsigned)ws_mcp.Port(), ws_mcp.Path());
+#if DEEP_DOG_MQTT_ENABLE
+                if (board_mqtt_) {
+                    board_mqtt_->SetWsMcpEndpoint(ws_mcp.Port(), ws_mcp.Path());
+                }
+#endif
+            } else {
+                ESP_LOGW(TAG, "WS MCP 启动失败");
             }
         }
 #endif

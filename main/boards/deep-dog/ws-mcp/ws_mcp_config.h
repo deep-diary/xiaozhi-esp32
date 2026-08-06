@@ -8,7 +8,11 @@
 #endif
 
 #ifndef DEEP_DOG_WS_MCP_ENABLE
+#if DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_DOG_ENABLE
+#define DEEP_DOG_WS_MCP_ENABLE 1
+#else
 #define DEEP_DOG_WS_MCP_ENABLE 0
+#endif
 #endif
 
 #ifndef DEEP_DOG_WS_MCP_PORT

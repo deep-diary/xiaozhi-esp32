@@ -116,6 +116,7 @@ void DeepDogDeviceMqtt::StatusTimerCb(void* arg) {
 void DeepDogDeviceMqtt::SetWsMcpEndpoint(int port, const char* path) {
     ws_mcp_port_ = port;
     ws_mcp_path_ = (path && path[0]) ? path : "/ws";
+    caps_.ws_mcp = (port > 0);
 }
 
 void DeepDogDeviceMqtt::OnConnected() {

@@ -506,6 +506,67 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     ReplyResult(id, json);
 }
 
+McpServer::InvokeResult McpServer::InvokeToolSync(const std::string& tool_name, const cJSON* tool_arguments) {
+    InvokeResult out;
+    auto tool_iter = std::find_if(tools_.begin(), tools_.end(),
+                                  [&tool_name](const McpTool* tool) { return tool->name() == tool_name; });
+    if (tool_iter == tools_.end()) {
+        out.error_message = "Unknown tool: " + tool_name;
+        return out;
+    }
+
+    PropertyList arguments = (*tool_iter)->properties();
+    try {
+        for (auto& argument : arguments) {
+            bool found = false;
+            if (cJSON_IsObject(tool_arguments)) {
+                auto value = cJSON_GetObjectItem(tool_arguments, argument.name().c_str());
+                if (argument.type() == kPropertyTypeBoolean && cJSON_IsBool(value)) {
+                    argument.set_value<bool>(value->valueint == 1);
+                    found = true;
+                } else if (argument.type() == kPropertyTypeInteger && cJSON_IsNumber(value)) {
+                    argument.set_value<int>(value->valueint);
+                    found = true;
+                } else if (argument.type() == kPropertyTypeString && cJSON_IsString(value)) {
+                    argument.set_value<std::string>(value->valuestring);
+                    found = true;
+                }
+            }
+            if (!argument.has_default_value() && !found) {
+                out.error_message = "Missing valid argument: " + argument.name();
+                return out;
+            }
+        }
+    } catch (const std::exception& e) {
+        out.error_message = e.what();
+        return out;
+    }
+
+    try {
+        out.result_json = (*tool_iter)->Call(arguments);
+        out.ok = true;
+    } catch (const std::exception& e) {
+        out.error_message = e.what();
+    }
+    return out;
+}
+
+void McpServer::AppendToolsToJsonArray(cJSON* tools_array, const char* name_prefix) const {
+    if (!tools_array || !cJSON_IsArray(tools_array) || !name_prefix) {
+        return;
+    }
+    const std::string prefix(name_prefix);
+    for (const McpTool* tool : tools_) {
+        if (tool->name().compare(0, prefix.size(), prefix) != 0) {
+            continue;
+        }
+        cJSON* item = cJSON_Parse(tool->to_json().c_str());
+        if (item) {
+            cJSON_AddItemToArray(tools_array, item);
+        }
+    }
+}
+
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
     auto tool_iter = std::find_if(tools_.begin(), tools_.end(), 
                                  [&tool_name](const McpTool* tool) { 
