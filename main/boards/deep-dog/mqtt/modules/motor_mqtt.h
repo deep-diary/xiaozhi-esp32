@@ -32,6 +32,8 @@ private:
     static void StatusTimerCb(void* arg);
     void ApplyCmd(const char* json);
     bool PublishTools();
+    bool PublishTeachingSnapshot(uint8_t motor_id);
+    bool PublishTeachingStatus();
     void PublishMcpResult(const char* tool_name, bool ok, const char* result_json, const char* error);
 
     DeepDogMqttClient* client_;

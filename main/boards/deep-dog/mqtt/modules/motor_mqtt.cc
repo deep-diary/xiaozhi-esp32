@@ -270,6 +270,52 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
 #endif
 }
 
+bool DeepDogMotorMqtt::PublishTeachingSnapshot(uint8_t motor_id) {
+#if !DEEP_DOG_MOTOR_ENABLE
+    (void)motor_id;
+    return false;
+#else
+    if (!enabled_ || !connected_ || !client_) {
+        return false;
+    }
+    DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
+    if (!motor) {
+        return false;
+    }
+    char* json = motor->buildTeachingSnapshotJson(motor_id);
+    if (!json) {
+        return false;
+    }
+    const bool ok = client_->Publish("motor/teaching/snapshot", json, 0, false);
+    cJSON_free(json);
+    if (ok) {
+        ESP_LOGI(TAG, "motor/teaching/snapshot motor_id=%u", (unsigned)motor_id);
+    }
+    return ok;
+#endif
+}
+
+bool DeepDogMotorMqtt::PublishTeachingStatus() {
+#if !DEEP_DOG_MOTOR_ENABLE
+    return false;
+#else
+    if (!enabled_ || !connected_ || !client_) {
+        return false;
+    }
+    DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
+    if (!motor) {
+        return false;
+    }
+    char* json = motor->buildTeachingStatusJson();
+    if (!json) {
+        return false;
+    }
+    const bool ok = client_->Publish("motor/teaching/status", json, 0, true);
+    cJSON_free(json);
+    return ok;
+#endif
+}
+
 void DeepDogMotorMqtt::ApplyCmd(const char* json) {
 #if !DEEP_DOG_MOTOR_ENABLE
     (void)json;
@@ -391,6 +437,94 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
         const float tau = cJSON_IsNumber(mt) ? static_cast<float>(mt->valuedouble) : 0.f;
         const bool sent = motor->setMotorMitCommand(motor_id, p, v, kp, kd, tau);
         ESP_LOGI(TAG, "motor/cmd mit motor_id=%u pos=%.3f sent=%d", (unsigned)motor_id, (double)p, sent ? 1 : 0);
+    }
+
+    const cJSON* teaching = cJSON_GetObjectItem(root, "teaching");
+    if (cJSON_IsString(teaching) && teaching->valuestring) {
+        const char* action = teaching->valuestring;
+        const cJSON* ids_j = cJSON_GetObjectItem(root, "teaching_motor_ids");
+        uint8_t multi_ids[MAX_MOTOR_COUNT];
+        uint8_t multi_count = 0;
+        if (cJSON_IsArray(ids_j)) {
+            const int n = cJSON_GetArraySize(ids_j);
+            for (int i = 0; i < n && multi_count < MAX_MOTOR_COUNT; ++i) {
+                const cJSON* item = cJSON_GetArrayItem(ids_j, i);
+                if (cJSON_IsNumber(item) && item->valueint > 0) {
+                    multi_ids[multi_count++] = static_cast<uint8_t>(item->valueint);
+                    EnsureMotorRegistered(motor, multi_ids[multi_count - 1]);
+                }
+            }
+        }
+        if (strcmp(action, "start") == 0) {
+            TeachingRecordConfig rc = TeachingRecordConfigDefault();
+            const cJSON* sp = cJSON_GetObjectItem(root, "sample_period_ms");
+            if (cJSON_IsNumber(sp) && sp->valueint > 0) {
+                rc.sample_period_ms = static_cast<uint32_t>(sp->valueint);
+            }
+            if (multi_count > 0) {
+                (void)motor->startTeachingMulti(multi_ids, multi_count, &rc);
+                ESP_LOGI(TAG, "motor/cmd teaching start multi count=%u", (unsigned)multi_count);
+            } else {
+                (void)motor->startTeaching(motor_id, &rc);
+                ESP_LOGI(TAG, "motor/cmd teaching start motor_id=%u", (unsigned)motor_id);
+            }
+            (void)PublishTeachingStatus();
+        } else if (strcmp(action, "stop") == 0) {
+            (void)motor->stopTeaching();
+            ESP_LOGI(TAG, "motor/cmd teaching stop");
+            int8_t ids[MAX_MOTOR_COUNT];
+            const uint8_t n = motor->getRegisteredMotorIds(ids, MAX_MOTOR_COUNT);
+            bool published = false;
+            for (uint8_t i = 0; i < n; ++i) {
+                const uint8_t mid = static_cast<uint8_t>(ids[i]);
+                if (motor->getTeachingPointCount(mid) > 0) {
+                    (void)PublishTeachingSnapshot(mid);
+                    published = true;
+                }
+            }
+            if (!published) {
+                (void)PublishTeachingSnapshot(motor_id);
+            }
+            (void)PublishTeachingStatus();
+        } else if (strcmp(action, "play") == 0) {
+            TeachingPlayConfig play_cfg = TeachingPlayConfigDefault();
+            const cJSON* dur = cJSON_GetObjectItem(root, "play_duration_ms");
+            const cJSON* blend = cJSON_GetObjectItem(root, "play_blend_ms");
+            const cJSON* pkp = cJSON_GetObjectItem(root, "play_kp");
+            const cJSON* pkd = cJSON_GetObjectItem(root, "play_kd");
+            const cJSON* ptau = cJSON_GetObjectItem(root, "play_tau_ff");
+            const cJSON* pts = cJSON_GetObjectItem(root, "play_time_scale");
+            const cJSON* put = cJSON_GetObjectItem(root, "play_use_timeline");
+            if (cJSON_IsNumber(dur)) {
+                play_cfg.duration_ms = static_cast<uint32_t>(dur->valuedouble);
+            }
+            if (cJSON_IsNumber(blend)) {
+                play_cfg.blend_ms = static_cast<uint32_t>(blend->valuedouble);
+            }
+            if (cJSON_IsNumber(pkp)) {
+                play_cfg.kp = static_cast<float>(pkp->valuedouble);
+            }
+            if (cJSON_IsNumber(pkd)) {
+                play_cfg.kd = static_cast<float>(pkd->valuedouble);
+            }
+            if (cJSON_IsNumber(ptau)) {
+                play_cfg.tau_ff = static_cast<float>(ptau->valuedouble);
+            }
+            if (cJSON_IsNumber(pts)) {
+                play_cfg.time_scale = static_cast<float>(pts->valuedouble);
+            }
+            if (cJSON_IsBool(put)) {
+                play_cfg.use_recorded_timeline = cJSON_IsTrue(put);
+            }
+            bool ok = false;
+            if (multi_count > 0) {
+                ok = motor->executeTeachingMulti(multi_ids, multi_count, &play_cfg);
+            } else {
+                ok = motor->executeTeaching(motor_id, &play_cfg);
+            }
+            ESP_LOGI(TAG, "motor/cmd teaching play ok=%d time_scale=%.2f", ok ? 1 : 0,
+                     (double)play_cfg.time_scale);
+        }
     }
 
     cJSON_Delete(root);

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "protocol_motor.h"
+#include "deep_motor_teaching.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led/circular_strip.h"
@@ -30,9 +31,7 @@
 #define MOTOR_FEEDBACK_MASK 0x02000000
 #define MOTOR_FEEDBACK_MASK_SHIFT 24
 
-// 录制功能相关常量
-#define MAX_TEACHING_POINTS 300        // 最大录制点数
-#define TEACHING_SAMPLE_RATE_MS 50     // 录制采样间隔(ms)
+// 录制功能相关常量（TeachingSample 等见 deep_motor_teaching.h）
 #define INIT_STATUS_RATE_MS 200       // 初始化状态查询间隔(ms)
 
 /** 电机初始化生命周期（MOT-09 异步 init） */
@@ -42,10 +41,6 @@ enum class MotorInitState : uint8_t {
     Ready,
     Failed,
 };
-
-// 宏定义用于解析29位ID
-#define RX_29ID_DISASSEMBLE_MOTOR_ID(id)        (uint8_t)(((id)>>8)&0xFF)
-#define RX_29ID_DISASSEMBLE_MASTER_ID(id)       (uint8_t)((id)&0xFF)
 
 class DeepMotor {
 private:
@@ -87,18 +82,12 @@ private:
     
     // 已注册电机数量
     uint8_t registered_count_;
-    
-    // 录制功能相关变量
-    bool teaching_mode_;                    // 录制模式标志
-    bool teaching_data_ready_;              // 录制数据就绪标志
-    float teaching_positions_[MAX_TEACHING_POINTS];  // 录制位置数据数组
-    uint16_t teaching_point_count_;         // 当前录制点数
-    uint16_t current_execute_index_;        // 当前执行索引
-    
+
+    /** 示教录制/播放（MOT-12） */
+    MotorTeachingManager teaching_;
+
     // 任务句柄
     TaskHandle_t init_status_task_handle_;  // 初始化状态查询任务句柄
-    TaskHandle_t teaching_task_handle_;     // 录制任务句柄
-    TaskHandle_t execute_task_handle_;      // 播放任务句柄
     
     // 查找电机ID在注册列表中的索引
     int8_t findMotorIndex(uint8_t motor_id) const;
@@ -113,8 +102,6 @@ private:
     
     // 静态任务函数
     static void initStatusTask(void* parameter);
-    static void recordingTask(void* parameter);
-    static void playTask(void* parameter);
     
     // 回调函数类型定义
     typedef void (*MotorDataCallback)(uint8_t motor_id, float position, void* user_data);
@@ -303,7 +290,8 @@ public:
      * 3. 设置录制标志位
      * 4. 清空录制数据数组
      */
-    bool startTeaching(uint8_t motor_id);
+    bool startTeaching(uint8_t motor_id, const TeachingRecordConfig* cfg = nullptr);
+    bool startTeachingMulti(const uint8_t* motor_ids, uint8_t count, const TeachingRecordConfig* cfg = nullptr);
     
     /**
      * @brief 结束录制模式
@@ -317,17 +305,18 @@ public:
     bool stopTeaching();
     
     /**
-     * @brief 播放录制
+     * @brief 播放录制（MIT 轨迹，MOT-11）
      * @param motor_id 电机ID
-     * @return true 成功, false 失败
-     * 
-     * 功能：
-     * 1. 使能电机
-     * 2. 每隔50ms发送位置数据
-     * 3. 按顺序发送录制数据
-     * 4. 发送完毕后停止
+     * @param cfg 播放参数；nullptr 使用默认（duration 10s、blend 500ms、kp/kd=1）
+     * @return true 成功启动播放任务, false 失败
      */
-    bool executeTeaching(uint8_t motor_id);
+    bool executeTeaching(uint8_t motor_id, const TeachingPlayConfig* cfg = nullptr);
+    bool executeTeachingMulti(const uint8_t* motor_ids, uint8_t count, const TeachingPlayConfig* cfg = nullptr);
+
+    const TeachingTrack* getTeachingTrack(uint8_t motor_id) const;
+    char* buildTeachingSnapshotJson(uint8_t motor_id) const;
+    char* buildTeachingStatusJson() const;
+    int8_t getActiveTeachingMotorId() const;
     
     /**
      * @brief 获取录制状态
@@ -346,6 +335,7 @@ public:
      * @return 录制点数
      */
     uint16_t getTeachingPointCount() const;
+    uint16_t getTeachingPointCount(uint8_t motor_id) const;
     
     /**
      * @brief 启动初始化状态查询任务

@@ -20,6 +20,8 @@ Deep-Dog **单电机调试与 CAN 总线**需求入口。四足整机运控仍�
 | [05-analog-axis-sample](./05-analog-axis-sample.md) | 轴归一化样例；框架权威在 I08b |
 | [09-async-init](./09-async-init.md) | 异步初始化（旧固件无主动上报） |
 | [10-motor-mcp-bridge](./10-motor-mcp-bridge.md) | 电机页 MCP 工具 MQTT 桥 |
+| [11-teaching-playback-mit](./11-teaching-playback-mit.md) | 示教录制 MIT 轨迹播放（索引 → [teaching/](./teaching/README.md)） |
+| [teaching/](./teaching/README.md) | **示教子域** MOT-11/12/13 |
 | [VERIFY](./VERIFY.md) | 实机验收清单 |
 
 ## 边界

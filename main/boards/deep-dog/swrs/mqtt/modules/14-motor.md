@@ -30,6 +30,8 @@
 | `motor/tools` | ↑ | 0 | true |
 | `motor/mcp_result` | ↑ | 0 | false |
 | `motor/cmd` | ↓ | 1 | false |
+| `motor/teaching/snapshot` | ↑ | 0 | false |
+| `motor/teaching/status` | ↑ | 0 | true |
 
 前缀：`deepdiary/deep-dog/{device_id}/`。
 
@@ -46,6 +48,14 @@
 | `speed_limit` | float | 否 | 限速 rad/s |
 | `iq_ref` | float | 否 | 电流环目标 |
 | `mit` | object | 否 | `{ position_rad, velocity_rad_s, kp, kd, torque_ff }` |
+| `teaching` | string | 否 | `"start"` / `"stop"` / `"play"`（MOT-11/12，详见 [teaching/](../../motor/teaching/README.md)） |
+| `teaching_motor_ids` | int[] | 否 | multi 录制/播放电机 ID 列表 |
+| `sample_period_ms` | int | 否 | start 时 EPScan 周期，默认 50 |
+| `play_duration_ms` | int | 否 | play 均匀模式时长，默认 10000 |
+| `play_blend_ms` | int | 否 | 过渡到首点，默认 3000 |
+| `play_time_scale` | float | 否 | 时间轴缩放，默认 1.0（2.0=两倍慢） |
+| `play_use_timeline` | bool | 否 | 是否按录制 `t_ms` 播放，默认 true |
+| `play_kp` / `play_kd` / `play_tau_ff` | float | 否 | MIT 增益，默认 1/1/0 |
 | `mcp_call` | object | 否 | `{ name, arguments }` 执行 `self.motor.*` / `self.can.*` 工具（MOT-10） |
 | `ts` | int | 否 | Unix 秒 |
 
@@ -73,6 +83,14 @@
 | `motors[].master_id` | int | 主站 CAN ID |
 | `motors[].collision` | bool | 堵转/碰撞 latch |
 | `ts` | int | Unix 秒 |
+
+### `motor/teaching/snapshot`（MOT-12）
+
+stop 录制后发布：`motor_id`, `point_count`, `duration_ms`, `sample_period_ms`, `samples[]`（`t_ms`, `pos`, `vel`）。
+
+### `motor/teaching/status` retain
+
+`recording`, `ready`, `motor_id`, `point_count`, `duration_ms`。
 
 以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
 

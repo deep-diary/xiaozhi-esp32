@@ -438,25 +438,44 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         }
     });
 
-    // 播放录制
-    mcp_server.AddTool("self.motor.play_recording", "播放录制", PropertyList(std::vector<Property>{
-        Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
-    }), [deep_motor](const PropertyList& properties) -> ReturnValue {
-        int motor_id = properties["motor_id"].value<int>();
-        
+    // 播放录制（MIT 轨迹，MOT-11）
+    mcp_server.AddTool("self.motor.play_recording",
+                       "播放录制（MIT 运控：过渡→轨迹插值，默认 10s）",
+                       PropertyList(std::vector<Property>{
+                           Property("motor_id", kPropertyTypeInteger, 1, 1, 255),
+                           Property("duration_ms", kPropertyTypeInteger, TEACHING_PLAY_DURATION_MS_DEFAULT, 1000,
+                                    120000),
+                           Property("blend_ms", kPropertyTypeInteger, TEACHING_PLAY_BLEND_MS_DEFAULT, 0, 5000),
+                           Property("time_scale_x10", kPropertyTypeInteger, 10, 1, 100),
+                           Property("kp_x10", kPropertyTypeInteger, 10, 0, 5000),
+                           Property("kd_x10", kPropertyTypeInteger, 10, 0, 50),
+                           Property("tau_ff_x10", kPropertyTypeInteger, 0, -60, 60),
+                       }),
+                       [deep_motor](const PropertyList& properties) -> ReturnValue {
+        const int motor_id = properties["motor_id"].value<int>();
+
         if (!deep_motor) {
             ESP_LOGW(TAG, "深度电机管理器未初始化");
             return std::string("深度电机管理器未初始化");
         }
-        
-        if (deep_motor->executeTeaching(motor_id)) {
-            uint16_t point_count = deep_motor->getTeachingPointCount();
-            ESP_LOGI(TAG, "播放录制成功，电机ID: %d，总点数: %d", motor_id, point_count);
-            return std::string("播放录制成功，电机ID: " + std::to_string(motor_id) + "，总点数: " + std::to_string(point_count));
-        } else {
-            ESP_LOGE(TAG, "播放录制失败，电机ID: %d", motor_id);
-            return std::string("播放录制失败，电机ID: " + std::to_string(motor_id));
+
+        TeachingPlayConfig cfg;
+        cfg.duration_ms = static_cast<uint32_t>(properties["duration_ms"].value<int>());
+        cfg.blend_ms = static_cast<uint32_t>(properties["blend_ms"].value<int>());
+        cfg.time_scale = properties["time_scale_x10"].value<int>() / 10.0f;
+        cfg.kp = properties["kp_x10"].value<int>() / 10.0f;
+        cfg.kd = properties["kd_x10"].value<int>() / 10.0f;
+        cfg.tau_ff = properties["tau_ff_x10"].value<int>() / 10.0f;
+
+        if (deep_motor->executeTeaching(static_cast<uint8_t>(motor_id), &cfg)) {
+            const uint16_t point_count = deep_motor->getTeachingPointCount();
+            ESP_LOGI(TAG, "MIT 播放启动 id=%d 点数=%u duration=%ums", motor_id, point_count,
+                     (unsigned)cfg.duration_ms);
+            return std::string("MIT 播放启动，电机ID: " + std::to_string(motor_id) + "，总点数: " +
+                               std::to_string(point_count) + "，duration_ms=" + std::to_string(cfg.duration_ms));
         }
+        ESP_LOGE(TAG, "MIT 播放失败 id=%d", motor_id);
+        return std::string("播放录制失败，电机ID: " + std::to_string(motor_id));
     });
 
     // 获取录制状态

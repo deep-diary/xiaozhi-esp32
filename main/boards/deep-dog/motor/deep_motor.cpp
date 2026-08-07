@@ -47,10 +47,8 @@ static inline bool motorNearlyEqual(float a, float b, float eps) {
 }
 
 DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registered_count_(0),
-                         teaching_mode_(false), teaching_data_ready_(false),
-                         teaching_point_count_(0), current_execute_index_(0),
-                         init_status_task_handle_(nullptr), teaching_task_handle_(nullptr),
-                         execute_task_handle_(nullptr), led_state_manager_(nullptr) {
+                         teaching_(this),
+                         init_status_task_handle_(nullptr), led_state_manager_(nullptr) {
     // 初始化所有电机ID为未注册状态
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
@@ -67,9 +65,6 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
         motor_cmd_cache_[i].iq_known = false;
         active_report_refcount_[i] = 0;
     }
-    
-    // 初始化录制数据数组
-    memset(teaching_positions_, 0, sizeof(teaching_positions_));
     
     // 初始化回调函数
     data_callback_ = nullptr;
@@ -101,16 +96,8 @@ DeepMotor::~DeepMotor() {
         vTaskDelete(init_status_task_handle_);
         init_status_task_handle_ = nullptr;
     }
-    
-    if (teaching_task_handle_ != nullptr) {
-        vTaskDelete(teaching_task_handle_);
-        teaching_task_handle_ = nullptr;
-    }
-    
-    if (execute_task_handle_ != nullptr) {
-        vTaskDelete(execute_task_handle_);
-        execute_task_handle_ = nullptr;
-    }
+
+    teaching_.shutdown();
 
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         if (active_report_refcount_[i] > 0 && registered_motor_ids_[i] != MOTOR_ID_UNREGISTERED) {
@@ -243,12 +230,11 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
         // 更新活跃电机ID为当前收到数据的电机
         active_motor_id_ = motor_id;
         
-        // 如果在录制模式下，保存位置数据
-        if (teaching_mode_ && teaching_point_count_ < MAX_TEACHING_POINTS) {
-            teaching_positions_[teaching_point_count_] = motor_statuses_[motor_index].current_angle;
-            teaching_point_count_++;
-            ESP_LOGI(TAG, "录制数据保存: 点%d, 位置=%.3f rad", 
-                     teaching_point_count_, motor_statuses_[motor_index].current_angle);
+        // 示教录制：存 (t, pos, vel)
+        if (teaching_.isTeachingMode()) {
+            const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
+            teaching_.onFeedback(motor_id, motor_statuses_[motor_index].current_angle,
+                                 motor_statuses_[motor_index].current_speed, now_ms);
         }
         
         // 更新LED状态显示
@@ -610,169 +596,57 @@ void DeepMotor::initStatusTask(void* parameter) {
     }
 }
 
-void DeepMotor::recordingTask(void* parameter) {
-    DeepMotor* motor_manager = static_cast<DeepMotor*>(parameter);
-    (void)motor_manager;
-    ESP_LOGI(TAG, "录制任务运行中（依赖 T24 主动上报）");
-
-    while (motor_manager->teaching_mode_) {
-        vTaskDelay(pdMS_TO_TICKS(TEACHING_SAMPLE_RATE_MS));
-    }
-    
-    ESP_LOGI(TAG, "录制任务结束");
-    vTaskDelete(nullptr);
+// 示教功能（委托 MotorTeachingManager）
+bool DeepMotor::startTeaching(uint8_t motor_id, const TeachingRecordConfig* cfg) {
+    return teaching_.startTeaching(motor_id, cfg);
 }
 
-void DeepMotor::playTask(void* parameter) {
-    DeepMotor* motor_manager = static_cast<DeepMotor*>(parameter);
-    int8_t motor_id = motor_manager->active_motor_id_;
-    
-    ESP_LOGI(TAG, "播放任务启动，电机ID: %d，总点数: %d", motor_id, motor_manager->teaching_point_count_);
-    
-    for (uint16_t i = 0; i < motor_manager->teaching_point_count_; i++) {
-        float position = motor_manager->teaching_positions_[i];
-        
-        // 发送位置指令
-        (void)motor_manager->setMotorPositionRefOnly(static_cast<uint8_t>(motor_id), position);
-        
-        ESP_LOGD(TAG, "播放录制点 %d/%d: 位置=%.3f rad", 
-                 i + 1, motor_manager->teaching_point_count_, position);
-        
-        vTaskDelay(pdMS_TO_TICKS(TEACHING_SAMPLE_RATE_MS));
-    }
-    
-    ESP_LOGI(TAG, "播放录制完成");
-    vTaskDelete(nullptr);
-}
-
-// 录制功能实现
-bool DeepMotor::startTeaching(uint8_t motor_id) {
-    if (teaching_mode_) {
-        ESP_LOGW(TAG, "录制模式已启动，请先停止当前录制");
-        return false;
-    }
-    
-    if (!isMotorRegistered(motor_id)) {
-        ESP_LOGE(TAG, "电机ID %d 未注册，无法开始录制", motor_id);
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "开始录制模式，电机ID: %d", motor_id);
-    
-    // 1. 停止电机（便于人工拖动）
-    if (!MotorProtocol::resetMotor(motor_id)) {
-        ESP_LOGE(TAG, "停止电机失败");
-        return false;
-    }
-    invalidateMotorCommandCache(motor_id);
-
-    // 2. 设置录制标志位
-    teaching_mode_ = true;
-    teaching_data_ready_ = false;
-    teaching_point_count_ = 0;
-    current_execute_index_ = 0;
-    
-    // 3. 清空录制数据数组
-    memset(teaching_positions_, 0, sizeof(teaching_positions_));
-    
-    // 4. 设置活跃电机ID
-    setActiveMotorId(motor_id);
-
-    (void)requestActiveReport(motor_id);
-    
-    // 5. 创建录制任务
-    BaseType_t ret = xTaskCreate(recordingTask, "recording_task", 4096, this, 5, &teaching_task_handle_);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "创建录制任务失败");
-        teaching_mode_ = false;
-        (void)releaseActiveReport(motor_id);
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "录制模式启动成功，可以开始拖动电机");
-    return true;
+bool DeepMotor::startTeachingMulti(const uint8_t* motor_ids, uint8_t count, const TeachingRecordConfig* cfg) {
+    return teaching_.startTeachingMulti(motor_ids, count, cfg);
 }
 
 bool DeepMotor::stopTeaching() {
-    if (!teaching_mode_) {
-        ESP_LOGW(TAG, "录制模式未启动");
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "结束录制模式，共记录 %d 个录制点", teaching_point_count_);
-
-    if (active_motor_id_ != MOTOR_ID_UNREGISTERED) {
-        (void)releaseActiveReport(static_cast<uint8_t>(active_motor_id_));
-    }
-    
-    // 1. 终止录制任务
-    if (teaching_task_handle_ != nullptr) {
-        vTaskDelete(teaching_task_handle_);
-        teaching_task_handle_ = nullptr;
-    }
-    
-    // 2. 清除录制标志位
-    teaching_mode_ = false;
-    
-    // 3. 保存录制数据
-    if (teaching_point_count_ > 0) {
-        teaching_data_ready_ = true;
-        ESP_LOGI(TAG, "录制数据保存完成，共 %d 个点", teaching_point_count_);
-    } else {
-        ESP_LOGW(TAG, "录制数据为空");
-    }
-    
-    return true;
+    return teaching_.stopTeaching();
 }
 
-bool DeepMotor::executeTeaching(uint8_t motor_id) {
-    if (!teaching_data_ready_) {
-        ESP_LOGE(TAG, "录制数据未就绪，请先完成录制");
-        return false;
-    }
-    
-    if (teaching_point_count_ == 0) {
-        ESP_LOGE(TAG, "录制数据为空，无法播放");
-        return false;
-    }
-    
-    if (!isMotorRegistered(motor_id)) {
-        ESP_LOGE(TAG, "电机ID %d 未注册，无法播放录制", motor_id);
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "开始播放录制，电机ID: %d，总点数: %d", motor_id, teaching_point_count_);
-    
-    // 1. 使能电机
-    if (!MotorProtocol::enableMotor(motor_id)) {
-        ESP_LOGE(TAG, "使能电机失败");
-        return false;
-    }
-    
-    // 2. 设置活跃电机ID
-    setActiveMotorId(motor_id);
-    
-    // 3. 创建播放任务
-    BaseType_t ret = xTaskCreate(playTask, "play_task", 4096, this, 5, &execute_task_handle_);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "创建播放任务失败");
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "播放录制任务启动成功");
-    return true;
+bool DeepMotor::executeTeaching(uint8_t motor_id, const TeachingPlayConfig* cfg) {
+    return teaching_.executeTeaching(motor_id, cfg);
+}
+
+bool DeepMotor::executeTeachingMulti(const uint8_t* motor_ids, uint8_t count, const TeachingPlayConfig* cfg) {
+    return teaching_.executeTeachingMulti(motor_ids, count, cfg);
+}
+
+const TeachingTrack* DeepMotor::getTeachingTrack(uint8_t motor_id) const {
+    return teaching_.getTrack(motor_id);
+}
+
+char* DeepMotor::buildTeachingSnapshotJson(uint8_t motor_id) const {
+    return teaching_.buildSnapshotJson(motor_id);
+}
+
+char* DeepMotor::buildTeachingStatusJson() const {
+    return teaching_.buildTeachingStatusJson();
+}
+
+int8_t DeepMotor::getActiveTeachingMotorId() const {
+    return teaching_.getActiveTeachingMotorId();
 }
 
 bool DeepMotor::isTeachingMode() const {
-    return teaching_mode_;
+    return teaching_.isTeachingMode();
 }
 
 bool DeepMotor::isTeachingDataReady() const {
-    return teaching_data_ready_;
+    return teaching_.isTeachingDataReady();
 }
 
 uint16_t DeepMotor::getTeachingPointCount() const {
-    return teaching_point_count_;
+    return teaching_.getTeachingPointCount();
+}
+
+uint16_t DeepMotor::getTeachingPointCount(uint8_t motor_id) const {
+    return teaching_.getTeachingPointCount(motor_id);
 }
 
 bool DeepMotor::startInitStatusTask(uint8_t motor_id) {

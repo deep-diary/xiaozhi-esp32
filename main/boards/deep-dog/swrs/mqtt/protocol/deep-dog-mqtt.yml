@@ -998,6 +998,22 @@ topics:
           kp: { type: float, optional: true }
           kd: { type: float, optional: true }
           torque_ff: { type: float, optional: true }
+      teaching:
+        type: string
+        optional: true
+        note: "start | stop | play (MOT-11/12)"
+      teaching_motor_ids:
+        type: array
+        optional: true
+        note: "multi-axis motor ids"
+      sample_period_ms: { type: int, optional: true, note: "EPScan period on start, default 50" }
+      play_duration_ms: { type: int, optional: true, note: "uniform play ms, default 10000" }
+      play_blend_ms: { type: int, optional: true, note: "blend to first point ms, default 3000" }
+      play_time_scale: { type: float, optional: true, note: "timeline scale, default 1.0" }
+      play_use_timeline: { type: bool, optional: true, note: "use recorded t_ms, default true" }
+      play_kp: { type: float, optional: true }
+      play_kd: { type: float, optional: true }
+      play_tau_ff: { type: float, optional: true }
       mcp_call:
         type: object
         optional: true
@@ -1050,6 +1066,39 @@ topics:
           temperature: { type: float, optional: true }
           fault: { type: bool, optional: true }
           target_rad: { type: float, optional: true }
+      ts: { type: int }
+
+  motor/teaching/snapshot:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: false
+    note: "Teaching track after stop (MOT-12)"
+    payload:
+      motor_id: { type: int }
+      point_count: { type: int }
+      duration_ms: { type: int }
+      sample_period_ms: { type: int }
+      samples:
+        type: array
+        item:
+          t_ms: { type: int }
+          pos: { type: float }
+          vel: { type: float }
+      ts: { type: int }
+
+  motor/teaching/status:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: true
+    note: "Teaching session summary"
+    payload:
+      recording: { type: bool }
+      ready: { type: bool }
+      motor_id: { type: int, optional: true }
+      point_count: { type: int, optional: true }
+      duration_ms: { type: int, optional: true }
       ts: { type: int }
 
   # ---- reserved ----

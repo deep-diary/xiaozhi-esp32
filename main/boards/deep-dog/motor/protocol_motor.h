@@ -112,7 +112,8 @@ typedef enum {
     PARAM_LIMIT_CUR = 0x7018,  // 电流限制
     PARAM_LOC_KP = 0x701E,     // 位置Kp
     PARAM_SPD_KP = 0x701F,     // 速度Kp
-    PARAM_SPD_KI = 0x7020      // 速度Ki
+    PARAM_SPD_KI = 0x7020,     // 速度Ki
+    PARAM_EPScan_time = 0x7026 // 主动上报周期 n：period_ms = 10+(n-1)*5
 } motor_param_t;
 
 // 电机状态结构体
@@ -276,6 +277,11 @@ public:
      * @param enable true 开启，false 关闭
      */
     static bool setActiveReportSwitch(uint8_t motor_id, bool enable);
+
+    /** EPScan 0x7026：设置主动上报周期（ms），内部换算为 n 写寄存器 */
+    static bool setEpScanPeriodMs(uint8_t motor_id, uint32_t period_ms);
+    static uint8_t periodMsToEpScanN(uint32_t period_ms);
+    static uint32_t epScanNToPeriodMs(uint8_t n);
 
     /**
      * @brief 设置电机参数

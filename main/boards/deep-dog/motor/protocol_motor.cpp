@@ -308,6 +308,26 @@ bool MotorProtocol::setActiveReportSwitch(uint8_t motor_id, bool enable) {
     return sendCanFrame(frame);
 }
 
+uint8_t MotorProtocol::periodMsToEpScanN(uint32_t period_ms) {
+    if (period_ms < 10) {
+        period_ms = 10;
+    }
+    return static_cast<uint8_t>((period_ms - 10) / 5 + 1);
+}
+
+uint32_t MotorProtocol::epScanNToPeriodMs(uint8_t n) {
+    if (n < 1) {
+        n = 1;
+    }
+    return 10 + static_cast<uint32_t>(n - 1) * 5;
+}
+
+bool MotorProtocol::setEpScanPeriodMs(uint8_t motor_id, uint32_t period_ms) {
+    const uint8_t n = periodMsToEpScanN(period_ms);
+    ESP_LOGI(TAG, "电机%u EPScan n=%u period=%ums", (unsigned)motor_id, (unsigned)n, (unsigned)period_ms);
+    return setMotorParameter(motor_id, PARAM_EPScan_time, static_cast<float>(n));
+}
+
 bool MotorProtocol::setMotorParameter(uint8_t motor_id, motor_param_t param, float value) {
     CanFrame frame;
     memset(&frame, 0, sizeof(frame));
