@@ -8,6 +8,7 @@
 #include "motor/deep_motor.h"
 #include "motor/protocol_motor.h"
 #include "motor/motor_access.h"
+#include "motor/motor_config.h"
 #endif
 
 #include <cJSON.h>
@@ -22,6 +23,11 @@
 #define TAG "dog_mqtt_motor"
 
 namespace {
+
+constexpr int64_t kStatusThrottleUs =
+    static_cast<int64_t>(DEEP_DOG_MOTOR_MQTT_STATUS_THROTTLE_MS) * 1000LL;
+constexpr int64_t kStatusHeartbeatUs =
+    static_cast<int64_t>(DEEP_DOG_MOTOR_MQTT_STATUS_HEARTBEAT_MS) * 1000LL;
 
 int64_t UnixTs() {
     const time_t now = time(nullptr);
@@ -67,6 +73,25 @@ const char* ModeStatusStr(motor_mode_t mode) {
     }
 }
 
+const char* RunModeStr(motor_run_mode_t mode) {
+    switch (mode) {
+        case MOTOR_CTRL_MODE:
+            return "mit";
+        case MOTOR_POS_MODE:
+            return "position";
+        case MOTOR_SPEED_MODE:
+            return "speed";
+        case MOTOR_CURRENT_MODE:
+            return "current";
+        default:
+            return "unknown";
+    }
+}
+
+const char* DriveStateStr(motor_mode_t mode) {
+    return ModeStatusStr(mode);
+}
+
 void AppendMotorStatusFields(cJSON* m, const motor_status_t& st) {
     cJSON_AddNumberToObject(m, "position_rad", st.current_angle);
     cJSON_AddNumberToObject(m, "speed_rad_s", st.current_speed);
@@ -84,11 +109,16 @@ void AppendMotorStatusFields(cJSON* m, const motor_status_t& st) {
     cJSON_AddBoolToObject(m, "has_feedback", st.has_feedback);
     cJSON_AddNumberToObject(m, "feedback_seq", static_cast<double>(st.feedback_seq));
     cJSON_AddNumberToObject(m, "master_id", st.master_id);
-    cJSON_AddStringToObject(m, "mode_status", ModeStatusStr(st.mode_status));
+    cJSON_AddStringToObject(m, "drive_state", DriveStateStr(st.mode_status));
+    cJSON_AddStringToObject(m, "mode_status", DriveStateStr(st.mode_status));
+    cJSON_AddBoolToObject(m, "motor_enabled", st.motor_enabled);
+    if (st.run_mode_known) {
+        cJSON_AddStringToObject(m, "run_mode", RunModeStr(st.run_mode));
+    }
     cJSON_AddBoolToObject(m, "has_device_id", st.has_device_id);
     if (st.has_device_id) {
         char uid_hex[17];
-        snprintf(uid_hex, sizeof(uid_hex), "%016llX", static_cast<unsigned long long>(st.mcu_uid));
+        MotorProtocol::FormatMcuUidHex(st.mcu_uid, uid_hex, sizeof(uid_hex));
         cJSON_AddStringToObject(m, "mcu_uid_hex", uid_hex);
         cJSON_AddStringToObject(m, "mcu_uid", uid_hex);
     }
@@ -108,16 +138,28 @@ void EnsureMotorRegistered(DeepMotor* motor, uint8_t motor_id) {
 
 DeepDogMotorMqtt::DeepDogMotorMqtt(DeepDogMqttClient* client) : client_(client) {
 #if DEEP_DOG_MOTOR_ENABLE
-    esp_timer_handle_t timer = nullptr;
-    esp_timer_create_args_t args = {
-        .callback = &DeepDogMotorMqtt::StatusTimerCb,
+    esp_timer_handle_t throttle = nullptr;
+    esp_timer_create_args_t throttle_args = {
+        .callback = &DeepDogMotorMqtt::ThrottleTimerCb,
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "dog_motor_mqtt",
+        .name = "dog_motor_mqtt_th",
         .skip_unhandled_events = true,
     };
-    if (esp_timer_create(&args, &timer) == ESP_OK) {
-        status_timer_ = timer;
+    if (esp_timer_create(&throttle_args, &throttle) == ESP_OK) {
+        throttle_timer_ = throttle;
+    }
+
+    esp_timer_handle_t heartbeat = nullptr;
+    esp_timer_create_args_t heartbeat_args = {
+        .callback = &DeepDogMotorMqtt::HeartbeatTimerCb,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "dog_motor_mqtt_hb",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&heartbeat_args, &heartbeat) == ESP_OK) {
+        heartbeat_timer_ = heartbeat;
     }
 #endif
 }
@@ -125,9 +167,13 @@ DeepDogMotorMqtt::DeepDogMotorMqtt(DeepDogMqttClient* client) : client_(client) 
 DeepDogMotorMqtt::~DeepDogMotorMqtt() {
     Stop();
 #if DEEP_DOG_MOTOR_ENABLE
-    if (status_timer_) {
-        esp_timer_delete(static_cast<esp_timer_handle_t>(status_timer_));
-        status_timer_ = nullptr;
+    if (throttle_timer_) {
+        esp_timer_delete(static_cast<esp_timer_handle_t>(throttle_timer_));
+        throttle_timer_ = nullptr;
+    }
+    if (heartbeat_timer_) {
+        esp_timer_delete(static_cast<esp_timer_handle_t>(heartbeat_timer_));
+        heartbeat_timer_ = nullptr;
     }
 #endif
 }
@@ -136,13 +182,65 @@ void DeepDogMotorMqtt::SetMotor(DeepMotor* motor) {
 #if DEEP_DOG_MOTOR_ENABLE
     if (motor_ && motor_ != motor) {
         motor_->setMotorDiscoveryCallback(nullptr, nullptr);
+        motor_->setMotorStatusNotifyCallback(nullptr, nullptr);
     }
     motor_ = motor;
     if (motor_) {
         motor_->setMotorDiscoveryCallback(&DeepDogMotorMqtt::OnMotorDiscovered, this);
+        motor_->setMotorStatusNotifyCallback(&DeepDogMotorMqtt::OnMotorStatusUpdated, this);
     }
 #else
     (void)motor;
+#endif
+}
+
+void DeepDogMotorMqtt::PublishScanStarted(uint8_t id_min, uint8_t id_max) {
+#if !DEEP_DOG_MOTOR_ENABLE
+    (void)id_min;
+    (void)id_max;
+#else
+    if (!enabled_ || !connected_ || !client_) {
+        return;
+    }
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "started", true);
+    cJSON* range = cJSON_AddArrayToObject(root, "range");
+    cJSON_AddItemToArray(range, cJSON_CreateNumber(id_min));
+    cJSON_AddItemToArray(range, cJSON_CreateNumber(id_max));
+    cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+    char* s = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (s) {
+        (void)client_->Publish("motor/scan_result", s, 0, false);
+        cJSON_free(s);
+    }
+#endif
+}
+
+void DeepDogMotorMqtt::PublishScanDiscovered(uint8_t motor_id, const motor_status_t& status) {
+#if !DEEP_DOG_MOTOR_ENABLE
+    (void)motor_id;
+    (void)status;
+#else
+    if (!enabled_ || !connected_ || !client_) {
+        return;
+    }
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "event", "discovered");
+    cJSON_AddNumberToObject(root, "id", motor_id);
+    if (status.has_device_id) {
+        char uid_hex[17];
+        MotorProtocol::FormatMcuUidHex(status.mcu_uid, uid_hex, sizeof(uid_hex));
+        cJSON_AddStringToObject(root, "mcu_uid", uid_hex);
+        cJSON_AddStringToObject(root, "mcu_uid_hex", uid_hex);
+    }
+    cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+    char* s = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (s) {
+        (void)client_->Publish("motor/scan_result", s, 0, false);
+        cJSON_free(s);
+    }
 #endif
 }
 
@@ -151,8 +249,15 @@ void DeepDogMotorMqtt::OnMotorDiscovered(uint8_t motor_id, const motor_status_t&
 #if DEEP_DOG_MOTOR_ENABLE
     auto* self = static_cast<DeepDogMotorMqtt*>(user_data);
     (void)MotorProtocol::requestSoftwareVersion(motor_id);
-    ESP_LOGI(TAG, "扫描发现电机 %u，已请求软件版本", (unsigned)motor_id);
+    if (status.has_device_id) {
+        char uid_hex[17];
+        MotorProtocol::FormatMcuUidHex(status.mcu_uid, uid_hex, sizeof(uid_hex));
+        ESP_LOGI(TAG, "扫描发现电机 %u mcu_uid=%s", (unsigned)motor_id, uid_hex);
+    } else {
+        ESP_LOGI(TAG, "扫描发现电机 %u", (unsigned)motor_id);
+    }
     if (self) {
+        self->PublishScanDiscovered(motor_id, status);
         self->PublishStatus(true);
     }
 #else
@@ -161,10 +266,55 @@ void DeepDogMotorMqtt::OnMotorDiscovered(uint8_t motor_id, const motor_status_t&
 #endif
 }
 
-void DeepDogMotorMqtt::StatusTimerCb(void* arg) {
+void DeepDogMotorMqtt::OnMotorStatusUpdated(uint8_t motor_id, void* user_data) {
+    (void)motor_id;
+#if DEEP_DOG_MOTOR_ENABLE
+    auto* self = static_cast<DeepDogMotorMqtt*>(user_data);
+    if (self) {
+        self->ScheduleStatusPublish();
+    }
+#else
+    (void)user_data;
+#endif
+}
+
+void DeepDogMotorMqtt::ScheduleStatusPublish() {
+#if !DEEP_DOG_MOTOR_ENABLE
+    return;
+#else
+    if (!enabled_ || !connected_) {
+        return;
+    }
+    const int64_t now = esp_timer_get_time();
+    if (last_publish_us_ == 0 || now - last_publish_us_ >= kStatusThrottleUs) {
+        PublishStatus(true);
+        return;
+    }
+    pending_publish_ = true;
+    if (throttle_timer_) {
+        auto* timer = static_cast<esp_timer_handle_t>(throttle_timer_);
+        esp_timer_stop(timer);
+        const int64_t wait = kStatusThrottleUs - (now - last_publish_us_);
+        esp_timer_start_once(timer, wait > 1000 ? wait : 1000);
+    }
+#endif
+}
+
+void DeepDogMotorMqtt::ThrottleTimerCb(void* arg) {
+    auto* self = static_cast<DeepDogMotorMqtt*>(arg);
+    if (!self) {
+        return;
+    }
+    if (self->pending_publish_) {
+        self->pending_publish_ = false;
+        self->PublishStatus(true);
+    }
+}
+
+void DeepDogMotorMqtt::HeartbeatTimerCb(void* arg) {
     auto* self = static_cast<DeepDogMotorMqtt*>(arg);
     if (self) {
-        self->PublishStatus(false);
+        self->PublishStatus(true);
     }
 }
 
@@ -249,8 +399,10 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
             }
             cJSON* m = cJSON_CreateObject();
             cJSON_AddNumberToObject(m, "id", mid);
+            cJSON_AddNumberToObject(m, "can_id", mid);
             cJSON_AddStringToObject(m, "init_state", InitStateStr(motor->getMotorInitState(mid)));
             AppendMotorStatusFields(m, st);
+            cJSON_AddBoolToObject(m, "teaching_recording", motor->isMotorRecording(mid));
             float target = 0.f;
             if (motor->getMotorTargetAngle(mid, &target)) {
                 cJSON_AddNumberToObject(m, "target_rad", target);
@@ -266,6 +418,10 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
     }
     const bool ok = client_->Publish("motor/status", s, 0, true);
     cJSON_free(s);
+    if (ok) {
+        last_publish_us_ = esp_timer_get_time();
+        pending_publish_ = false;
+    }
     return ok;
 #endif
 }
@@ -348,7 +504,7 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
             }
         }
         cJSON_Delete(root);
-        PublishStatus(true);
+        ScheduleStatusPublish();
         return;
     }
 
@@ -368,6 +524,7 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
     if (cJSON_IsTrue(reset)) {
         MotorProtocol::resetMotor(motor_id);
         motor->invalidateMotorCommandCache(motor_id);
+        motor->markMotorEnabled(motor_id, false);
         motor->resetMotorInitState(motor_id);
     }
 
@@ -380,6 +537,7 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
         } else {
             MotorProtocol::resetMotor(motor_id);
             motor->invalidateMotorCommandCache(motor_id);
+            motor->markMotorEnabled(motor_id, false);
             motor->resetMotorInitState(motor_id);
         }
     }
@@ -395,8 +553,20 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
         }
     }
 
+    const cJSON* speed_ref_j = cJSON_GetObjectItem(root, "speed_rad_s");
+    const cJSON* pos_j = cJSON_GetObjectItem(root, "position_rad");
     const cJSON* speed = cJSON_GetObjectItem(root, "speed_limit");
-    if (cJSON_IsNumber(speed)) {
+    if (cJSON_IsNumber(speed_ref_j)) {
+        const float spd = static_cast<float>(speed_ref_j->valuedouble);
+        const bool sent = motor->setMotorSpeedRef(motor_id, spd);
+        ESP_LOGI(TAG, "motor/cmd speed_rad_s motor_id=%u spd=%.3f sent=%d", (unsigned)motor_id, (double)spd,
+                 sent ? 1 : 0);
+    } else if (cJSON_IsNumber(speed) && !cJSON_IsNumber(pos_j)) {
+        const float spd = static_cast<float>(speed->valuedouble);
+        const bool sent = motor->setMotorSpeedRef(motor_id, spd);
+        ESP_LOGI(TAG, "motor/cmd speed_limit→spd_ref motor_id=%u spd=%.3f sent=%d", (unsigned)motor_id,
+                 (double)spd, sent ? 1 : 0);
+    } else if (cJSON_IsNumber(speed) && cJSON_IsNumber(pos_j)) {
         (void)motor->setMotorSpeedLimit(motor_id, static_cast<float>(speed->valuedouble));
     }
 
@@ -528,7 +698,7 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
     }
 
     cJSON_Delete(root);
-    PublishStatus(true);
+    ScheduleStatusPublish();
 #endif
 }
 
@@ -543,11 +713,16 @@ void DeepDogMotorMqtt::OnConnected() {
     if (!motor_) {
         motor_ = DeepDogMotorGet();
     }
+    if (motor_) {
+        motor_->setMotorDiscoveryCallback(&DeepDogMotorMqtt::OnMotorDiscovered, this);
+        motor_->setMotorStatusNotifyCallback(&DeepDogMotorMqtt::OnMotorStatusUpdated, this);
+    }
     client_->Subscribe("motor/cmd", 1);
+    client_->Subscribe("motor/scan", 0);
     PublishTools();
     PublishStatus(true);
-    if (status_timer_) {
-        esp_timer_start_periodic(static_cast<esp_timer_handle_t>(status_timer_), 500000);
+    if (heartbeat_timer_) {
+        esp_timer_start_periodic(static_cast<esp_timer_handle_t>(heartbeat_timer_), kStatusHeartbeatUs);
     }
 #endif
 }
@@ -555,8 +730,12 @@ void DeepDogMotorMqtt::OnConnected() {
 void DeepDogMotorMqtt::OnDisconnected() {
     connected_ = false;
 #if DEEP_DOG_MOTOR_ENABLE
-    if (status_timer_) {
-        esp_timer_stop(static_cast<esp_timer_handle_t>(status_timer_));
+    pending_publish_ = false;
+    if (throttle_timer_) {
+        esp_timer_stop(static_cast<esp_timer_handle_t>(throttle_timer_));
+    }
+    if (heartbeat_timer_) {
+        esp_timer_stop(static_cast<esp_timer_handle_t>(heartbeat_timer_));
     }
 #endif
 }
@@ -575,6 +754,15 @@ void DeepDogMotorMqtt::OnMessage(const std::string& topic, const std::string& pa
     }
     if (client_ && topic == client_->Topic("motor/cmd")) {
         ApplyCmd(payload.c_str());
+        return;
+    }
+    if (client_ && topic == client_->Topic("motor/scan")) {
+        DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
+        if (motor) {
+            PublishScanStarted(1, 127);
+            motor->sendBusScanProbes();
+            ESP_LOGI(TAG, "motor/scan -> probes 1-127");
+        }
     }
 #endif
 }

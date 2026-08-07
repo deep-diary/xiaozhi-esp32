@@ -54,7 +54,7 @@
 | `motor/report_start` | 对已注册电机 `requestActiveReport`（一次性，无 50ms 轮询） |
 | `motor/report_stop` | 对已注册电机 `releaseActiveReport` |
 
-`motor/status` 仍由 500ms 定时器从缓存发布；数据来源为 T24 上报帧。
+`motor/status` 由 **CAN 反馈事件 + 20ms 节流** 发布（`DEEP_DOG_MOTOR_MQTT_STATUS_THROTTLE_MS`），并保留 **1s 心跳**（`DEEP_DOG_MOTOR_MQTT_STATUS_HEARTBEAT_MS`）刷新 retain；数据来源为反馈帧或 T24 上报帧。
 
 ## 验收
 

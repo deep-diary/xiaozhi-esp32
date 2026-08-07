@@ -46,8 +46,11 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         int speed_int = properties["speed"].value<int>();
         float speed = speed_int / 10.0f; // 转换为浮点数（保留1位小数）
         
-        if (MotorProtocol::setSpeed(motor_id, speed)) {
-            ESP_LOGI(TAG, "发送电机速度控制指令成功 - 电机ID: %d, 速度: %.1f rad/s", motor_id, speed);
+        if (MotorProtocol::setSpeedRef(motor_id, speed)) {
+            if (deep_motor) {
+                (void)deep_motor->setMotorSpeedRef(static_cast<uint8_t>(motor_id), speed);
+            }
+            ESP_LOGI(TAG, "发送电机速度指令成功 - 电机ID: %d, 速度: %.1f rad/s", motor_id, speed);
             return true;
         } else {
             ESP_LOGE(TAG, "发送电机速度控制指令失败 - 电机ID: %d", motor_id);
@@ -60,14 +63,23 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
     }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
-        
-        if (MotorProtocol::enableMotor(motor_id)) {
-            ESP_LOGI(TAG, "电机使能成功 - 电机ID: %d", motor_id);
-            return true;
-        } else {
+        const uint8_t mid = static_cast<uint8_t>(motor_id);
+
+        if (!deep_motor) {
+            if (MotorProtocol::enableMotor(motor_id)) {
+                ESP_LOGI(TAG, "电机使能成功 - 电机ID: %d", motor_id);
+                return true;
+            }
             ESP_LOGE(TAG, "电机使能失败 - 电机ID: %d", motor_id);
             return false;
         }
+
+        if (deep_motor->ensureMotorEnabled(mid)) {
+            ESP_LOGI(TAG, "电机使能成功 - 电机ID: %d", motor_id);
+            return true;
+        }
+        ESP_LOGE(TAG, "电机使能失败 - 电机ID: %d", motor_id);
+        return false;
     });
 
     // 电机停止工具
@@ -75,8 +87,13 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         Property("motor_id", kPropertyTypeInteger, 1, 1, 255)
     }), [deep_motor](const PropertyList& properties) -> ReturnValue {
         int motor_id = properties["motor_id"].value<int>();
-        
+        const uint8_t mid = static_cast<uint8_t>(motor_id);
+
         if (MotorProtocol::resetMotor(motor_id)) {
+            if (deep_motor) {
+                deep_motor->invalidateMotorCommandCache(mid);
+                deep_motor->resetMotorInitState(mid);
+            }
             ESP_LOGI(TAG, "电机停止成功 - 电机ID: %d", motor_id);
             return true;
         } else {
@@ -240,6 +257,7 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::setMotorControlMode(motor_id)) {
+            deep_motor->markMotorRunMode(static_cast<uint8_t>(motor_id), MOTOR_CTRL_MODE);
             ESP_LOGI(TAG, "设置电机%d为运控模式成功", motor_id);
             return std::string("设置电机" + std::to_string(motor_id) + "为运控模式成功");
         } else {
@@ -255,6 +273,9 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::setMotorPositionMode(motor_id)) {
+            if (deep_motor) {
+                deep_motor->markMotorRunMode(static_cast<uint8_t>(motor_id), MOTOR_POS_MODE);
+            }
             ESP_LOGI(TAG, "设置电机%d为位置模式成功", motor_id);
             return std::string("设置电机" + std::to_string(motor_id) + "为位置模式成功");
         } else {
@@ -285,6 +306,9 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::setMotorSpeedMode(motor_id)) {
+            if (deep_motor) {
+                deep_motor->markMotorRunMode(static_cast<uint8_t>(motor_id), MOTOR_SPEED_MODE);
+            }
             ESP_LOGI(TAG, "设置电机%d为速度模式成功", motor_id);
             return std::string("设置电机" + std::to_string(motor_id) + "为速度模式成功");
         } else {
@@ -300,6 +324,9 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         int motor_id = properties["motor_id"].value<int>();
         
         if (MotorProtocol::setMotorCurrentMode(motor_id)) {
+            if (deep_motor) {
+                deep_motor->markMotorRunMode(static_cast<uint8_t>(motor_id), MOTOR_CURRENT_MODE);
+            }
             ESP_LOGI(TAG, "设置电机%d为电流模式成功", motor_id);
             return std::string("设置电机" + std::to_string(motor_id) + "为电流模式成功");
         } else {
@@ -319,6 +346,10 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
         const char* mode_names[] = {"运控模式", "位置模式", "速度模式", "电流模式"};
         
         if (MotorProtocol::setMotorRunMode(motor_id, mode)) {
+            if (deep_motor && mode >= 0 && mode <= 3) {
+                deep_motor->markMotorRunMode(static_cast<uint8_t>(motor_id),
+                                            static_cast<motor_run_mode_t>(mode));
+            }
             ESP_LOGI(TAG, "设置电机%d为%s成功", motor_id, mode_names[mode]);
             return std::string("设置电机" + std::to_string(motor_id) + "为" + mode_names[mode] + "成功");
         } else {

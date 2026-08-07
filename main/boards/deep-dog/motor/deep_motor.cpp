@@ -42,6 +42,51 @@ static constexpr float kMotorEpsPosRad = 1e-5f;
 static constexpr float kMotorEpsSpd = 1e-4f;
 static constexpr float kMotorEpsIq = 1e-4f;
 
+const char* DriveStateLabel(motor_mode_t mode) {
+    switch (mode) {
+        case MOTOR_MODE_RESET:
+            return "reset(复位)";
+        case MOTOR_MODE_CALIBRATE:
+            return "calibrate(标定)";
+        case MOTOR_MODE_RUN:
+            return "run(运行)";
+        default:
+            return "unknown";
+    }
+}
+
+const char* RunModeLabel(motor_run_mode_t mode, bool known) {
+    if (!known) {
+        return "unknown(未设置)";
+    }
+    switch (mode) {
+        case MOTOR_CTRL_MODE:
+            return "mit(运控)";
+        case MOTOR_POS_MODE:
+            return "position(位置)";
+        case MOTOR_SPEED_MODE:
+            return "speed(速度)";
+        case MOTOR_CURRENT_MODE:
+            return "current(电流)";
+        default:
+            return "unknown";
+    }
+}
+
+const char* InitStateLabel(MotorInitState st) {
+    switch (st) {
+        case MotorInitState::Initializing:
+            return "initializing";
+        case MotorInitState::Ready:
+            return "ready";
+        case MotorInitState::Failed:
+            return "failed";
+        case MotorInitState::None:
+        default:
+            return "none";
+    }
+}
+
 static inline bool motorNearlyEqual(float a, float b, float eps) {
     return fabsf(a - b) <= eps;
 }
@@ -62,6 +107,7 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
         motor_cmd_cache_[i].iq_ref = 0.0f;
         motor_cmd_cache_[i].position_known = false;
         motor_cmd_cache_[i].speed_known = false;
+        motor_cmd_cache_[i].speed_ref_known = false;
         motor_cmd_cache_[i].iq_known = false;
         active_report_refcount_[i] = 0;
     }
@@ -71,6 +117,8 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
     callback_user_data_ = nullptr;
     discovery_callback_ = nullptr;
     discovery_user_data_ = nullptr;
+    status_notify_callback_ = nullptr;
+    status_notify_user_data_ = nullptr;
     
     // 初始化LED状态管理器
     if (led_strip != nullptr) {
@@ -287,7 +335,8 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
                   motor_statuses_[motor_index].current_error,
                   motor_statuses_[motor_index].voltage_error,
                   motor_statuses_[motor_index].mode_status);
-    
+
+    invokeStatusNotify(motor_id);
     return true;
 }
 
@@ -319,6 +368,9 @@ bool DeepMotor::registerMotorId(uint8_t motor_id) {
             motor_statuses_[i].feedback_seq = 0;
             motor_statuses_[i].has_device_id = false;
             motor_statuses_[i].mcu_uid = 0;
+            motor_statuses_[i].motor_enabled = false;
+            motor_statuses_[i].run_mode = MOTOR_CTRL_MODE;
+            motor_statuses_[i].run_mode_known = false;
             motor_statuses_[i].max_abs_torque = 0.0f;
             motor_statuses_[i].collision = false;
             torque_observe_enabled_[i] = false;
@@ -512,6 +564,17 @@ void DeepMotor::setMotorDiscoveryCallback(MotorDiscoveryCallback callback, void*
     discovery_user_data_ = user_data;
 }
 
+void DeepMotor::setMotorStatusNotifyCallback(MotorStatusNotifyCallback callback, void* user_data) {
+    status_notify_callback_ = callback;
+    status_notify_user_data_ = user_data;
+}
+
+void DeepMotor::invokeStatusNotify(uint8_t motor_id) {
+    if (status_notify_callback_) {
+        status_notify_callback_(motor_id, status_notify_user_data_);
+    }
+}
+
 bool DeepMotor::isMotorRegistered(uint8_t motor_id) const {
     return findMotorIndex(motor_id) != -1;
 }
@@ -532,6 +595,7 @@ void DeepMotor::clearAllMotors() {
         torque_observe_enabled_[i] = false;
         motor_cmd_cache_[i].position_known = false;
         motor_cmd_cache_[i].speed_known = false;
+        motor_cmd_cache_[i].speed_ref_known = false;
         motor_cmd_cache_[i].iq_known = false;
         motor_cmd_cache_[i].position_rad = 0.0f;
         motor_cmd_cache_[i].speed_limit_rad_s = 0.0f;
@@ -552,6 +616,7 @@ void DeepMotor::invalidateMotorCommandCache(uint8_t motor_id) {
     }
     motor_cmd_cache_[idx].position_known = false;
     motor_cmd_cache_[idx].speed_known = false;
+    motor_cmd_cache_[idx].speed_ref_known = false;
     motor_cmd_cache_[idx].iq_known = false;
 }
 
@@ -559,27 +624,61 @@ void DeepMotor::printAllMotorStatus() const {
     ESP_LOGI(TAG, "=== 电机状态总览 ===");
     ESP_LOGI(TAG, "已注册电机数量: %d", registered_count_);
     ESP_LOGI(TAG, "当前活跃电机ID: %d", active_motor_id_);
-    
+
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
-        if (registered_motor_ids_[i] != MOTOR_ID_UNREGISTERED) {
-            const motor_status_t* status = &motor_statuses_[i];
+        if (registered_motor_ids_[i] == MOTOR_ID_UNREGISTERED) {
+            continue;
+        }
+        const motor_status_t* status = &motor_statuses_[i];
+        const uint8_t mid = status->motor_id;
+        const MotorInitState init_st = motor_init_state_[i];
+
+        ESP_LOGI(TAG,
+                 "电机ID %u: 角度=%.3f rad, 速度=%.3f rad/s, 扭矩=%.3f N·m, |τ|max=%.3f, 碰撞=%s, 温度=%.1f°C",
+                 (unsigned)mid,
+                 status->current_angle,
+                 status->current_speed,
+                 status->current_torque,
+                 status->max_abs_torque,
+                 status->collision ? "是" : "否",
+                 status->current_temp);
+        ESP_LOGI(TAG,
+                 "  驱动状态=%s(%d), 工作模式=%s, 已使能=%s, init=%s, 反馈seq=%lu, has_feedback=%s",
+                 DriveStateLabel(status->mode_status),
+                 (int)status->mode_status,
+                 RunModeLabel(status->run_mode, status->run_mode_known),
+                 status->motor_enabled ? "是" : "否",
+                 InitStateLabel(init_st),
+                 (unsigned long)status->feedback_seq,
+                 status->has_feedback ? "是" : "否");
+        if (status->has_device_id) {
+            char uid_hex[17];
+            MotorProtocol::FormatMcuUidHex(status->mcu_uid, uid_hex, sizeof(uid_hex));
+            ESP_LOGI(TAG, "  MCU UID=%s", uid_hex);
+        }
+        if (status->version[0] != '\0') {
+            ESP_LOGI(TAG, "  固件版本=%s", status->version);
+        }
+        if (i >= 0) {
+            const MotorCommandCache& cache = motor_cmd_cache_[i];
             ESP_LOGI(TAG,
-                     "电机ID %d: 角度=%.3f rad, 速度=%.3f rad/s, 扭矩=%.3f N·m, |τ|max=%.3f, 碰撞=%s, 温度=%.1f°C, 模式=%d",
-                     status->motor_id,
-                     status->current_angle,
-                     status->current_speed,
-                     status->current_torque,
-                     status->max_abs_torque,
-                     status->collision ? "是" : "否",
-                     status->current_temp,
-                     status->mode_status);
-            
-            // 打印错误状态
-            if (status->error_status) {
-                ESP_LOGW(TAG, "  错误状态: 霍尔=%d, 磁铁=%d, 温度=%d, 电流=%d, 电压=%d",
-                         status->hall_error, status->magnet_error, status->temp_error,
-                         status->current_error, status->voltage_error);
-            }
+                     "  下发缓存: loc=%.3f(%s) limit_spd=%.3f(%s) spd_ref=%.3f(%s) iq=%.3f(%s)",
+                     cache.position_rad,
+                     cache.position_known ? "ok" : "—",
+                     cache.speed_limit_rad_s,
+                     cache.speed_known ? "ok" : "—",
+                     cache.speed_ref_rad_s,
+                     cache.speed_ref_known ? "ok" : "—",
+                     cache.iq_ref,
+                     cache.iq_known ? "ok" : "—");
+        }
+        if (status->error_status) {
+            ESP_LOGW(TAG, "  故障: 霍尔=%d 磁编=%d 过温=%d 过流=%d 欠压=%d",
+                     status->hall_error,
+                     status->magnet_error,
+                     status->temp_error,
+                     status->current_error,
+                     status->voltage_error);
         }
     }
     ESP_LOGI(TAG, "==================");
@@ -894,6 +993,108 @@ void DeepMotor::resetMotorInitState(uint8_t motor_id) {
     motor_init_state_[idx] = MotorInitState::None;
     motor_init_started_us_[idx] = 0;
     torque_observe_enabled_[idx] = false;
+    motor_statuses_[idx].motor_enabled = false;
+}
+
+void DeepMotor::markMotorEnabled(uint8_t motor_id, bool enabled) {
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return;
+    }
+    motor_statuses_[idx].motor_enabled = enabled;
+}
+
+void DeepMotor::markMotorRunMode(uint8_t motor_id, motor_run_mode_t mode) {
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return;
+    }
+    motor_statuses_[idx].run_mode = mode;
+    motor_statuses_[idx].run_mode_known = true;
+}
+
+bool DeepMotor::ensureMotorEnabled(uint8_t motor_id) {
+    if (!isMotorRegistered(motor_id)) {
+        if (!registerMotor(motor_id)) {
+            ESP_LOGW(TAG, "ensureMotorEnabled: 电机 %u 注册失败", (unsigned)motor_id);
+            return false;
+        }
+    }
+
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return false;
+    }
+
+    if (motor_statuses_[idx].motor_enabled) {
+        return true;
+    }
+
+    if (!MotorProtocol::enableMotor(motor_id)) {
+        ESP_LOGW(TAG, "ensureMotorEnabled: 电机 %u CAN 使能失败", (unsigned)motor_id);
+        return false;
+    }
+
+    markMotorEnabled(motor_id, true);
+    ESP_LOGI(TAG, "ensureMotorEnabled: 电机 %u 已使能（保留工作模式 %s）", (unsigned)motor_id,
+             RunModeLabel(motor_statuses_[idx].run_mode, motor_statuses_[idx].run_mode_known));
+    return true;
+}
+
+bool DeepMotor::ensureMotorCommandReady(uint8_t motor_id, motor_run_mode_t mode) {
+    if (!isMotorRegistered(motor_id)) {
+        if (!registerMotor(motor_id)) {
+            ESP_LOGW(TAG, "ensureMotorCommandReady: 电机 %u 注册失败", (unsigned)motor_id);
+            return false;
+        }
+    }
+
+    const int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        return false;
+    }
+
+    if (!motor_statuses_[idx].run_mode_known || motor_statuses_[idx].run_mode != mode) {
+        bool mode_ok = false;
+        switch (mode) {
+            case MOTOR_CTRL_MODE:
+                mode_ok = MotorProtocol::setMotorControlMode(motor_id);
+                break;
+            case MOTOR_POS_MODE:
+                mode_ok = MotorProtocol::setMotorPositionMode(motor_id);
+                break;
+            case MOTOR_SPEED_MODE:
+                mode_ok = MotorProtocol::setMotorSpeedMode(motor_id);
+                break;
+            case MOTOR_CURRENT_MODE:
+                mode_ok = MotorProtocol::setMotorCurrentMode(motor_id);
+                break;
+            default:
+                break;
+        }
+        if (!mode_ok) {
+            ESP_LOGW(TAG, "ensureMotorCommandReady: 电机 %u 切换工作模式失败", (unsigned)motor_id);
+            return false;
+        }
+        markMotorRunMode(motor_id, mode);
+    }
+
+    if (!motor_statuses_[idx].motor_enabled) {
+        if (!MotorProtocol::enableMotor(motor_id)) {
+            ESP_LOGW(TAG, "ensureMotorCommandReady: 电机 %u CAN 使能失败", (unsigned)motor_id);
+            return false;
+        }
+        markMotorEnabled(motor_id, true);
+        ESP_LOGI(TAG, "ensureMotorCommandReady: 电机 %u 已补发 %s+使能", (unsigned)motor_id,
+                 RunModeLabel(mode, true));
+    }
+
+    return true;
+}
+
+bool DeepMotor::isMotorRecording(uint8_t motor_id) const {
+    const TeachingTrack* tr = teaching_.getTrack(motor_id);
+    return tr != nullptr && tr->recording;
 }
 
 void DeepMotor::pollAsyncInitCompletion(int8_t motor_index, uint8_t motor_id) {
@@ -910,6 +1111,7 @@ void DeepMotor::pollAsyncInitCompletion(int8_t motor_index, uint8_t motor_id) {
         ESP_LOGE(TAG, "电机%u 异步 init 超时 (%lld ms)，reset 停扭", (unsigned)motor_id, (long long)elapsed_ms);
         st = MotorInitState::Failed;
         (void)MotorProtocol::resetMotor(motor_id);
+        markMotorEnabled(motor_id, false);
         invalidateMotorCommandCache(motor_id);
         (void)releaseActiveReport(motor_id);
         return;
@@ -922,12 +1124,13 @@ void DeepMotor::pollAsyncInitCompletion(int8_t motor_index, uint8_t motor_id) {
 
     if (fabsf(ms.current_angle) <= DEEP_DOG_MOTOR_INIT_ZERO_TOL_RAD) {
         st = MotorInitState::Ready;
+        markMotorEnabled(motor_id, true);
         torque_observe_enabled_[motor_index] = true;
         motor_statuses_[motor_index].max_abs_torque = 0.0f;
         motor_statuses_[motor_index].collision = false;
         (void)releaseActiveReport(motor_id);
-        ESP_LOGI(TAG, "电机%u 异步 init 成功：pos=%.4f rad (elapsed %lld ms)", (unsigned)motor_id,
-                 (double)ms.current_angle, (long long)elapsed_ms);
+        ESP_LOGI(TAG, "电机%u 异步 init 成功：pos=%.4f rad (elapsed %ld ms)", (unsigned)motor_id,
+                 (double)ms.current_angle, (long)elapsed_ms);
     }
 }
 
@@ -949,11 +1152,13 @@ bool DeepMotor::sendInitCommandsAfterReset(uint8_t motor_id, float target_veloci
         ESP_LOGE(TAG, "电机%u 设置运控模式失败", (unsigned)motor_id);
         return false;
     }
+    markMotorRunMode(motor_id, MOTOR_CTRL_MODE);
 #else
     if (!MotorProtocol::setMotorPositionMode(motor_id)) {
         ESP_LOGE(TAG, "电机%u 设置位置模式失败", (unsigned)motor_id);
         return false;
     }
+    markMotorRunMode(motor_id, MOTOR_POS_MODE);
 #endif
     vTaskDelay(pdMS_TO_TICKS(10));
 
@@ -961,6 +1166,7 @@ bool DeepMotor::sendInitCommandsAfterReset(uint8_t motor_id, float target_veloci
         ESP_LOGE(TAG, "电机%u enable 失败", (unsigned)motor_id);
         return false;
     }
+    markMotorEnabled(motor_id, true);
 
 #if DEEP_DOG_USE_MIT_WALK
     if (!MotorProtocol::controlMotor(motor_id, 0.0f, 0.0f, DEEP_DOG_MIT_INIT_HOLD_KP, DEEP_DOG_MIT_INIT_HOLD_KD,
@@ -1262,6 +1468,11 @@ bool DeepMotor::getMotorTargetAngle(uint8_t motor_id, float* target_angle) const
 }
 
 bool DeepMotor::setMotorPosition(uint8_t motor_id, float position, float max_speed) {
+    if (!ensureMotorCommandReady(motor_id, MOTOR_POS_MODE)) {
+        ESP_LOGW(TAG, "电机 %u 未就绪，位置指令未发送", (unsigned)motor_id);
+        return false;
+    }
+
     if (!setMotorTargetAngle(motor_id, position)) {
         ESP_LOGW(TAG, "设置电机ID %d 目标位置失败", motor_id);
         return false;
@@ -1308,6 +1519,7 @@ bool DeepMotor::setMotorPosition(uint8_t motor_id, float position, float max_spe
         motor_cmd_cache_[idx].position_known = true;
     }
 
+    markMotorRunMode(motor_id, MOTOR_POS_MODE);
     ESP_LOGD(TAG, "设置电机ID %d 位置: %.3f rad, 最大速度: %.1f rad/s (spd=%s pos=%s)",
              motor_id, position, max_speed, need_speed ? "发" : "跳", need_pos ? "发" : "跳");
     return true;
@@ -1340,7 +1552,47 @@ bool DeepMotor::setMotorSpeedLimit(uint8_t motor_id, float max_speed_rad_s) {
     return true;
 }
 
+bool DeepMotor::setMotorSpeedRef(uint8_t motor_id, float speed_rad_s) {
+    if (!ensureMotorCommandReady(motor_id, MOTOR_SPEED_MODE)) {
+        ESP_LOGW(TAG, "电机 %u 未就绪，速度指令未发送", (unsigned)motor_id);
+        return false;
+    }
+
+    int8_t idx = findMotorIndex(motor_id);
+    if (idx < 0) {
+        ESP_LOGW(TAG, "setMotorSpeedRef: 电机 %d 未注册", motor_id);
+        return false;
+    }
+    if (motor_statuses_[idx].collision) {
+        ESP_LOGE(TAG, "电机%u 已触发碰撞保护，拒绝下发速度指令并 reset 停扭", (unsigned)motor_id);
+        (void)MotorProtocol::resetMotor(motor_id);
+        invalidateMotorCommandCache(motor_id);
+        return false;
+    }
+
+    if (motor_cmd_cache_[idx].speed_ref_known &&
+        motorNearlyEqual(motor_cmd_cache_[idx].speed_ref_rad_s, speed_rad_s, kMotorEpsSpd)) {
+        ESP_LOGD(TAG, "电机 %d setMotorSpeedRef: %.4f rad/s 与缓存一致，跳过 CAN", motor_id, speed_rad_s);
+        return true;
+    }
+
+    if (!MotorProtocol::setSpeedRef(motor_id, speed_rad_s)) {
+        ESP_LOGW(TAG, "发送电机ID %d 速度指令失败", motor_id);
+        return false;
+    }
+    motor_cmd_cache_[idx].speed_ref_rad_s = speed_rad_s;
+    motor_cmd_cache_[idx].speed_ref_known = true;
+    markMotorRunMode(motor_id, MOTOR_SPEED_MODE);
+    ESP_LOGI(TAG, "电机ID %d 速度指令: %.3f rad/s (PARAM_SPD_REF)", motor_id, speed_rad_s);
+    return true;
+}
+
 bool DeepMotor::setMotorPositionRefOnly(uint8_t motor_id, float position) {
+    if (!ensureMotorCommandReady(motor_id, MOTOR_POS_MODE)) {
+        ESP_LOGW(TAG, "电机 %u 未就绪，位置指令未发送", (unsigned)motor_id);
+        return false;
+    }
+
     if (!setMotorTargetAngle(motor_id, position)) {
         return false;
     }
@@ -1368,6 +1620,7 @@ bool DeepMotor::setMotorPositionRefOnly(uint8_t motor_id, float position) {
     }
     motor_cmd_cache_[idx].position_rad = position;
     motor_cmd_cache_[idx].position_known = true;
+    markMotorRunMode(motor_id, MOTOR_POS_MODE);
     return true;
 }
 
@@ -1395,6 +1648,7 @@ bool DeepMotor::setMotorIqRef(uint8_t motor_id, float iq_ref) {
     }
     motor_cmd_cache_[idx].iq_ref = iq_ref;
     motor_cmd_cache_[idx].iq_known = true;
+    markMotorRunMode(motor_id, MOTOR_CURRENT_MODE);
     return true;
 }
 
@@ -1416,6 +1670,7 @@ bool DeepMotor::setMotorMitCommand(uint8_t motor_id, float position_rad, float v
         ESP_LOGW(TAG, "setMotorMitCommand: 电机 %d 运控帧发送失败", motor_id);
         return false;
     }
+    markMotorRunMode(motor_id, MOTOR_CTRL_MODE);
     invalidateMotorCommandCache(motor_id);
     return true;
 }

@@ -144,10 +144,18 @@ typedef struct {
     bool has_device_id;
     /** 64 位 MCU 唯一标识符（通信类型 0 应答 data 区，大端序） */
     uint64_t mcu_uid;
+    /** 固件侧最近一次 enable/reset 成功后的使能意图（非驱动器寄存器直读） */
+    bool motor_enabled;
+    /** 运行模式：运控/位置/速度/电流（PARAM_RUN_MODE） */
+    motor_run_mode_t run_mode;
+    /** run_mode 是否已由固件下发更新过 */
+    bool run_mode_known;
 } motor_status_t;
 
 class MotorProtocol {
 public:
+    /** 64 位 MCU UID → 16 位大写十六进制（避免 ESP32 printf 不支持 %llX） */
+    static void FormatMcuUidHex(uint64_t uid, char* out, size_t out_len);
 
     /**
      * @brief 电机使能
@@ -210,7 +218,15 @@ public:
      * @param speed 目标速度 (-50.0 ~ +50.0 rad/s)
      * @return true 成功, false 失败
      */
+    /**
+     * @brief 设置速度限制（PARAM_LIMIT_SPD 0x7017，位置模式到达目标时的最大速度）
+     */
     static bool setSpeed(uint8_t motor_id, float speed);
+
+    /**
+     * @brief 设置速度指令（PARAM_SPD_REF 0x700A，速度模式下的目标角速度 rad/s）
+     */
+    static bool setSpeedRef(uint8_t motor_id, float speed_rad_s);
 
     /**
      * @brief 设置电机电流

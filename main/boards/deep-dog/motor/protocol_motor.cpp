@@ -47,6 +47,19 @@ static inline void parseMotorIdFieldsFromCanId(const CanFrame& can_frame, motor_
 }
 
 
+void MotorProtocol::FormatMcuUidHex(uint64_t uid, char* out, size_t out_len) {
+    if (out == nullptr || out_len < 17) {
+        return;
+    }
+    static const char kHex[] = "0123456789ABCDEF";
+    for (int i = 0; i < 8; ++i) {
+        const uint8_t b = static_cast<uint8_t>(uid >> (56 - i * 8));
+        out[i * 2] = kHex[b >> 4];
+        out[i * 2 + 1] = kHex[b & 0x0Fu];
+    }
+    out[16] = '\0';
+}
+
 bool MotorProtocol::enableMotor(uint8_t motor_id) {
     CanFrame frame;
     memset(&frame, 0, sizeof(frame));
@@ -225,6 +238,10 @@ bool MotorProtocol::setPositionOnly(uint8_t motor_id, float position) { // Âè™ËÆ
 
 bool MotorProtocol::setSpeed(uint8_t motor_id, float speed) {
     return setMotorParameter(motor_id, PARAM_LIMIT_SPD, speed);
+}
+
+bool MotorProtocol::setSpeedRef(uint8_t motor_id, float speed_rad_s) {
+    return setMotorParameter(motor_id, PARAM_SPD_REF, speed_rad_s);
 }
 
 bool MotorProtocol::setCurrent(uint8_t motor_id, float current) {

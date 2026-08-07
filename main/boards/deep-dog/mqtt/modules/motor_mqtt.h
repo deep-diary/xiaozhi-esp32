@@ -27,18 +27,26 @@ public:
     bool PublishStatus(bool force = true);
 
     static void OnMotorDiscovered(uint8_t motor_id, const motor_status_t& status, void* user_data);
+    static void OnMotorStatusUpdated(uint8_t motor_id, void* user_data);
 
 private:
-    static void StatusTimerCb(void* arg);
+    static void ThrottleTimerCb(void* arg);
+    static void HeartbeatTimerCb(void* arg);
+    void ScheduleStatusPublish();
     void ApplyCmd(const char* json);
     bool PublishTools();
     bool PublishTeachingSnapshot(uint8_t motor_id);
     bool PublishTeachingStatus();
     void PublishMcpResult(const char* tool_name, bool ok, const char* result_json, const char* error);
+    void PublishScanStarted(uint8_t id_min, uint8_t id_max);
+    void PublishScanDiscovered(uint8_t motor_id, const motor_status_t& status);
 
     DeepDogMqttClient* client_;
     DeepMotor* motor_ = nullptr;
     bool enabled_ = false;
     bool connected_ = false;
-    void* status_timer_ = nullptr;
+    void* throttle_timer_ = nullptr;
+    void* heartbeat_timer_ = nullptr;
+    int64_t last_publish_us_ = 0;
+    bool pending_publish_ = false;
 };

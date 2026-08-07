@@ -45,7 +45,8 @@
 | `enable` | bool | 否 | `true`→initialize/enable；`false`→reset |
 | `reset` | bool | 否 | `true`→resetMotor |
 | `position_rad` | float | 否 | 位置参考，钳位 ±12.57 |
-| `speed_limit` | float | 否 | 限速 rad/s |
+| `speed_limit` | float | 否 | 位置模式限速 rad/s（与 `position_rad` 同发）；单独发送时在速度模式下作 `speed_rad_s` 兼容 |
+| `speed_rad_s` | float | 否 | 速度模式目标 rad/s（写 `PARAM_SPD_REF`） |
 | `iq_ref` | float | 否 | 电流环目标 |
 | `mit` | object | 否 | `{ position_rad, velocity_rad_s, kp, kd, torque_ff }` |
 | `teaching` | string | 否 | `"start"` / `"stop"` / `"play"`（MOT-11/12，详见 [teaching/](../../motor/teaching/README.md)） |
@@ -66,7 +67,12 @@
 | `ok` | bool | 栈就绪 |
 | `motors` | array | 已注册电机快照 |
 | `motors[].id` | int | motor_id |
+| `motors[].can_id` | int | CAN 总线地址（同 `id`） |
 | `motors[].init_state` | string | `none` / `initializing` / `ready` / `failed`（MOT-09） |
+| `motors[].motor_enabled` | bool | 固件侧 enable/reset 意图（`self.can.enable_motor` 仅 CAN 使能，**不切换** `run_mode`；init 成功后也为 true） |
+| `motors[].run_mode` | string | `mit` / `position` / `speed` / `current`（下发后更新） |
+| `motors[].drive_state` | string | 反馈帧驱动状态：`reset` / `calibrate` / `run` |
+| `motors[].teaching_recording` | bool | 该电机是否正在示教录制（详情见 `motor/teaching/status`） |
 | `motors[].position_rad` | float | 实际角 |
 | `motors[].speed_rad_s` | float | 实际速 |
 | `motors[].torque_nm` | float | 实际矩 |
@@ -75,7 +81,7 @@
 | `motors[].target_rad` | float | 可选软件目标 |
 | `motors[].max_abs_torque` | float | 历史最大 \|扭矩\|（N·m） |
 | `motors[].has_device_id` | bool | 是否已收到通信类型 0 应答 |
-| `motors[].mcu_uid_hex` | string | 16 位十六进制 MCU UID |
+| `motors[].mcu_uid_hex` | string | 16 位十六进制 **MCU UID**（非 CAN 地址） |
 | `motors[].version` | string | EL05 软件版本（扫描后自动查询） |
 | `motors[].has_feedback` | bool | 是否收到过反馈帧 |
 | `motors[].feedback_seq` | int | 反馈帧计数 |
@@ -83,6 +89,8 @@
 | `motors[].master_id` | int | 主站 CAN ID |
 | `motors[].collision` | bool | 堵转/碰撞 latch |
 | `ts` | int | Unix 秒 |
+
+**发布策略**：CAN 状态缓存更新 → 事件触发 + **20ms 节流**；无反馈时 **1s 心跳**（宏见 `motor_config.h`）。
 
 ### `motor/teaching/snapshot`（MOT-12）
 

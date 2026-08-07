@@ -67,9 +67,11 @@ private:
     struct MotorCommandCache {
         float position_rad;       // PARAM_LOC_REF
         float speed_limit_rad_s;  // PARAM_LIMIT_SPD
+        float speed_ref_rad_s;    // PARAM_SPD_REF（速度模式目标速度）
         float iq_ref;             // PARAM_IQ_REF（电流/力矩环目标，协议命名）
         bool position_known;
         bool speed_known;
+        bool speed_ref_known;
         bool iq_known;
     };
     MotorCommandCache motor_cmd_cache_[MAX_MOTOR_COUNT];
@@ -106,12 +108,18 @@ private:
     // 回调函数类型定义
     typedef void (*MotorDataCallback)(uint8_t motor_id, float position, void* user_data);
     typedef void (*MotorDiscoveryCallback)(uint8_t motor_id, const motor_status_t& status, void* user_data);
+    /** CAN 反馈/版本等更新 motor_statuses_ 后触发（供 motor_mqtt 事件上报） */
+    typedef void (*MotorStatusNotifyCallback)(uint8_t motor_id, void* user_data);
     
     // 回调函数相关
     MotorDataCallback data_callback_;
     void* callback_user_data_;
     MotorDiscoveryCallback discovery_callback_;
     void* discovery_user_data_;
+    MotorStatusNotifyCallback status_notify_callback_;
+    void* status_notify_user_data_;
+    
+    void invokeStatusNotify(uint8_t motor_id);
     
     // LED状态管理器
     DeepMotorLedState* led_state_manager_;
@@ -198,6 +206,9 @@ public:
     /** 仅下发速度限制（PARAM_LIMIT_SPD），用于批量动作前统一限速 */
     bool setMotorSpeedLimit(uint8_t motor_id, float max_speed_rad_s);
 
+    /** 速度模式目标角速度（PARAM_SPD_REF） */
+    bool setMotorSpeedRef(uint8_t motor_id, float speed_rad_s);
+
     /** 仅下发位置参考（PARAM_LOC_REF），不重复写速度；须保证限速已设或与 init 一致 */
     bool setMotorPositionRefOnly(uint8_t motor_id, float position);
 
@@ -255,6 +266,9 @@ public:
      * @brief 设置电机发现回调（通信类型 0 应答首次注册或更新 mcu_uid 时触发）
      */
     void setMotorDiscoveryCallback(MotorDiscoveryCallback callback, void* user_data = nullptr);
+
+    /** CAN 状态缓存更新后通知（节流由订阅方负责） */
+    void setMotorStatusNotifyCallback(MotorStatusNotifyCallback callback, void* user_data = nullptr);
     
     /**
      * @brief 检查电机是否已注册
@@ -460,6 +474,13 @@ public:
     MotorInitState getMotorInitState(uint8_t motor_id) const;
     bool isMotorReady(uint8_t motor_id) const;
     void resetMotorInitState(uint8_t motor_id);
+    void markMotorEnabled(uint8_t motor_id, bool enabled);
+    void markMotorRunMode(uint8_t motor_id, motor_run_mode_t mode);
+    /** 仅 CAN 使能 + 更新 motor_enabled，不切换工作模式 */
+    bool ensureMotorEnabled(uint8_t motor_id);
+    /** 下发运动指令前：注册、切工作模式、CAN 使能，并同步 motor_enabled / run_mode 缓存 */
+    bool ensureMotorCommandReady(uint8_t motor_id, motor_run_mode_t mode = MOTOR_POS_MODE);
+    bool isMotorRecording(uint8_t motor_id) const;
 
     /**
      * @brief 异步初始化：发指令后在 RX 环判定零位（MOT-09）

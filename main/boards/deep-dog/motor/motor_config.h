@@ -111,4 +111,13 @@
 #define DEEP_DOG_MOTOR_INIT_TIMEOUT_MS 30000
 #endif
 
+/** motor/status MQTT：CAN 反馈触发 + 节流（ms）；对齐示教播放 20ms MIT tick */
+#ifndef DEEP_DOG_MOTOR_MQTT_STATUS_THROTTLE_MS
+#define DEEP_DOG_MOTOR_MQTT_STATUS_THROTTLE_MS 20
+#endif
+/** 无 CAN 反馈时的 retain 心跳（ms） */
+#ifndef DEEP_DOG_MOTOR_MQTT_STATUS_HEARTBEAT_MS
+#define DEEP_DOG_MOTOR_MQTT_STATUS_HEARTBEAT_MS 1000
+#endif
+
 #endif  // _DEEP_DOG_MOTOR_CONFIG_H_
