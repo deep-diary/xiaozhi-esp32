@@ -8,9 +8,9 @@
 #define DEEP_DOG_VISION_HUB_ENABLE 1
 #endif
 
-/** 开机是否自动 RTSP 推流（默认关；C03 MQTT 再远程开） */
+/** 开机是否自动 RTSP 推流（默认关；stream/cmd 再远程开） */
 #ifndef DEEP_DOG_VISION_PUSH_AT_BOOT
-#define DEEP_DOG_VISION_PUSH_AT_BOOT 1
+#define DEEP_DOG_VISION_PUSH_AT_BOOT 0
 #endif
 
 /** MediaMTX RTSP 发布基址（不含 path） */

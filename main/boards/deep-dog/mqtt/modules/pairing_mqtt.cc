@@ -207,7 +207,7 @@ void DeepDogPairingMqtt::PublishStatus() {
     if (!root) {
         return;
     }
-    const std::string& device_id = client_->settings().device_id;
+    const std::string device_id = DeepDogMqttConfig::MacCompactDeviceId();
     const std::string mac = MacDisplay();
     cJSON_AddStringToObject(root, "device_id", device_id.c_str());
     cJSON_AddStringToObject(root, "mac", mac.c_str());
@@ -235,7 +235,7 @@ void DeepDogPairingMqtt::PublishPairingRequest(const char* action) {
     if (!root) {
         return;
     }
-    const std::string& device_id = client_->settings().device_id;
+    const std::string device_id = DeepDogMqttConfig::MacCompactDeviceId();
     cJSON_AddStringToObject(root, "action", action);
     cJSON_AddStringToObject(root, "device_id", device_id.c_str());
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
@@ -295,22 +295,22 @@ void DeepDogPairingMqtt::ApplyBound(bool bound) {
     SaveBoundState(bound);
     StopReplayTimer();
 
-    if (identity_reload_cb_) {
-        identity_reload_cb_();
-    }
-
-    if (!bound) {
-        PublishStatus();
-        if (was_bound) {
-            ShowUnboundAlert();
+    // 不可在 MQTT 任务回调里 Stop/Start 客户端（会 Cache panic）；defer 到主循环
+    Application::GetInstance().Schedule([this, bound, was_bound]() {
+        if (identity_reload_cb_) {
+            identity_reload_cb_();
         }
-        ESP_LOGI(TAG, "device unbound");
-        return;
-    }
-
-    PublishStatus();
-    ShowBoundSuccessAlert();
-    ESP_LOGI(TAG, "device bound");
+        PublishStatus();
+        if (!bound) {
+            if (was_bound) {
+                ShowUnboundAlert();
+            }
+            ESP_LOGI(TAG, "device unbound");
+            return;
+        }
+        ShowBoundSuccessAlert();
+        ESP_LOGI(TAG, "device bound");
+    });
 }
 
 void DeepDogPairingMqtt::OnConnected() {
@@ -367,6 +367,9 @@ void DeepDogPairingMqtt::OnMessage(const std::string& topic, const std::string& 
         ApplyBound(true);
     } else if (act == "unbind") {
         ApplyBound(false);
+    } else if (act == "start_pairing") {
+        ESP_LOGI(TAG, "pairing/cmd start_pairing");
+        StartPairingSessionOrAnnounceBound();
     } else {
         ESP_LOGW(TAG, "pairing/cmd unknown action %s", act.c_str());
     }

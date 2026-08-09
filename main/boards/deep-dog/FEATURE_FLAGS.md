@@ -59,7 +59,7 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 非引脚开关（默认可按联调需要改 `board_features.h`）：
 
 - `DEEP_DOG_MQTT_ENABLE`（默认 1）
-- `DEEP_DOG_VISION_HUB_ENABLE` / `FACE_AI` / `IMU` / `TRACK_MQTT`
+- `DEEP_DOG_VISION_HUB_ENABLE` / `FACE_AI`（开机默认关检测，MQTT `face/cmd` 可开）/ `IMU` / `TRACK_MQTT`
 - `DEEP_DOG_HTTP_SERVER_ENABLE`（默认 0）
 - `DEEP_DOG_HANDLE_ENABLE`（默认 1；蓝牙手柄 / PC 桥输入）
 

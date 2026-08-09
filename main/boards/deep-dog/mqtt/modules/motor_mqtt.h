@@ -26,7 +26,9 @@ public:
 
     bool PublishStatus(bool force = true);
 
+#if DEEP_DOG_MOTOR_ENABLE
     static void OnMotorDiscovered(uint8_t motor_id, const motor_status_t& status, void* user_data);
+#endif
     static void OnMotorStatusUpdated(uint8_t motor_id, void* user_data);
 
 private:
@@ -39,7 +41,9 @@ private:
     bool PublishTeachingStatus();
     void PublishMcpResult(const char* tool_name, bool ok, const char* result_json, const char* error);
     void PublishScanStarted(uint8_t id_min, uint8_t id_max);
+#if DEEP_DOG_MOTOR_ENABLE
     void PublishScanDiscovered(uint8_t motor_id, const motor_status_t& status);
+#endif
 
     DeepDogMqttClient* client_;
     DeepMotor* motor_ = nullptr;

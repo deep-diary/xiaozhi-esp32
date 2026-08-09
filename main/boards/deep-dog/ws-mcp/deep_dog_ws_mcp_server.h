@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ws_mcp_config.h"
+#include <string>
 
 #if DEEP_DOG_WS_MCP_ENABLE
 

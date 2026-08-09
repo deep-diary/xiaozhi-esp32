@@ -24,10 +24,12 @@
 
 namespace {
 
+#if DEEP_DOG_MOTOR_ENABLE
 constexpr int64_t kStatusThrottleUs =
     static_cast<int64_t>(DEEP_DOG_MOTOR_MQTT_STATUS_THROTTLE_MS) * 1000LL;
 constexpr int64_t kStatusHeartbeatUs =
     static_cast<int64_t>(DEEP_DOG_MOTOR_MQTT_STATUS_HEARTBEAT_MS) * 1000LL;
+#endif
 
 int64_t UnixTs() {
     const time_t now = time(nullptr);
@@ -217,11 +219,8 @@ void DeepDogMotorMqtt::PublishScanStarted(uint8_t id_min, uint8_t id_max) {
 #endif
 }
 
+#if DEEP_DOG_MOTOR_ENABLE
 void DeepDogMotorMqtt::PublishScanDiscovered(uint8_t motor_id, const motor_status_t& status) {
-#if !DEEP_DOG_MOTOR_ENABLE
-    (void)motor_id;
-    (void)status;
-#else
     if (!enabled_ || !connected_ || !client_) {
         return;
     }
@@ -241,12 +240,9 @@ void DeepDogMotorMqtt::PublishScanDiscovered(uint8_t motor_id, const motor_statu
         (void)client_->Publish("motor/scan_result", s, 0, false);
         cJSON_free(s);
     }
-#endif
 }
 
 void DeepDogMotorMqtt::OnMotorDiscovered(uint8_t motor_id, const motor_status_t& status, void* user_data) {
-    (void)status;
-#if DEEP_DOG_MOTOR_ENABLE
     auto* self = static_cast<DeepDogMotorMqtt*>(user_data);
     (void)MotorProtocol::requestSoftwareVersion(motor_id);
     if (status.has_device_id) {
@@ -260,11 +256,8 @@ void DeepDogMotorMqtt::OnMotorDiscovered(uint8_t motor_id, const motor_status_t&
         self->PublishScanDiscovered(motor_id, status);
         self->PublishStatus(true);
     }
-#else
-    (void)motor_id;
-    (void)user_data;
-#endif
 }
+#endif
 
 void DeepDogMotorMqtt::OnMotorStatusUpdated(uint8_t motor_id, void* user_data) {
     (void)motor_id;

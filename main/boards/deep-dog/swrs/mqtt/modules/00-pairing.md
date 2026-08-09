@@ -25,7 +25,7 @@
 | `device/info.mac` | 可读形式 `AA:BB:…`（展示用） |
 | NVS | 命名空间 `deep_dog_mqtt`：`bound`、`device_id`（绑定写入 MAC，解绑清除）、`pair_code`、`pro_pairing_mqtt` |
 | `client_id` | 可继续带 MAC 后缀，避免 Broker 会话冲突 |
-| 绑定切换 | 收到 `pairing/cmd` `bound`/`unbind` 后重载 MQTT 前缀与推流 URL |
+| 绑定切换 | 收到 `pairing/cmd` `bound`/`unbind` 后 **defer** 重载 MQTT 前缀与推流 URL（不可在 MQTT 回调内 Stop 客户端） |
 
 ## 通道（混合）
 
@@ -43,7 +43,7 @@
   ├─ bound=true  → publish pairing/status bound=true（无 code）；正常业务
   └─ bound=false → 静默（不自动播码、不重播）
                    │
-                   ├─ MCP start_pairing / hold1_tap2
+                   ├─ MCP start_pairing / hold1_tap2 / pairing/cmd start_pairing
                    │     → 生成/复用码 → Alert 屏显 + 语音 → retain pairing/status
                    │     → 会话内 45s 重播
                    │
@@ -72,7 +72,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `device_id` | string | 是 | MAC 紧凑串 |
+| `device_id` | string | 是 | **STA MAC 紧凑串**（非 Topic 前缀 `dev`） |
 | `mac` | string | 否 | `AA:BB:…` |
 | `code` | string | 配对会话/pro 模式 | 恰好 6 位数字；`bound=true` 时省略 |
 | `bound` | bool | 是 | 是否已绑定 |
@@ -90,7 +90,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `action` | string | 是 | `bound` \| `unbind` |
+| `action` | string | 是 | `bound` \| `unbind` \| `start_pairing`（仅未绑定；联调 Topic `…/dev/pairing/cmd`） |
 | `ts` | int | 是 | Unix 秒 |
 
 ## 固件实现
@@ -99,6 +99,7 @@
 |----|------|
 | MQTT 模块 | [`pairing_mqtt.cc`](../../../mqtt/modules/pairing_mqtt.cc) |
 | MCP | [`pairing/pairing_mcp.cc`](../../../pairing/pairing_mcp.cc)：`self.device.start_pairing` / `self.device.unbind` |
+| MQTT 触发 | 未绑定向 `deepdiary/deep-dog/dev/pairing/cmd` 发 `{"action":"start_pairing","ts":…}` |
 | 触摸 | `hold1_tap2` 配对；`hold1_tap3` 解绑（[`esp_sparkbot_board.cc`](../../../esp_sparkbot_board.cc)） |
 | 播报 | 逐位 `OGG_0`…`OGG_9` + `Application::Alert` 屏显；会话内 45s 重播 |
 
@@ -115,6 +116,7 @@ MQTT_HOST=192.168.31.25 MQTT_PORT=8083 MQTT_USE_TLS=false MQTT_PATH=/mqtt \
 
 - [ ] 开机未绑定：无自动播码
 - [ ] MCP / hold1_tap2：屏显 + 语音 + ingest 收到 pending
+- [ ] MQTT `pairing/cmd` `start_pairing`（未绑定、`device_id=dev`）：屏显 + 语音 + retain code
 - [ ] 网页输入码：绑定成功，屏显「绑定成功」
 - [ ] 已绑定 MCP / hold1_tap2：提示已绑定
 - [ ] MCP unbind / hold1_tap3：后端解绑 + 设备收到 unbind

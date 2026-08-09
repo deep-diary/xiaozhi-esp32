@@ -37,7 +37,7 @@ struct FaceFrameJob {
 
 static QueueHandle_t s_queue = nullptr;
 static TaskHandle_t s_task = nullptr;
-static std::atomic<bool> s_user_enabled{true};
+static std::atomic<bool> s_user_enabled{DEEP_DOG_FACE_AI_DEFAULT_ENABLED != 0};
 static std::atomic<bool> s_runtime_started{false};
 static std::atomic<int> s_detect_interval_ms{DEEP_DOG_FACE_AI_MIN_INTERVAL_MS};
 static std::atomic<uint8_t> s_pipeline{static_cast<uint8_t>(DeepDogFacePipeline::Live)};
@@ -487,6 +487,14 @@ void DeepDogFaceAiRuntimeStop() {
 }
 
 void DeepDogFaceAiSetEnabled(bool on) {
+    if (on) {
+        if (!s_runtime_started.load(std::memory_order_acquire)) {
+            if (!DeepDogFaceAiRuntimeStart()) {
+                ESP_LOGW(TAG, "SetEnabled(true) failed: runtime start failed");
+                return;
+            }
+        }
+    }
     s_user_enabled.store(on, std::memory_order_relaxed);
     if (!on) {
         std::lock_guard<std::mutex> lock(s_snap_mu);

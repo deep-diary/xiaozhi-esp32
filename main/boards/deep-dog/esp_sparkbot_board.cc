@@ -650,14 +650,11 @@ private:
                      DEEP_DOG_CAMERA_INIT_RETRIES);
         }
 
-        Settings settings("sparkbot", false);
-        // 考虑到部分复刻使用了不可动摄像头的设计，默认启用翻转
-        bool camera_flipped = static_cast<bool>(settings.GetInt("camera-flipped", 0));
-        ESP_LOGI(TAG, "Camera Flipped: %d", camera_flipped);
-        camera_flipped = 1;
         if (camera_ != nullptr) {
-            camera_->SetHMirror(camera_flipped);
-            camera_->SetVFlip(camera_flipped);
+            camera_->SetHMirror(DEEP_DOG_CAMERA_H_MIRROR != 0);
+            camera_->SetVFlip(DEEP_DOG_CAMERA_V_FLIP != 0);
+            ESP_LOGI(TAG, "Camera orient h_mirror=%d v_flip=%d", DEEP_DOG_CAMERA_H_MIRROR ? 1 : 0,
+                     DEEP_DOG_CAMERA_V_FLIP ? 1 : 0);
         }
 #if DEEP_DOG_TOUCH_APP_DOG_ENABLE
         touch_app_dog_.SetCamera(camera_);
@@ -848,6 +845,7 @@ public:
         InitializeImu();
 #endif
 #if DEEP_DOG_FACE_AI_ENABLE
+#if DEEP_DOG_FACE_AI_DEFAULT_ENABLED
 #if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
         // BT 已占 INTERNAL；Face AI 12KB 栈延后到 idle+AFE 之后再试
         ESP_LOGW(TAG, "Face AI deferred ~90s (BT on: protect wake / TLS heap)");
@@ -871,6 +869,9 @@ public:
         if (!DeepDogFaceAiRuntimeStart()) {
             ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");
         }
+#endif
+#else
+        ESP_LOGI(TAG, "Face AI off at boot (face/cmd enabled=true to start)");
 #endif
 #endif
 #if DEEP_DOG_VISION_HUB_ENABLE

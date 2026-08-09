@@ -50,7 +50,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `enabled` | bool | 否* | 总开关；关则检测+识别均停 |
+| `enabled` | bool | 否* | 总开关；关则检测+识别均停；**开机默认 false**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED`） |
 | `action` | enum | 否 | `clear_db`：清空本地已注册人脸 |
 | `pipeline` | enum | 否 | `live` \| `identity` |
 | `detect_interval_ms` | int | 否 | **200–5000**；越界夹紧；status 回显生效值 |

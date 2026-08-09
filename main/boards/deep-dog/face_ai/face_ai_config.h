@@ -15,6 +15,11 @@
 #define DEEP_DOG_FACE_AI_ENABLE 1
 #endif
 
+/** 开机运行时总开关（检测+识别）；0=关，运行中由 MQTT face/cmd / HTTP 再开 */
+#ifndef DEEP_DOG_FACE_AI_DEFAULT_ENABLED
+#define DEEP_DOG_FACE_AI_DEFAULT_ENABLED 0
+#endif
+
 /**
  * 默认送帧最小间隔（ms）；运行时可由 MQTT face/cmd.detect_interval_ms 覆盖。
  * 对齐推流约 3fps 可用 333；默认 500 降低与 H264 叠加时 esp_timer/CPU 压力。

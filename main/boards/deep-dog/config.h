@@ -26,7 +26,7 @@ typedef int deep_dog_ext_pin_mode_t;
 
 /** 联调默认 CAN（单电机）；云台改回 _PWM，灯带 _LED，前端壳 _NONE */
 #ifndef DEEP_DOG_EXT_PIN_MODE
-#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_CAN
+#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_LED
 #endif
 
 #define DEEP_DOG_EXT_PIN_A_GPIO GPIO_NUM_38
@@ -160,6 +160,13 @@ typedef int deep_dog_ext_pin_mode_t;
 #endif
 #ifndef DEEP_DOG_CAMERA_INIT_RETRY_GAP_MS
 #define DEEP_DOG_CAMERA_INIT_RETRY_GAP_MS 300
+#endif
+/** 摄像头方向（EspVideo SetHMirror / SetVFlip）；SparkBot 默认均为 0；上下反了可试 V_FLIP=1 或 H+V 均为 1 */
+#ifndef DEEP_DOG_CAMERA_H_MIRROR
+#define DEEP_DOG_CAMERA_H_MIRROR 0
+#endif
+#ifndef DEEP_DOG_CAMERA_V_FLIP
+#define DEEP_DOG_CAMERA_V_FLIP 0
 #endif
 #define SPARKBOT_LEDC_TIMER       (LEDC_TIMER_0)
 #define SPARKBOT_LEDC_CHANNEL     (LEDC_CHANNEL_0)

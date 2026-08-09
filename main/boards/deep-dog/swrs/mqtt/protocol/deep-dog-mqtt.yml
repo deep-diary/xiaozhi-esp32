@@ -164,7 +164,7 @@ topics:
     qos: 1
     retain: false
     payload:
-      action: { type: string, note: "bound|unbind" }
+      action: { type: string, note: "bound|unbind|start_pairing (unbound only, dev topic)" }
       ts: { type: int }
 
   # ---- device ----
@@ -359,7 +359,7 @@ topics:
     retain: false
     http: "POST /api/face_enable (+ clear_db / pipeline / interval via MQTT)"
     payload:
-      enabled: { type: bool, optional: true, note: "master switch; off stops detect+recog" }
+      enabled: { type: bool, optional: true, note: "master switch; default false at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED); lazy-loads runtime on first true" }
       action:
         type: enum
         values: [clear_db]
