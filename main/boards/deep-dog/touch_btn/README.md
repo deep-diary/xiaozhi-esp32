@@ -130,6 +130,7 @@ MQTT：`touch/status.thresholds` 始终上报；`touch/cmd` 调参/标定。
 - 实现：[`touch_combo_recognizer`](./touch_combo_recognizer.h)；契约：[06-touch.md](../swrs/mqtt/modules/06-touch.md#组合键识别层)
 - `DEEP_DOG_TOUCH_COMBO_ENABLE`（默认 1）：打开识别 + MQTT `last_combo`
 - `DEEP_DOG_TOUCH_COMBO_CONSUME`（默认 0）：命中后是否跳过应用 fan-out
+- **配对**：`hold1_tap2` → 进入配对播报；`hold1_tap3` → 设备解绑请求（见 [00-pairing](../swrs/mqtt/modules/00-pairing.md)）
 
 ## 新增应用
 

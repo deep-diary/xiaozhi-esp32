@@ -3,6 +3,7 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/modules/device_mqtt.h"
+#include "mqtt/modules/pairing_mqtt.h"
 #include "mqtt/modules/stream_mqtt.h"
 #include "mqtt/modules/imu_mqtt.h"
 #include "mqtt/modules/face_mqtt.h"
@@ -28,6 +29,7 @@
 #include "sensor/imu_switch.h"
 #endif
 #include "vision/vision_config.h"
+#include "vision/vision_frame_hub.h"
 
 #include <esp_log.h>
 
@@ -38,6 +40,7 @@
 struct DeepDogMqtt::Impl {
     DeepDogMqttClient client;
     DeepDogDeviceMqtt device{&client};
+    DeepDogPairingMqtt pairing{&client};
     DeepDogStreamMqtt stream{&client};
     DeepDogImuMqtt imu{&client};
     DeepDogFaceMqtt face{&client};
@@ -63,11 +66,14 @@ struct DeepDogMqtt::Impl {
 
     void OnConnection(bool connected);
     void OnMessage(const std::string& topic, const std::string& payload);
+    void ApplyVisionStreamUrl(const DeepDogMqttSettings& settings);
+    void StopModulesForReload();
 };
 
 void DeepDogMqtt::Impl::OnConnection(bool connected) {
     if (connected) {
         device.OnConnected();
+        pairing.OnConnected();
         stream.OnConnected();
         imu.OnConnected();
         face.OnConnected();
@@ -81,6 +87,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         motor.OnConnected();
     } else {
         device.OnDisconnected();
+        pairing.OnDisconnected();
         stream.OnDisconnected();
         imu.OnDisconnected();
         face.OnDisconnected();
@@ -96,6 +103,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
 }
 
 void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& payload) {
+    pairing.OnMessage(topic, payload);
     stream.OnMessage(topic, payload);
     face.OnMessage(topic, payload);
     track.OnMessage(topic, payload);
@@ -108,7 +116,9 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     motor.OnMessage(topic, payload);
 }
 
-DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {}
+DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {
+    impl_->pairing.SetIdentityReloadCallback([this]() { ReloadDeviceIdentity(); });
+}
 
 DeepDogMqtt::~DeepDogMqtt() {
     if (impl_ && impl_->touch_hub) {
@@ -243,6 +253,67 @@ bool DeepDogMqtt::IsRunning() const {
     return impl_ && impl_->started;
 }
 
+void DeepDogMqtt::StartPairingSessionOrAnnounceBound() {
+    if (impl_) {
+        impl_->pairing.StartPairingSessionOrAnnounceBound();
+    }
+}
+
+void DeepDogMqtt::RequestDeviceUnbind() {
+    if (impl_) {
+        impl_->pairing.RequestUnbind();
+    }
+}
+
+bool DeepDogMqtt::IsDeviceBound() const {
+    return impl_ && impl_->pairing.IsBound();
+}
+
+const std::string& DeepDogMqtt::DevicePairCode() const {
+    static const std::string kEmpty;
+    return impl_ ? impl_->pairing.pair_code() : kEmpty;
+}
+
+void DeepDogMqtt::Impl::ApplyVisionStreamUrl(const DeepDogMqttSettings& settings) {
+#if DEEP_DOG_VISION_HUB_ENABLE
+    if (hub) {
+        hub->SetRtspUrl(DeepDogMqttConfig::RtspPushUrlForDeviceId(settings.device_id));
+    }
+#else
+    (void)settings;
+#endif
+}
+
+void DeepDogMqtt::Impl::StopModulesForReload() {
+    motor.Stop();
+    can.Stop();
+    gimbal.Stop();
+    servo.Stop();
+    led.Stop();
+    handle.Stop();
+    touch.Stop();
+    track.Stop();
+    face.Stop();
+    imu.Stop();
+    stream.Stop();
+    pairing.Stop();
+    device.Stop();
+    client.Stop();
+}
+
+void DeepDogMqtt::ReloadDeviceIdentity() {
+    if (!impl_ || !impl_->started) {
+        return;
+    }
+    const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
+    impl_->ApplyVisionStreamUrl(settings);
+    impl_->StopModulesForReload();
+    impl_->stream.SetVisionHub(impl_->hub);
+    impl_->stream.SetHttpServer(impl_->http);
+    const bool ok = impl_->client.Start(settings);
+    ESP_LOGI(TAG, "ReloadDeviceIdentity device_id=%s connected=%d", settings.device_id.c_str(), ok ? 1 : 0);
+}
+
 bool DeepDogMqtt::Start() {
     if (!impl_ || impl_->started) {
         return impl_ && impl_->started;
@@ -344,6 +415,7 @@ bool DeepDogMqtt::Start() {
         [this](const std::string& t, const std::string& p) { impl_->OnMessage(t, p); });
 
     const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
+    impl_->ApplyVisionStreamUrl(settings);
     const bool ok = impl_->client.Start(settings);
     impl_->started = true;
     ESP_LOGI(TAG,
@@ -359,19 +431,7 @@ void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
     }
-    impl_->motor.Stop();
-    impl_->can.Stop();
-    impl_->gimbal.Stop();
-    impl_->servo.Stop();
-    impl_->led.Stop();
-    impl_->handle.Stop();
-    impl_->touch.Stop();
-    impl_->track.Stop();
-    impl_->face.Stop();
-    impl_->imu.Stop();
-    impl_->stream.Stop();
-    impl_->device.Stop();
-    impl_->client.Stop();
+    impl_->StopModulesForReload();
     impl_->started = false;
 }
 
@@ -394,6 +454,14 @@ void DeepDogMqtt::SetDeepMotor(DeepMotor*) {}
 void DeepDogMqtt::SetWsMcpEndpoint(int, const char*) {}
 bool DeepDogMqtt::Start() { return false; }
 void DeepDogMqtt::Stop() {}
+void DeepDogMqtt::ReloadDeviceIdentity() {}
 bool DeepDogMqtt::IsRunning() const { return false; }
+void DeepDogMqtt::StartPairingSessionOrAnnounceBound() {}
+void DeepDogMqtt::RequestDeviceUnbind() {}
+bool DeepDogMqtt::IsDeviceBound() const { return false; }
+const std::string& DeepDogMqtt::DevicePairCode() const {
+    static const std::string kEmpty;
+    return kEmpty;
+}
 
 #endif

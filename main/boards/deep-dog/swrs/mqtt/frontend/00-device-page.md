@@ -23,6 +23,7 @@
 | `device/status` | ↑ | 0 | false | 心跳：RSSI、内存、health（可选） |
 
 前缀：`deepdiary/deep-dog/{device_id}/`。  
+生产默认 `device_id` = STA MAC 紧凑串；之家添加设备用配对码，见 [00-pairing](../modules/00-pairing.md)（**无入口卡**）。  
 Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 
 ## 入口卡顺序
@@ -33,6 +34,7 @@ Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
 仅当 `capabilities.<module_id> === true` 时渲染对应入口卡。  
 另读 `ext_pins.mode`（`none|can|uart|rs485|pwm|io|ad|led`）决定总线/灯带类页面骨架（与 capabilities 互补；`mode` 为真源）。LED 卡需 `mode=led` 且 `capabilities.led`。
 
+**Pairing 不单独出卡**：添加/绑定在 deep-trace 之家列表（REQ-IOT-142）。  
 **Track 不单独出卡**：跟踪 UI 在 [02-stream](../modules/02-stream.md)（`#track`）。  
 **Person 不单独出卡**：并入 [04-face](../modules/04-face.md)；`/modules/person` redirect 到 face。
 

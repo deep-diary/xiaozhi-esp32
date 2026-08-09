@@ -1,6 +1,7 @@
 #include "vision/vision_frame_hub.h"
 
 #include "vision/vision_config.h"
+#include "mqtt/mqtt_config.h"
 #if DEEP_DOG_VISION_CODEC_H264
 #include "vision/h264_sw_encoder.h"
 #include "vision/rtsp_h264_pusher.h"
@@ -13,6 +14,8 @@
 #include "face_ai_bridge.h"
 #include "face_ai_config.h"
 #include "image_to_jpeg.h"
+
+#include "esp_imgfx_color_convert.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -67,6 +70,35 @@ static bool PackedRgb565FromFrame(const CameraFrame& cf, std::vector<uint8_t>* p
     return false;
 }
 
+/** OV2640（与 esp-sparkbot 一致）出 YUV422；H264/人脸需要 RGB565，在此统一转换。 */
+static bool YuyvToRgb565Packed(const uint8_t* yuyv, size_t yuyv_len, uint16_t w, uint16_t h,
+                               std::vector<uint8_t>* rgb565_out) {
+    if (!yuyv || !rgb565_out || w == 0 || h == 0) {
+        return false;
+    }
+    const size_t need_rgb = (size_t)w * (size_t)h * 2u;
+    if (yuyv_len < need_rgb) {
+        return false;
+    }
+    rgb565_out->resize(need_rgb);
+    esp_imgfx_color_convert_cfg_t cfg = {
+        .in_res = {.width = static_cast<int16_t>(w), .height = static_cast<int16_t>(h)},
+        .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_YUYV,
+        .out_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+        .color_space_std = ESP_IMGFX_COLOR_SPACE_STD_BT601,
+    };
+    esp_imgfx_color_convert_handle_t handle = nullptr;
+    esp_imgfx_err_t err = esp_imgfx_color_convert_open(&cfg, &handle);
+    if (err != ESP_IMGFX_ERR_OK || handle == nullptr) {
+        return false;
+    }
+    esp_imgfx_data_t in_data = {.data = const_cast<uint8_t*>(yuyv), .data_len = static_cast<uint32_t>(yuyv_len)};
+    esp_imgfx_data_t out_data = {.data = rgb565_out->data(), .data_len = static_cast<uint32_t>(need_rgb)};
+    err = esp_imgfx_color_convert_process(handle, &in_data, &out_data);
+    esp_imgfx_color_convert_close(handle);
+    return err == ESP_IMGFX_ERR_OK;
+}
+
 }  // namespace
 
 VisionFrameHub::VisionFrameHub(EspVideo* camera) : camera_(camera) {
@@ -76,10 +108,10 @@ VisionFrameHub::VisionFrameHub(EspVideo* camera) : camera_(camera) {
 #else
     pusher_ = std::make_unique<RtspJpegPusher>();
 #endif
-    char url[160];
-    snprintf(url, sizeof(url), "rtsp://%s:%u/%s", DEEP_DOG_VISION_RTSP_HOST,
-             static_cast<unsigned>(DEEP_DOG_VISION_RTSP_PORT), DEEP_DOG_VISION_STREAM_PATH);
-    pusher_->SetUrl(url);
+    const DeepDogMqttSettings mqtt_settings = DeepDogMqttConfig::Load();
+    const std::string rtsp = DeepDogMqttConfig::RtspPushUrlForDeviceId(mqtt_settings.device_id);
+    pusher_->SetUrl(rtsp);
+    ESP_LOGI(TAG, "RTSP push url=%s", rtsp.c_str());
 }
 
 VisionFrameHub::~VisionFrameHub() {
@@ -256,6 +288,19 @@ bool VisionFrameHub::CapturePackedRgb565(std::vector<uint8_t>* packed, uint16_t*
                      (unsigned)cf.len, cf.format);
             return false;
         }
+        static bool s_logged_native_rgb565 = false;
+        if (!s_logged_native_rgb565) {
+            ESP_LOGI(TAG, "capture path=native RGB565 (no YUV convert)");
+            s_logged_native_rgb565 = true;
+        }
+        return true;
+    }
+    if (vf == V4L2_PIX_FMT_YUYV || vf == V4L2_PIX_FMT_YUV422P) {
+        if (!YuyvToRgb565Packed(cf.data, cf.len, *w, *h, packed)) {
+            ESP_LOGW(TAG, "capture stage=yuyv_to_rgb565 fail w=%u h=%u len=%u", *w, *h, (unsigned)cf.len);
+            return false;
+        }
+        *v4l_fmt = static_cast<uint32_t>(V4L2_PIX_FMT_RGB565);
         return true;
     }
     packed->assign(cf.data, cf.data + cf.len);

@@ -8,7 +8,15 @@ protocol:
   description: >
     Modular full-feature board MQTT contract. Topics are split by module;
     trim via device/info.capabilities (e.g. disable dog for non-quadruped builds).
+    Stable device_id defaults to STA MAC compact (lowercase, no colons);
+    pairing uses pairing/status + pairing/cmd (see modules/00-pairing).
   topic_prefix: "deepdiary/deep-dog/{device_id}"
+  device_id:
+    default: "dev_when_unbound_mac_when_bound"
+    note: >
+      Unbound: device_id=dev (MQTT prefix deepdiary/deep-dog/dev/, RTSP path deep-dog/dev).
+      Bound: STA MAC compact aabbccddeeff; written to NVS on pairing/cmd bound.
+      NVS deep_dog_mqtt.device_id explicit override for lab only.
   payload: json
   conventions:
     cmd_qos: 1
@@ -23,6 +31,14 @@ broker:
   note: "Addresses owned by vision/infra.md; credentials in NVS / secret store only."
 
 modules:
+  pairing:
+    status: defined
+    required: true
+    impl: modules/00-pairing
+    note: >
+      Unbound devices stay silent on boot; pairing via MCP or hold1_tap2.
+      pairing/status with code during session or pro_pairing_mqtt NVS.
+      Device unbind via pairing/request; backend confirms pairing/cmd.
   device:
     status: defined
     required: true
@@ -116,6 +132,41 @@ modules:
       snapshot in-process; optional gimbal/dog actuators later.
 
 topics:
+  # ---- pairing ----
+  pairing/status:
+    module: pairing
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect_if_bound_or_pairing_session_or_pro_mode
+    payload:
+      device_id: { type: string, note: "STA MAC compact, e.g. aabbccddeeff" }
+      mac: { type: string, optional: true, note: "AA:BB:CC:DD:EE:FF display form" }
+      code: { type: string, optional: true, note: "6 digit chars when pairing session active or pro_pairing_mqtt" }
+      bound: { type: bool }
+      ts: { type: int }
+      ts_iso: { type: string, optional: true }
+
+  pairing/request:
+    module: pairing
+    dir: uplink
+    qos: 1
+    retain: false
+    when: user_unbind_via_mcp_or_hold1_tap3
+    payload:
+      action: { type: string, note: "unbind" }
+      device_id: { type: string }
+      ts: { type: int }
+
+  pairing/cmd:
+    module: pairing
+    dir: downlink
+    qos: 1
+    retain: false
+    payload:
+      action: { type: string, note: "bound|unbind" }
+      ts: { type: int }
+
   # ---- device ----
   device/info:
     module: device
@@ -124,7 +175,7 @@ topics:
     retain: true
     when: on_connect
     payload:
-      device_id: { type: string }
+      device_id: { type: string, note: "same as topic prefix id; default MAC compact" }
       firmware: { type: string }
       board: { type: string, optional: true, note: "BOARD_NAME / board id, e.g. deep-dog" }
       chip_model: { type: string, optional: true, note: "CONFIG_IDF_TARGET, e.g. esp32s3" }

@@ -131,6 +131,7 @@
 #include "mqtt/mqtt_config.h"
 #if DEEP_DOG_MQTT_ENABLE
 #include "mqtt/deep_dog_mqtt.h"
+#include "pairing/pairing_mcp.h"
 #endif
 
 #define TAG "deep_dog"
@@ -470,6 +471,13 @@ private:
         touch_dispatcher_.SetComboHitListener([this](const char* id) {
             if (board_mqtt_) {
                 board_mqtt_->NotifyTouchCombo(id);
+#if DEEP_DOG_MQTT_ENABLE
+                if (strcmp(id, "hold1_tap2") == 0) {
+                    board_mqtt_->StartPairingSessionOrAnnounceBound();
+                } else if (strcmp(id, "hold1_tap3") == 0) {
+                    board_mqtt_->RequestDeviceUnbind();
+                }
+#endif
             }
         });
 #endif
@@ -728,7 +736,12 @@ private:
 #if DEEP_DOG_SERVO_ENABLE
         RegisterServoMcpTools(mcp_server);
 #endif
-#if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_LED_ENABLE && !DEEP_DOG_SERVO_ENABLE
+#if DEEP_DOG_MQTT_ENABLE
+        if (board_mqtt_) {
+            RegisterPairingMcpTools(mcp_server, board_mqtt_.get());
+        }
+#endif
+#if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_LED_ENABLE && !DEEP_DOG_SERVO_ENABLE && !DEEP_DOG_MQTT_ENABLE
         (void)mcp_server;
 #endif
     }

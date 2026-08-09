@@ -37,11 +37,13 @@
 
 前缀：`deepdiary/deep-dog/{device_id}/`。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
 
+**`device_id` 语义**：生产默认 = STA MAC 紧凑串（小写无冒号）；与 Topic 前缀一致。添加设备 / 配对见 [00-pairing](./00-pairing.md)，勿要求用户手输本字段。
+
 ## 字段表 · `device/info`
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `device_id` | string | 是 | 设备 ID |
+| `device_id` | string | 是 | 与 Topic 前缀相同；默认 MAC 紧凑 |
 | `firmware` | string | 是 | `esp_app_desc.version` |
 | `board` | string | 否 | 板名，如 `deep-dog` |
 | `chip_model` | string | 否 | 如 `esp32s3` |
@@ -83,7 +85,7 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 
 ```json
 {
-  "device_id": "deep-dog-dev",
+  "device_id": "aabbccddeeff",
   "firmware": "2.1.0",
   "board": "deep-dog",
   "chip_model": "esp32s3",
@@ -104,6 +106,8 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
   "ts_iso": "2024-03-09T12:00:00Z"
 }
 ```
+
+联调覆盖 `device_id=dev` 时，样例中的 `device_id` 与 Topic 前缀改为 `dev` 即可。
 
 ## 样例 JSON · `device/status`
 
