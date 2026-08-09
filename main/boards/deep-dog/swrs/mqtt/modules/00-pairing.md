@@ -3,14 +3,16 @@
 | 项 | 内容 |
 |----|------|
 | module_id | `pairing` |
-| capabilities | （核心；未绑定设备始终进入配对流） |
+| capabilities | （核心；显式触发配对流） |
 | 路由建议 | 无独立 Hub 卡；由网页「添加设备」消费 |
 | 契约 | **已实现待实测**；字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准 |
-| 对齐 | deep-trace REQ-IOT-142：`/Volumes/MacExtStorage/projects/deep-trace/docs/requirements/features/iot/hub/142-home-add-device-by-pair-code.md`；REQ-IOT-143：`/Volumes/MacExtStorage/projects/deep-trace/docs/requirements/features/iot/143-device-pair-bind-api.md` |
+| 对齐 | deep-trace REQ-IOT-142；REQ-IOT-143 |
 
 ## 目标
 
 多台设备刷同一固件时，MQTT Topic 前缀必须互不冲突；用户在网页添加设备时**只输入 6 位配对码**，不手输 MAC / `device_id`。
+
+**须先在设备上进入配对模式**（MCP 语音 / 长按1+轻触2），设备才会播报码并 retain 上报 `code`。
 
 ## 身份约定
 
@@ -19,14 +21,15 @@
 | 稳定 `device_id` | STA MAC **紧凑串**：小写、无冒号，如 `aabbccddeeff` |
 | Topic 前缀 | `deepdiary/deep-dog/{device_id}/` |
 | `device/info.mac` | 可读形式 `AA:BB:…`（展示用） |
-| NVS 覆盖 | 命名空间 `deep_dog_mqtt` 的 `device_id` 仍可强制为 `dev` 等，**仅联调**；生产默认不写死 `dev` |
+| NVS 覆盖 | 命名空间 `deep_dog_mqtt`：`bound`、`pair_code`、`pro_pairing_mqtt`（bool，默认 false） |
 | `client_id` | 可继续带 MAC 后缀，避免 Broker 会话冲突 |
 
 ## 通道（混合）
 
-1. 设备生成 6 位数字码，语音/屏显播报，经 MQTT 上报 `pairing/status`。
-2. 网页只调 Django HTTP 绑定 API（见 REQ-IOT-142/143）。
-3. 后端绑定成功后下行 `pairing/cmd`；设备写 NVS `bound=true`，退出配对播报循环。
+1. 用户显式触发配对 → 设备生成 6 位码，**屏显 + 语音**播报，经 MQTT 上报 `pairing/status`（retain，含 `code`）。
+2. 网页只调 Django HTTP 绑定 API（REQ-IOT-142/143）。
+3. 后端绑定成功后下行 `pairing/cmd` `action=bound`；设备写 NVS `bound=true`，停止配对播报。
+4. 解绑：MCP / 长按1+轻触3 → 设备上行 `pairing/request` `action=unbind` → 后端解绑并下行 `pairing/cmd` `action=unbind`。
 
 **不**走官方小智 OTA `/activate`；业务 MQTT 与配对共用同一 Broker。
 
@@ -34,19 +37,30 @@
 
 ```text
 上线 → 读 NVS bound
-  ├─ bound=true  → 正常业务；pairing/status 可发 bound=true（无 code 或清空）
-  └─ bound=false → 生成/复用 6 位码 → 播报 → publish pairing/status(retain)
-                   → 订 pairing/cmd → 收到 action=bound → NVS bound=true → 停播报
-                   → 收到 action=unbind → NVS bound=false → 重新进入配对
+  ├─ bound=true  → publish pairing/status bound=true（无 code）；正常业务
+  └─ bound=false → 静默（不自动播码、不重播）
+                   │
+                   ├─ MCP start_pairing / hold1_tap2
+                   │     → 生成/复用码 → Alert 屏显 + 语音 → retain pairing/status
+                   │     → 会话内 45s 重播
+                   │
+                   ├─ pro_pairing_mqtt=true（NVS）
+                   │     → 未绑定时也 retain 带 code（无语音，专业/调试）
+                   │
+                   ├─ 收到 pairing/cmd bound → NVS bound=true → 屏显「绑定成功」→ 停重播
+                   │
+                   └─ MCP unbind / hold1_tap3 → pairing/request unbind
+                         → 后端 unbind → pairing/cmd unbind → NVS bound=false → 静默
 ```
 
-码有效期由后端 PendingPairing TTL 约束（建议 10～15 min）；设备可周期性重播同一码，或超时后换新码并重新 retain 上报。
+码有效期由后端 PendingPairing TTL 约束（建议 10～15 min）；配对会话内可周期性重播同一码。
 
 ## Topic
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
 | `pairing/status` | ↑ | 0 | true |
+| `pairing/request` | ↑ | 1 | false |
 | `pairing/cmd` | ↓ | 1 | false |
 
 前缀：`deepdiary/deep-dog/{device_id}/`。
@@ -57,10 +71,17 @@
 |------|------|------|------|
 | `device_id` | string | 是 | MAC 紧凑串 |
 | `mac` | string | 否 | `AA:BB:…` |
-| `code` | string | 未绑定时是 | 恰好 6 位数字字符；`bound=true` 时可省略或空 |
-| `bound` | bool | 是 | 是否已绑定到某用户/之家（设备侧 NVS） |
+| `code` | string | 配对会话/pro 模式 | 恰好 6 位数字；`bound=true` 时省略 |
+| `bound` | bool | 是 | 是否已绑定 |
 | `ts` | int | 是 | Unix 秒 |
-| `ts_iso` | string | 否 | UTC ISO8601 |
+
+## 字段表 · `pairing/request`
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `action` | string | 是 | `unbind` |
+| `device_id` | string | 是 | MAC 紧凑串 |
+| `ts` | int | 是 | Unix 秒 |
 
 ## 字段表 · `pairing/cmd`
 
@@ -69,62 +90,34 @@
 | `action` | string | 是 | `bound` \| `unbind` |
 | `ts` | int | 是 | Unix 秒 |
 
-稀疏 cmd：只带需变更的键；`action` 必填。
+## 固件实现
 
-## 样例
+| 项 | 落地 |
+|----|------|
+| MQTT 模块 | [`pairing_mqtt.cc`](../../../mqtt/modules/pairing_mqtt.cc) |
+| MCP | [`pairing/pairing_mcp.cc`](../../../pairing/pairing_mcp.cc)：`self.device.start_pairing` / `self.device.unbind` |
+| 触摸 | `hold1_tap2` 配对；`hold1_tap3` 解绑（[`esp_sparkbot_board.cc`](../../../esp_sparkbot_board.cc)） |
+| 播报 | 逐位 `OGG_0`…`OGG_9` + `Application::Alert` 屏显；会话内 45s 重播 |
 
-未绑定：
+## 联调前置
 
-```json
-{
-  "device_id": "aabbccddeeff",
-  "mac": "AA:BB:CC:DD:EE:FF",
-  "code": "482913",
-  "bound": false,
-  "ts": 1710000000,
-  "ts_iso": "2024-03-09T12:00:00Z"
-}
+```bash
+MQTT_HOST=192.168.31.25 MQTT_PORT=8083 MQTT_USE_TLS=false MQTT_PATH=/mqtt \
+  python manage.py run_pairing_ingest
 ```
 
-已绑定后 status（可选清理 code）：
-
-```json
-{
-  "device_id": "aabbccddeeff",
-  "mac": "AA:BB:CC:DD:EE:FF",
-  "bound": true,
-  "ts": 1710000060
-}
-```
-
-下行绑定确认：
-
-```json
-{ "action": "bound", "ts": 1710000055 }
-```
-
-解绑：
-
-```json
-{ "action": "unbind", "ts": 1710001000 }
-```
-
-## 固件实现（需求约定，待开发）
-
-- 默认 `device_id`：从 STA MAC 生成紧凑串；仅当 NVS 显式配置时覆盖。
-- NVS `deep_dog_mqtt`：增加 `bound`（bool）；可选缓存当前 `pair_code`。
-- 未绑定：上线/重连后 retain 发 `pairing/status`；订阅 `pairing/cmd`。
-- 播报：逐位播放数字音（可复用小智 `OGG_0`…`OGG_9` 资源，若板级可用）；无扬声器时至少日志/屏显。
-- 绑定后仍用同一 `device_id` 发 `device/info` 等业务 Topic，**不**改前缀。
+前端 UX：[`../frontend/01-add-device-pairing.md`](../frontend/01-add-device-pairing.md)
 
 ## 验收
 
-- [ ] 两台设备默认 Topic 前缀不同（各自 MAC）
-- [ ] 未绑定设备 `pairing/status` retain 含 6 位 `code`
-- [ ] 收到 `action=bound` 后不再要求用户输码即可正常业务；重连 `bound=true`
-- [ ] 联调可 NVS 强制 `device_id=dev`，与正式默认语义文档区分清楚
+- [ ] 开机未绑定：无自动播码
+- [ ] MCP / hold1_tap2：屏显 + 语音 + ingest 收到 pending
+- [ ] 网页输入码：绑定成功，屏显「绑定成功」
+- [ ] 已绑定 MCP / hold1_tap2：提示已绑定
+- [ ] MCP unbind / hold1_tap3：后端解绑 + 设备收到 unbind
+- [ ] `pro_pairing_mqtt=1`：未绑定时 retain 带 code
 
 ## 非目标
 
 - 官方 xiaozhi.me / OTA 激活兼容
-- 网页手输 MAC 作为主路径（调试见 REQ-IOT-140）
+- 网页手输 MAC 作为主路径

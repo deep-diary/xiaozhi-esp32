@@ -35,8 +35,9 @@ modules:
     required: true
     impl: modules/00-pairing
     note: >
-      Unbound devices publish 6-digit code on pairing/status (retain);
-      backend bind API confirms via pairing/cmd. Not official xiaozhi OTA activate.
+      Unbound devices stay silent on boot; pairing via MCP or hold1_tap2.
+      pairing/status with code during session or pro_pairing_mqtt NVS.
+      Device unbind via pairing/request; backend confirms pairing/cmd.
   device:
     status: defined
     required: true
@@ -118,14 +119,25 @@ topics:
     dir: uplink
     qos: 0
     retain: true
-    when: on_connect_if_unbound_or_bound_change
+    when: on_connect_if_bound_or_pairing_session_or_pro_mode
     payload:
       device_id: { type: string, note: "STA MAC compact, e.g. aabbccddeeff" }
       mac: { type: string, optional: true, note: "AA:BB:CC:DD:EE:FF display form" }
-      code: { type: string, optional: true, note: "6 digit chars when bound=false" }
+      code: { type: string, optional: true, note: "6 digit chars when pairing session active or pro_pairing_mqtt" }
       bound: { type: bool }
       ts: { type: int }
       ts_iso: { type: string, optional: true }
+
+  pairing/request:
+    module: pairing
+    dir: uplink
+    qos: 1
+    retain: false
+    when: user_unbind_via_mcp_or_hold1_tap3
+    payload:
+      action: { type: string, note: "unbind" }
+      device_id: { type: string }
+      ts: { type: int }
 
   pairing/cmd:
     module: pairing

@@ -5,8 +5,9 @@
 ## 前端怎么读
 
 1. [frontend/00-device-page.md](./frontend/00-device-page.md) — 设备页：入口卡（无 detail）
-2. [modules/](./modules/) — 各模块**独立详情页**（订阅/控制 Steps）
-3. [M01](./M01-board-mqtt-protocol.md) — 总览、裁剪、Broker
+2. [frontend/01-add-device-pairing.md](./frontend/01-add-device-pairing.md) — 之家：按配对码添加 / 解绑设备
+3. [modules/](./modules/) — 各模块**独立详情页**（订阅/控制 Steps）
+4. [M01](./M01-board-mqtt-protocol.md) — 总览、裁剪、Broker
 
 | 顺序 | 模块文档 |
 |------|----------|
@@ -42,7 +43,7 @@ Broker 地址：[vision/infra.md](../vision/infra.md)。推流能力依赖 [C02]
 
 源码：`main/boards/deep-dog/mqtt/`（`DEEP_DOG_MQTT_ENABLE`，默认 1）。
 
-NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password` /（规划）`bound`。  
+NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password` / `bound` / `pair_code`。  
 默认 broker `192.168.31.25:1883`。**生产默认 `device_id` = STA MAC 紧凑串**（如 `aabbccddeeff`）；NVS 显式写入 `dev` 仅用于联调，前缀则为 `deepdiary/deep-dog/dev/`。配对见 [00-pairing](./modules/00-pairing.md)。
 
 ### MQTTX / 脚本验收清单

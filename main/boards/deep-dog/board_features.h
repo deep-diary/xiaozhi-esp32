@@ -70,6 +70,11 @@
 #define DEEP_DOG_LED_ENABLE 1
 #endif
 
+/* -------- 蓝牙手柄（bluepad32；默认关，配对联调不受影响） -------- */
+#ifndef DEEP_DOG_HANDLE_ENABLE
+#define DEEP_DOG_HANDLE_ENABLE 0
+#endif
+
 /* -------- 依赖钳位 -------- */
 #if !DEEP_DOG_CAN_AVAILABLE
 #undef DEEP_DOG_CAN_ENABLE

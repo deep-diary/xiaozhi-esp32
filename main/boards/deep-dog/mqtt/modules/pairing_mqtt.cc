@@ -65,6 +65,7 @@ void DeepDogPairingMqtt::LoadBoundState() {
     Settings settings("deep_dog_mqtt", false);
     bound_ = settings.GetBool("bound", false);
     pair_code_ = settings.GetString("pair_code", "");
+    pro_pairing_mqtt_ = settings.GetBool("pro_pairing_mqtt", false);
 }
 
 void DeepDogPairingMqtt::SaveBoundState(bool bound) {
@@ -73,6 +74,7 @@ void DeepDogPairingMqtt::SaveBoundState(bool bound) {
     if (bound) {
         settings.EraseKey("pair_code");
         pair_code_.clear();
+        session_active_ = false;
     } else if (!pair_code_.empty()) {
         settings.SetString("pair_code", pair_code_);
     }
@@ -98,6 +100,10 @@ void DeepDogPairingMqtt::EnsurePairCode() {
     ESP_LOGI(TAG, "generated pair code %s", pair_code_.c_str());
 }
 
+bool DeepDogPairingMqtt::ShouldPublishPairCode() const {
+    return !bound_ && (session_active_ || pro_pairing_mqtt_);
+}
+
 void DeepDogPairingMqtt::EnsureReplayTimer() {
     if (replay_timer_) {
         return;
@@ -112,13 +118,47 @@ void DeepDogPairingMqtt::EnsureReplayTimer() {
     esp_timer_create(&args, &replay_timer_);
 }
 
+void DeepDogPairingMqtt::StopReplayTimer() {
+    if (replay_timer_) {
+        esp_timer_stop(replay_timer_);
+    }
+}
+
 void DeepDogPairingMqtt::ReplayTimerCb(void* arg) {
     auto* self = static_cast<DeepDogPairingMqtt*>(arg);
-    if (!self || !self->connected_ || self->bound_) {
+    if (!self || !self->connected_ || self->bound_ || !self->ShouldPublishPairCode()) {
         return;
     }
     self->PublishStatus();
-    self->AnnounceCode();
+    if (self->session_active_) {
+        self->AnnounceCode();
+    }
+}
+
+void DeepDogPairingMqtt::ShowPairingAlert() {
+    char msg[64];
+    snprintf(msg, sizeof(msg), "请在网页输入配对码：%s", pair_code_.c_str());
+    Application::GetInstance().Alert("配对", msg, "link", Lang::Sounds::OGG_POPUP);
+}
+
+void DeepDogPairingMqtt::ShowAlreadyBoundAlert() {
+    Application::GetInstance().Alert("设备", "本设备已绑定", "check", Lang::Sounds::OGG_SUCCESS);
+}
+
+void DeepDogPairingMqtt::ShowNotBoundAlert() {
+    Application::GetInstance().Alert("设备", "当前未绑定", "neutral", std::string_view{});
+}
+
+void DeepDogPairingMqtt::ShowBoundSuccessAlert() {
+    Application::GetInstance().Alert("配对", "绑定成功", "happy", Lang::Sounds::OGG_SUCCESS);
+}
+
+void DeepDogPairingMqtt::ShowUnboundAlert() {
+    Application::GetInstance().Alert("配对", "已解绑，可重新配对", "neutral", Lang::Sounds::OGG_POPUP);
+}
+
+void DeepDogPairingMqtt::ShowUnbindRequestSentAlert() {
+    Application::GetInstance().Alert("配对", "解绑请求已发送", "link", Lang::Sounds::OGG_POPUP);
 }
 
 void DeepDogPairingMqtt::AnnounceCode() {
@@ -166,7 +206,7 @@ void DeepDogPairingMqtt::PublishStatus() {
     cJSON_AddStringToObject(root, "device_id", device_id.c_str());
     cJSON_AddStringToObject(root, "mac", mac.c_str());
     cJSON_AddBoolToObject(root, "bound", bound_);
-    if (!bound_ && !pair_code_.empty()) {
+    if (ShouldPublishPairCode() && !pair_code_.empty()) {
         cJSON_AddStringToObject(root, "code", pair_code_.c_str());
     }
     const int64_t ts = UnixTs();
@@ -180,27 +220,88 @@ void DeepDogPairingMqtt::PublishStatus() {
     cJSON_free(raw);
 }
 
-void DeepDogPairingMqtt::ApplyBound(bool bound) {
-    if (bound == bound_ && bound) {
-        PublishStatus();
+void DeepDogPairingMqtt::PublishPairingRequest(const char* action) {
+    if (!client_ || !connected_ || !action) {
+        ESP_LOGW(TAG, "pairing/request skipped (not connected)");
         return;
     }
-    SaveBoundState(bound);
-    if (replay_timer_) {
-        esp_timer_stop(replay_timer_);
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        return;
     }
-    if (!bound) {
-        EnsurePairCode();
-        PublishStatus();
+    const std::string& device_id = client_->settings().device_id;
+    cJSON_AddStringToObject(root, "action", action);
+    cJSON_AddStringToObject(root, "device_id", device_id.c_str());
+    cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+    char* raw = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!raw) {
+        return;
+    }
+    client_->Publish("pairing/request", raw, 1, false);
+    cJSON_free(raw);
+    ESP_LOGI(TAG, "pairing/request action=%s", action);
+}
+
+void DeepDogPairingMqtt::StartPairingSession(bool announce) {
+    if (bound_) {
+        ShowAlreadyBoundAlert();
+        return;
+    }
+    session_active_ = true;
+    EnsurePairCode();
+    PublishStatus();
+    if (announce) {
+        ShowPairingAlert();
         AnnounceCode();
-        EnsureReplayTimer();
-        if (replay_timer_) {
-            esp_timer_start_periodic(replay_timer_, kReplayIntervalUs);
-        }
-    } else {
-        PublishStatus();
-        ESP_LOGI(TAG, "device bound");
     }
+    EnsureReplayTimer();
+    if (replay_timer_) {
+        esp_timer_start_periodic(replay_timer_, kReplayIntervalUs);
+    }
+}
+
+void DeepDogPairingMqtt::StartPairingSessionOrAnnounceBound() {
+    LoadBoundState();
+    if (bound_) {
+        ShowAlreadyBoundAlert();
+        return;
+    }
+    StartPairingSession(true);
+}
+
+void DeepDogPairingMqtt::RequestUnbind() {
+    LoadBoundState();
+    if (!bound_) {
+        ShowNotBoundAlert();
+        return;
+    }
+    if (!connected_) {
+        Application::GetInstance().Alert("配对", "网络未连接，请稍后重试", "sad", std::string_view{});
+        return;
+    }
+    PublishPairingRequest("unbind");
+    ShowUnbindRequestSentAlert();
+}
+
+void DeepDogPairingMqtt::ApplyBound(bool bound) {
+    const bool was_bound = bound_;
+    SaveBoundState(bound);
+    StopReplayTimer();
+
+    if (!bound) {
+        session_active_ = false;
+        PublishStatus();
+        if (was_bound) {
+            ShowUnboundAlert();
+        }
+        ESP_LOGI(TAG, "device unbound");
+        return;
+    }
+
+    PublishStatus();
+    ShowBoundSuccessAlert();
+    ESP_LOGI(TAG, "device bound");
 }
 
 void DeepDogPairingMqtt::OnConnected() {
@@ -209,24 +310,28 @@ void DeepDogPairingMqtt::OnConnected() {
     if (client_) {
         client_->Subscribe("pairing/cmd", 1);
     }
-    if (!bound_) {
+
+    if (bound_) {
+        PublishStatus();
+        return;
+    }
+
+    if (pro_pairing_mqtt_) {
         EnsurePairCode();
         PublishStatus();
-        AnnounceCode();
         EnsureReplayTimer();
         if (replay_timer_) {
             esp_timer_start_periodic(replay_timer_, kReplayIntervalUs);
         }
+        ESP_LOGI(TAG, "pro pairing mqtt: retain code without announce");
     } else {
-        PublishStatus();
+        ESP_LOGI(TAG, "unbound idle (pair on MCP/touch)");
     }
 }
 
 void DeepDogPairingMqtt::OnDisconnected() {
     connected_ = false;
-    if (replay_timer_) {
-        esp_timer_stop(replay_timer_);
-    }
+    StopReplayTimer();
 }
 
 void DeepDogPairingMqtt::Stop() {

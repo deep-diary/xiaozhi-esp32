@@ -936,6 +936,16 @@ if(BOARD_TYPE STREQUAL "deep-thumble")
     )
 endif()
 
+# deep-dog：handle/third_party 含 bluepad32 示例，依赖 btstack；默认未启 BT，排除误编入。
+if(BOARD_TYPE STREQUAL "deep-dog")
+    file(GLOB_RECURSE BOARD_HANDLE_THIRD_PARTY
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-dog/handle/third_party/*.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-dog/handle/third_party/*.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/deep-dog/handle/third_party/*.cpp
+    )
+    list(REMOVE_ITEM BOARD_SOURCES ${BOARD_HANDLE_THIRD_PARTY})
+endif()
+
 list(APPEND SOURCES ${BOARD_SOURCES})
 # Add board directory to include paths so board-specific headers can be found
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})

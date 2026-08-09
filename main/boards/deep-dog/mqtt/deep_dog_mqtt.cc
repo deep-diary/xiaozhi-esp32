@@ -189,6 +189,27 @@ bool DeepDogMqtt::IsRunning() const {
     return impl_ && impl_->started;
 }
 
+void DeepDogMqtt::StartPairingSessionOrAnnounceBound() {
+    if (impl_) {
+        impl_->pairing.StartPairingSessionOrAnnounceBound();
+    }
+}
+
+void DeepDogMqtt::RequestDeviceUnbind() {
+    if (impl_) {
+        impl_->pairing.RequestUnbind();
+    }
+}
+
+bool DeepDogMqtt::IsDeviceBound() const {
+    return impl_ && impl_->pairing.IsBound();
+}
+
+const std::string& DeepDogMqtt::DevicePairCode() const {
+    static const std::string kEmpty;
+    return impl_ ? impl_->pairing.pair_code() : kEmpty;
+}
+
 bool DeepDogMqtt::Start() {
     if (!impl_ || impl_->started) {
         return impl_ && impl_->started;
@@ -323,5 +344,12 @@ void DeepDogMqtt::SetLedControl(LedStripControl*) {}
 bool DeepDogMqtt::Start() { return false; }
 void DeepDogMqtt::Stop() {}
 bool DeepDogMqtt::IsRunning() const { return false; }
+void DeepDogMqtt::StartPairingSessionOrAnnounceBound() {}
+void DeepDogMqtt::RequestDeviceUnbind() {}
+bool DeepDogMqtt::IsDeviceBound() const { return false; }
+const std::string& DeepDogMqtt::DevicePairCode() const {
+    static const std::string kEmpty;
+    return kEmpty;
+}
 
 #endif

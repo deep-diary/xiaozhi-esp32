@@ -137,10 +137,11 @@
 
 见既有白名单；`last_combo` 与阈值无关。宏：`DEEP_DOG_TOUCH_COMBO_ENABLE` / `COMBO_CONSUME`。
 
-| id | 类型 |
-|----|------|
-| `chord_short_1_2` / `_1_3` / `_2_3` | Chord |
-| `hold1_tap2` / `hold1_tap3` | Hold+Tap |
+| id | 类型 | 设备语义（deep-dog） |
+|----|------|----------------------|
+| `chord_short_1_2` / `_1_3` / `_2_3` | Chord | （业务层，见狗控表） |
+| `hold1_tap2` | Hold+Tap | 进入配对 / 播报码 |
+| `hold1_tap3` | Hold+Tap | 请求解绑（`pairing/request`） |
 
 ## Steps（前端）
 

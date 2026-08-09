@@ -3,6 +3,7 @@
 #include "mqtt/mqtt_config.h"
 
 #include <memory>
+#include <string>
 
 class VisionFrameHub;
 class DeepDogHttpServer;
@@ -37,6 +38,13 @@ public:
     bool Start();
     void Stop();
     bool IsRunning() const;
+
+    /** 配对：未绑定进入会话；已绑定屏显提示 */
+    void StartPairingSessionOrAnnounceBound();
+    /** 设备发起解绑（pairing/request） */
+    void RequestDeviceUnbind();
+    bool IsDeviceBound() const;
+    const std::string& DevicePairCode() const;
 
 private:
 #if DEEP_DOG_MQTT_ENABLE
