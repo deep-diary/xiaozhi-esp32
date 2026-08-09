@@ -37,6 +37,8 @@ public:
 
     bool Start();
     void Stop();
+    /** 绑定/解绑后重载 device_id、MQTT 前缀与 RTSP path */
+    void ReloadDeviceIdentity();
     bool IsRunning() const;
 
     /** 配对：未绑定进入会话；已绑定屏显提示 */

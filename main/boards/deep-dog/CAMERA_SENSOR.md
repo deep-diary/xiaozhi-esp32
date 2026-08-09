@@ -198,11 +198,13 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 
 ## 8. 推流目标（内网 / 外网）
 
-| 角色 | 地址 | 定义位置 |
+路径 **`deep-dog/{device_id}`** 与 MQTT Topic 前缀中的 `device_id` 一致：未绑定为 `dev`，已绑定为 MAC 紧凑串。运行时由 [`mqtt/mqtt_config.cc`](mqtt/mqtt_config.cc) 生成 URL。
+
+| 角色 | 地址（示例） | 定义位置 |
 |------|------|----------|
-| **设备 RTSP 推流（内网）** | `rtsp://192.168.31.25:8554/deep-dog/dev` | [`vision/vision_config.h`](vision/vision_config.h)：`DEEP_DOG_VISION_RTSP_HOST` / `PORT` / `STREAM_PATH` |
-| **局域网 HLS 播放** | `http://192.168.31.25:8888/deep-dog/dev/index.m3u8` | `DEEP_DOG_VISION_LAN_PLAY_URL` |
-| **外网 HLS 播放** | `https://live.deep-diary.com/deep-dog/dev/index.m3u8` | `DEEP_DOG_VISION_PUBLIC_PLAY_URL`；MQTT `stream/status.url` |
+| **设备 RTSP 推流（内网）** | `rtsp://192.168.31.25:8554/deep-dog/dev` 或 `…/deep-dog/{mac}` | `DeepDogMqttConfig::RtspPushUrlForDeviceId` |
+| **局域网 HLS 播放** | `http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8` | `LanHlsUrlForDeviceId` |
+| **外网 HLS 播放** | `https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8` | `PublicHlsUrlForDeviceId`；MQTT `stream/status.url` |
 | **MQTT 上报** | `push_url`=内网 RTSP，`url`=外网 HLS | [`mqtt/modules/stream_mqtt.cc`](mqtt/modules/stream_mqtt.cc) |
 
 **结论：设备只向内网 MediaMTX 推 RTSP**；外网 HLS 由服务器侧转发，设备不直连公网推流。见 [`swrs/vision/infra.md`](swrs/vision/infra.md)。
@@ -211,11 +213,18 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 
 ## 9. 当前 deep-dog 默认剖面（SparkBot OV2640）
 
-[`config.json`](config.json) 优化剖面（省 imgfx 转换）：
+[`config.json`](config.json) 默认剖面（省 imgfx 转换、H.264 可推流）：
 
 ```json
 "CONFIG_CAMERA_OV2640_DVP_RGB565_240X240_25FPS=y",
 "CONFIG_CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER=y"
+```
+
+试验 VGA（640×480）时 H.264 软编易 OOM，见联调记录；可改：
+
+```json
+"CONFIG_CAMERA_OV2640_DVP_RGB565_640X480_6FPS=y",
+"CONFIG_CAMERA_OV2640_DVP_RGB565_240X240_25FPS=n"
 ```
 
 烧录后若花屏：关 `CAMERA_SENSOR_SWAP`、改开 `ENDIANNESS_SWAP`；仍不行则回退 YUV422（§5.1）。
@@ -235,4 +244,4 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 
 ---
 
-*文档版本：与 deep-dog OV2640 RGB565 + SENSOR_SWAP 优化剖面对齐。*
+*文档版本：与 deep-dog OV2640 RGB565 240×240 + SENSOR_SWAP 及 device_id 动态 path 对齐。*

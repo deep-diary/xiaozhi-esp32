@@ -12,10 +12,11 @@ protocol:
     pairing uses pairing/status + pairing/cmd (see modules/00-pairing).
   topic_prefix: "deepdiary/deep-dog/{device_id}"
   device_id:
-    default: "sta_mac_compact"
+    default: "dev_when_unbound_mac_when_bound"
     note: >
-      Production default = WiFi STA MAC as aabbccddeeff.
-      NVS deep_dog_mqtt.device_id may override (e.g. "dev") for lab only.
+      Unbound: device_id=dev (MQTT prefix deepdiary/deep-dog/dev/, RTSP path deep-dog/dev).
+      Bound: STA MAC compact aabbccddeeff; written to NVS on pairing/cmd bound.
+      NVS deep_dog_mqtt.device_id explicit override for lab only.
   payload: json
   conventions:
     cmd_qos: 1

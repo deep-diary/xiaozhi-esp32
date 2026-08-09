@@ -2,6 +2,7 @@
 
 #include <esp_timer.h>
 
+#include <functional>
 #include <string>
 
 class DeepDogMqttClient;
@@ -25,6 +26,9 @@ public:
 
     /** MCP / 长按1+轻触3：上行 pairing/request unbind */
     void RequestUnbind();
+
+    /** bound 切换后重载 MQTT prefix / 推流 path */
+    void SetIdentityReloadCallback(std::function<void()> cb);
 
 private:
     static void ReplayTimerCb(void* arg);
@@ -54,4 +58,5 @@ private:
     bool session_active_ = false;
     std::string pair_code_;
     esp_timer_handle_t replay_timer_ = nullptr;
+    std::function<void()> identity_reload_cb_;
 };

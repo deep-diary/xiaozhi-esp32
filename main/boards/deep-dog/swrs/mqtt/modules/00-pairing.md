@@ -18,11 +18,14 @@
 
 | 项 | 约定 |
 |----|------|
-| 稳定 `device_id` | STA MAC **紧凑串**：小写、无冒号，如 `aabbccddeeff` |
+| 未绑定 `device_id` | **`dev`**（联调默认；Topic `deepdiary/deep-dog/dev/`） |
+| 已绑定 `device_id` | STA MAC **紧凑串**：小写、无冒号，如 `aabbccddeeff` |
 | Topic 前缀 | `deepdiary/deep-dog/{device_id}/` |
+| RTSP / HLS path | `deep-dog/{device_id}`（与 MQTT 前缀 id 对齐） |
 | `device/info.mac` | 可读形式 `AA:BB:…`（展示用） |
-| NVS 覆盖 | 命名空间 `deep_dog_mqtt`：`bound`、`pair_code`、`pro_pairing_mqtt`（bool，默认 false） |
+| NVS | 命名空间 `deep_dog_mqtt`：`bound`、`device_id`（绑定写入 MAC，解绑清除）、`pair_code`、`pro_pairing_mqtt` |
 | `client_id` | 可继续带 MAC 后缀，避免 Broker 会话冲突 |
+| 绑定切换 | 收到 `pairing/cmd` `bound`/`unbind` 后重载 MQTT 前缀与推流 URL |
 
 ## 通道（混合）
 

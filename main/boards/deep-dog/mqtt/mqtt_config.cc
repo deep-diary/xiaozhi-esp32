@@ -1,6 +1,7 @@
 #include "mqtt/mqtt_config.h"
 
 #include "settings.h"
+#include "vision/vision_config.h"
 
 #include <esp_log.h>
 #include <esp_mac.h>
@@ -30,20 +31,54 @@ std::string DeepDogMqttConfig::DefaultClientId(const std::string& device_id) {
     return buf;
 }
 
+std::string DeepDogMqttConfig::EffectiveDeviceId(bool bound, const std::string& nvs_override) {
+    if (!nvs_override.empty()) {
+        return nvs_override;
+    }
+    if (bound) {
+        return MacCompactDeviceId();
+    }
+    return DEEP_DOG_MQTT_DEFAULT_DEVICE_ID;
+}
+
+std::string DeepDogMqttConfig::StreamPathForDeviceId(const std::string& device_id) {
+    return std::string("deep-dog/") + device_id;
+}
+
+std::string DeepDogMqttConfig::RtspPushUrlForDeviceId(const std::string& device_id) {
+    char url[160];
+    snprintf(url, sizeof(url), "rtsp://%s:%u/%s", DEEP_DOG_VISION_RTSP_HOST,
+             static_cast<unsigned>(DEEP_DOG_VISION_RTSP_PORT),
+             StreamPathForDeviceId(device_id).c_str());
+    return url;
+}
+
+std::string DeepDogMqttConfig::PublicHlsUrlForDeviceId(const std::string& device_id) {
+    char url[192];
+    snprintf(url, sizeof(url), "https://live.deep-diary.com/%s/index.m3u8",
+             StreamPathForDeviceId(device_id).c_str());
+    return url;
+}
+
+std::string DeepDogMqttConfig::LanHlsUrlForDeviceId(const std::string& device_id) {
+    char url[192];
+    snprintf(url, sizeof(url), "http://%s:8888/%s/index.m3u8", DEEP_DOG_VISION_RTSP_HOST,
+             StreamPathForDeviceId(device_id).c_str());
+    return url;
+}
+
 DeepDogMqttSettings DeepDogMqttConfig::Load() {
     Settings settings("deep_dog_mqtt", false);
     DeepDogMqttSettings s;
     s.broker_host = settings.GetString("broker_host", DEEP_DOG_MQTT_DEFAULT_BROKER_HOST);
     s.broker_port = settings.GetInt("broker_port", DEEP_DOG_MQTT_DEFAULT_BROKER_PORT);
-    // 空 = NVS 未配置 → 生产用 MAC 紧凑；联调可 NVS 写 "dev"
-    s.device_id = settings.GetString("device_id", "");
+    const bool bound = settings.GetBool("bound", false);
+    const std::string nvs_device_id = settings.GetString("device_id", "");
+    s.device_id = EffectiveDeviceId(bound, nvs_device_id);
     s.client_id = settings.GetString("client_id", "");
     s.username = settings.GetString("username", "");
     s.password = settings.GetString("password", "");
     s.keepalive_s = settings.GetInt("keepalive_s", DEEP_DOG_MQTT_DEFAULT_KEEPALIVE_S);
-    if (s.device_id.empty()) {
-        s.device_id = MacCompactDeviceId();
-    }
     if (s.client_id.empty()) {
         s.client_id = DefaultClientId(s.device_id);
     }
@@ -53,8 +88,8 @@ DeepDogMqttSettings DeepDogMqttConfig::Load() {
     if (s.broker_port <= 0) {
         s.broker_port = DEEP_DOG_MQTT_DEFAULT_BROKER_PORT;
     }
-    ESP_LOGI(TAG, "broker %s:%d device_id=%s client_id=%s", s.broker_host.c_str(), s.broker_port,
-             s.device_id.c_str(), s.client_id.c_str());
+    ESP_LOGI(TAG, "broker %s:%d bound=%d device_id=%s client_id=%s", s.broker_host.c_str(),
+             s.broker_port, bound ? 1 : 0, s.device_id.c_str(), s.client_id.c_str());
     return s;
 }
 

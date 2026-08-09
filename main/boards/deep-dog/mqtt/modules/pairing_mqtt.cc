@@ -72,13 +72,19 @@ void DeepDogPairingMqtt::SaveBoundState(bool bound) {
     Settings settings("deep_dog_mqtt", true);
     settings.SetBool("bound", bound);
     if (bound) {
+        settings.SetString("device_id", DeepDogMqttConfig::MacCompactDeviceId());
         settings.EraseKey("pair_code");
         pair_code_.clear();
         session_active_ = false;
-    } else if (!pair_code_.empty()) {
-        settings.SetString("pair_code", pair_code_);
+    } else {
+        settings.EraseKey("device_id");
+        session_active_ = false;
     }
     bound_ = bound;
+}
+
+void DeepDogPairingMqtt::SetIdentityReloadCallback(std::function<void()> cb) {
+    identity_reload_cb_ = std::move(cb);
 }
 
 void DeepDogPairingMqtt::EnsurePairCode() {
@@ -289,8 +295,11 @@ void DeepDogPairingMqtt::ApplyBound(bool bound) {
     SaveBoundState(bound);
     StopReplayTimer();
 
+    if (identity_reload_cb_) {
+        identity_reload_cb_();
+    }
+
     if (!bound) {
-        session_active_ = false;
         PublishStatus();
         if (was_bound) {
             ShowUnboundAlert();

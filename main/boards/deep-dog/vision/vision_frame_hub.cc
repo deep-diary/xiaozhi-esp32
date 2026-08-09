@@ -1,6 +1,7 @@
 #include "vision/vision_frame_hub.h"
 
 #include "vision/vision_config.h"
+#include "mqtt/mqtt_config.h"
 #if DEEP_DOG_VISION_CODEC_H264
 #include "vision/h264_sw_encoder.h"
 #include "vision/rtsp_h264_pusher.h"
@@ -107,10 +108,10 @@ VisionFrameHub::VisionFrameHub(EspVideo* camera) : camera_(camera) {
 #else
     pusher_ = std::make_unique<RtspJpegPusher>();
 #endif
-    char url[160];
-    snprintf(url, sizeof(url), "rtsp://%s:%u/%s", DEEP_DOG_VISION_RTSP_HOST,
-             static_cast<unsigned>(DEEP_DOG_VISION_RTSP_PORT), DEEP_DOG_VISION_STREAM_PATH);
-    pusher_->SetUrl(url);
+    const DeepDogMqttSettings mqtt_settings = DeepDogMqttConfig::Load();
+    const std::string rtsp = DeepDogMqttConfig::RtspPushUrlForDeviceId(mqtt_settings.device_id);
+    pusher_->SetUrl(rtsp);
+    ESP_LOGI(TAG, "RTSP push url=%s", rtsp.c_str());
 }
 
 VisionFrameHub::~VisionFrameHub() {
