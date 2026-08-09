@@ -684,6 +684,8 @@ public:
         InitializeDisplay();
         InitializeButtons();
         InitializeTouchButtons();
+        // 摄像头 init 会占用 LEDC 与 SCCB，先恢复背光避免长时间黑屏（与 sensecap-watcher / esp-sparkbot 同类板一致）
+        GetBacklight()->RestoreBrightness();
         InitializeCamera();
         InitializeExtPinModules();
 #if DEEP_DOG_MQTT_ENABLE && DEEP_DOG_LED_ENABLE
@@ -701,7 +703,6 @@ public:
 #endif
 #endif
         InitializeTools();
-        GetBacklight()->RestoreBrightness();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

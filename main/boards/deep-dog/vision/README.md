@@ -11,7 +11,7 @@
 - `RtspH264Pusher` + `H264SwEncoder`（`esp_h264` 软编）：SDP `H264/90000`，RTP 单 NAL / FU-A
 - `RtspJpegPusher`：保留；`DEEP_DOG_VISION_CODEC_H264=0` 可回退 RTP/JPEG
 
-配置见 [`vision_config.h`](./vision_config.h)。板级在 `StartNetwork` 启动 `face_ai` + Hub；HTTP 仅控制页/`/api`。
+配置见 [`vision_config.h`](./vision_config.h)。**摄像头型号 / 像素格式 / OV2640↔OV3660 切换**见 [`../CAMERA_SENSOR.md`](../CAMERA_SENSOR.md)。板级在 `StartNetwork` 启动 `face_ai` + Hub；HTTP 仅控制页/`/api`。
 
 ## API（HTTP，C03 MQTT 将复用同一状态机）
 
