@@ -287,6 +287,11 @@ bool VisionFrameHub::CapturePackedRgb565(std::vector<uint8_t>* packed, uint16_t*
                      (unsigned)cf.len, cf.format);
             return false;
         }
+        static bool s_logged_native_rgb565 = false;
+        if (!s_logged_native_rgb565) {
+            ESP_LOGI(TAG, "capture path=native RGB565 (no YUV convert)");
+            s_logged_native_rgb565 = true;
+        }
         return true;
     }
     if (vf == V4L2_PIX_FMT_YUYV || vf == V4L2_PIX_FMT_YUV422P) {

@@ -81,7 +81,8 @@ CONFIG_CAMERA_OV2640_DVP_RGB565_240X240_25FPS=y
 
 | 场景 | 推荐 |
 |------|------|
-| SparkBot 兼容 / 与上游 esp-sparkbot 对齐 | OV2640 + **YUV422** + Hub 转 RGB565（**当前默认**） |
+| SparkBot 兼容 / 与上游 esp-sparkbot 对齐 | OV2640 + **YUV422** + Hub 转 RGB565（颜色最稳） |
+| **deep-dog 默认（省 CPU）** | OV2640 + **RGB565** + `CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER`（当前 `config.json`） |
 | 追求少一次转换、已实机验证颜色 | OV2640 + **RGB565** + 配对 byte swap |
 | OV3660 模组 | OV3660 + **RGB565** + `ENDIANNESS_SWAP`（参考 deep-thumble） |
 
@@ -195,7 +196,33 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 
 ---
 
-## 8. 参考链接（仓库内）
+## 8. 推流目标（内网 / 外网）
+
+| 角色 | 地址 | 定义位置 |
+|------|------|----------|
+| **设备 RTSP 推流（内网）** | `rtsp://192.168.31.25:8554/deep-dog/dev` | [`vision/vision_config.h`](vision/vision_config.h)：`DEEP_DOG_VISION_RTSP_HOST` / `PORT` / `STREAM_PATH` |
+| **局域网 HLS 播放** | `http://192.168.31.25:8888/deep-dog/dev/index.m3u8` | `DEEP_DOG_VISION_LAN_PLAY_URL` |
+| **外网 HLS 播放** | `https://live.deep-diary.com/deep-dog/dev/index.m3u8` | `DEEP_DOG_VISION_PUBLIC_PLAY_URL`；MQTT `stream/status.url` |
+| **MQTT 上报** | `push_url`=内网 RTSP，`url`=外网 HLS | [`mqtt/modules/stream_mqtt.cc`](mqtt/modules/stream_mqtt.cc) |
+
+**结论：设备只向内网 MediaMTX 推 RTSP**；外网 HLS 由服务器侧转发，设备不直连公网推流。见 [`swrs/vision/infra.md`](swrs/vision/infra.md)。
+
+---
+
+## 9. 当前 deep-dog 默认剖面（SparkBot OV2640）
+
+[`config.json`](config.json) 优化剖面（省 imgfx 转换）：
+
+```json
+"CONFIG_CAMERA_OV2640_DVP_RGB565_240X240_25FPS=y",
+"CONFIG_CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER=y"
+```
+
+烧录后若花屏：关 `CAMERA_SENSOR_SWAP`、改开 `ENDIANNESS_SWAP`；仍不行则回退 YUV422（§5.1）。
+
+---
+
+## 10. 参考链接（仓库内）
 
 | 路径 | 内容 |
 |------|------|
@@ -208,4 +235,4 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 
 ---
 
-*文档版本：与 deep-dog OV2640 YUV422 默认剖面对齐；硬件以 ESP-SparkBot 兼容为基准。*
+*文档版本：与 deep-dog OV2640 RGB565 + SENSOR_SWAP 优化剖面对齐。*
