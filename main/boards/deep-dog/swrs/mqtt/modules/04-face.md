@@ -5,8 +5,8 @@
 | module_id | `face` |
 | capabilities | `face`（入口卡；含原 person 能力） |
 | 路由建议 | `/device/:deviceId/modules/face` |
-| 契约 | ready（检测/cmd）；`person/active` 草案；`face/thumb` planned |
-| YAML | `face/cmd`、`face/status`；可选 `person/active`；预留 `face/thumb` |
+| 契约 | ready；`face/registry` retain；`person/active` ready |
+| YAML | `face/cmd`、`face/status`、`face/registry`；`person/active` |
 | 说明 | **实时框/跟踪 UI 在 [02-stream](./02-stream.md)**；本页做人脸开关、清库、间隔、Immich 轮播与打招呼 |
 
 ## 入口卡文案
@@ -19,7 +19,8 @@
 
 | 分区 | 内容 |
 |------|------|
-| **检测控制** | `enabled` / `pipeline` / `detect_interval_ms`；`action=clear_db` |
+| **检测控制** | `enabled` / `recognize_enabled` / `pipeline` / `detect_interval_ms`；`action=clear_db` |
+| **人脸库** | 订 `face/registry`；rename / delete_one / merge |
 | **当前身份** | `faces[]`、`display_name`；可选订 `person/active` |
 | **Immich / 打招呼** | 按身份拉相册轮播；节流打招呼（见下） |
 | **实时画面** | 不嵌主直播；链到 Stream 页。预留日后 `face/thumb` |
@@ -36,9 +37,11 @@
 
 | Topic | 方向 | QoS | retain | 说明 |
 |-------|------|-----|--------|------|
-| `…/face/status` | ↑ | 0 | false | on_change |
+| `…/face/status` | ↑ | 0 | false | on_change 实时框 |
+| `…/face/registry` | ↑ | 0 | **true** | 已注册 canonical 人脸库 |
+| `…/face/immich/status` | ↑ | 0 | **true** | Immich 配置 + 探活（见 [04-face-immich-mqtt](./04-face-immich-mqtt.md)） |
 | `…/face/cmd` | ↓ | 1 | false | 见字段表 |
-| `…/person/active` | ↑ | 0 | true | 身份事件（可选） |
+| `…/person/active` | ↑ | 0 | true | primary 身份变化 |
 | `…/face/thumb` | ↑ | 0 | false | **planned**，默认不发 |
 | `…/track/*` | — | — | — | UI 在 Stream 页 |
 
@@ -50,8 +53,15 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `enabled` | bool | 否* | 总开关；关则检测+识别均停；**开机默认 false**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED`） |
-| `action` | enum | 否 | `clear_db`：清空本地已注册人脸 |
+| `enabled` | bool | 否* | 检测总开关 |
+| `recognize_enabled` | bool | 否 | 识别开关；false 时只检测不 enroll |
+| `action` | enum | 否 | `clear_db` \| `rename` \| `delete_one` \| `merge` \| `refresh_immich` \| `set_immich_config` \| `ping_immich` |
+| `local_id` | int | 否 | rename/delete/merge/refresh 目标 |
+| `target_local_id` | int | 否 | merge 的 canonical id |
+| `display_name` | string | 否 | rename 新名称 |
+| `api_url` | string | 否 | Immich API 根（`set_immich_config` 或稀疏更新） |
+| `api_key` | string | 否 | Immich Key（写入 NVS；status 仅回 `key_len`） |
+| `delete_asset` | int | 否 | 0 保留临时图 / 1 识别后删除 |
 | `pipeline` | enum | 否 | `live` \| `identity` |
 | `detect_interval_ms` | int | 否 | **200–5000**；越界夹紧；status 回显生效值 |
 | `ts` | int | 否 | Unix 秒 |
@@ -120,6 +130,18 @@
 { "detect_interval_ms": 3000, "ts": 1710000000 }
 ```
 
+**alias 合并（侧脸→正脸，保留 embedding）**
+
+```json
+{ "action": "merge", "local_id": 3, "target_local_id": 2, "ts": 1710000000 }
+```
+
+**重命名**
+
+```json
+{ "action": "rename", "local_id": 2, "display_name": "张三", "ts": 1710000000 }
+```
+
 **清空已识别人脸（重测）**
 
 ```json
@@ -151,7 +173,27 @@
 }
 ```
 
-## `person/active`（草案）
+## 样例 · `face/registry`
+
+```json
+{
+  "version": 1,
+  "count": 1,
+  "entries": [
+    {
+      "local_id": 2,
+      "display_name": "张三",
+      "immich_person_id": "uuid",
+      "immich_asset_id": "asset-uuid",
+      "aliases": [3],
+      "updated_at": 1710000000
+    }
+  ],
+  "ts": 1710000000
+}
+```
+
+## `person/active`
 
 ```json
 { "local_id": 2, "display_name": "张三", "immich_person_id": "uuid-optional", "ts": 1710000000 }

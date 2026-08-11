@@ -362,9 +362,16 @@ topics:
       enabled: { type: bool, optional: true, note: "master switch; default false at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED); lazy-loads runtime on first true" }
       action:
         type: enum
-        values: [clear_db]
+        values: [clear_db, rename, delete_one, merge, refresh_immich, set_immich_config, ping_immich]
         optional: true
-        note: "clear facedb feats + NVS meta + session"
+        note: "clear_db= wipe all; merge=alias; set_immich_config= NVS fdog_im; ping_immich= probe server/ping"
+      local_id: { type: int, optional: true }
+      target_local_id: { type: int, optional: true, note: "merge canonical target" }
+      display_name: { type: string, optional: true, note: "rename" }
+      api_url: { type: string, optional: true, note: "Immich API root for set_immich_config" }
+      api_key: { type: string, optional: true, note: "Immich x-api-key; never echoed on uplink" }
+      delete_asset: { type: int, optional: true, note: "0 keep temp asset / 1 delete after naming" }
+      recognize_enabled: { type: bool, optional: true, note: "false=detect only, no enroll" }
       pipeline:
         type: enum
         values: [live, identity]
@@ -410,6 +417,57 @@ topics:
           score: { type: number, optional: true }
           local_id: { type: int, optional: true }
           display_name: { type: string, optional: true }
+      ts: { type: int }
+
+  face/registry:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_enroll_bind_rename_merge_delete_clear
+    payload:
+      version: { type: int }
+      count: { type: int }
+      entries:
+        type: array
+        item:
+          local_id: { type: int }
+          display_name: { type: string }
+          immich_person_id: { type: string, optional: true }
+          immich_asset_id: { type: string, optional: true }
+          aliases: { type: array, item: { type: int }, optional: true }
+          updated_at: { type: int }
+      ts: { type: int }
+
+  face/immich/status:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect_config_change_periodic_ping
+    payload:
+      configured: { type: bool }
+      url: { type: string }
+      key_len: { type: int }
+      delete_asset: { type: int }
+      server_ok: { type: bool }
+      server_http: { type: int, optional: true }
+      ping_ms: { type: int, optional: true }
+      inflight: { type: int }
+      last: { type: string }
+      last_local_id: { type: int }
+      ts: { type: int }
+
+  person/active:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: primary_local_id_changes
+    payload:
+      local_id: { type: int }
+      display_name: { type: string, optional: true }
+      immich_person_id: { type: string, optional: true }
       ts: { type: int }
 
   face/thumb:

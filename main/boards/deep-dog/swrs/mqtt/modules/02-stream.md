@@ -20,8 +20,8 @@
 1. 显示 `state` / `mode` / `url`（外网 HLS）/ `lan_url` / `push_url` / `error`；start / stop；嵌 HLS 或外链 `url`。  
 2. **人脸叠加（推荐）**：若 `capabilities.face`，同页订 `face/status`；UI 开关「显示人脸框 / 显示人名」。  
 3. **跟踪（推荐）**：若 `capabilities.track`，同页订 `track/status`，开关发 `track/cmd`；可 `#track` 锚点。  
-4. **拍照视觉解释（推荐）**：按钮发 `stream/cmd` `take_photo`，订 `stream/photo` 展示结果（与推流并存，不改 mode）。  
-5. 人脸总开关 / 间隔 / 清库可链到 [04-face](./04-face.md)，或本页简化发 `face/cmd`。
+4. **拍照视觉解释（推荐）**：局域网优先 WS MCP `self.camera.take_photo`；否则 `stream/cmd` `take_photo` → `stream/photo`（与推流并存，不改 mode）。  
+5. **人脸 MCP（推荐）**：若 `capabilities.face`，同页经 WS MCP `self.face.*`（`set_mode` 等），超时降级 MQTT `face/cmd`；订 `face/status` 叠层。
 
 ## 边界
 
@@ -62,13 +62,15 @@
 
 异步执行，约数秒；结果走 `stream/photo`（不改推流 `mode`）。并发第二次会 `ok=false, error=busy`。需设备已配置 Explain URL（曾连小智云下发 vision）。
 
+**局域网优先**：同页可经 WS MCP `self.camera.take_photo` 同步返回（不占 MQTT 侧 `dog_stream_photo` 任务栈）。MQTT `take_photo` 在 internal SRAM 紧张时可能 `error=task_fail`（固件已将任务栈迁至 PSRAM）。
+
 ## 字段表 · `stream/photo`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `ok` | bool | 是否成功 |
 | `result` | string | 成功时 Explain 返回（多为 **字符串化 JSON**，内含 `text`） |
-| `error` | string | `busy` / `capture_fail` / `Image explain URL or token is not set` 等 |
+| `error` | string | `busy` / `capture_fail` / `task_fail`（internal 内存不足未能建任务；优先 WS MCP）/ `oom` / `Image explain URL or token is not set` 等 |
 | `elapsed_ms` | int | 耗时 |
 | `ts` | int | Unix 秒 |
 

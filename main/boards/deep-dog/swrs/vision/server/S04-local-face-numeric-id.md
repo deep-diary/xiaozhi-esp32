@@ -21,7 +21,7 @@ S03 仅有检测框。本阶段在 **HTTP 服务器路径**上打通本地识别
 
 ## 3. 范围
 
-**包含**：embedding、5s 会话缓存、NVS（≤16 人可配）、自动建档、API/UI 数字 ID。  
+**包含**：embedding、5s 会话缓存、NVS（**≤64** feat 条数，canonical 人数通常更少）、自动建档、API/UI 数字 ID、alias 合并（V-S07）。  
 **不包含**：Immich（S05）、Kiosk（P01）、跟脸、MediaMTX 推流（C02）。
 
 ## 4. 决策流

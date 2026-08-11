@@ -21,7 +21,7 @@
 #include "led/led_strip_control.h"
 
 #include "config.h"
-#include "face_ai_config.h"
+#include "face_control.h"
 #include "http-server/http_server_config.h"
 #include "sensor/imu_config.h"
 #if DEEP_DOG_IMU_ENABLE
@@ -118,6 +118,10 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {
     impl_->pairing.SetIdentityReloadCallback([this]() { ReloadDeviceIdentity(); });
+#if DEEP_DOG_FACE_AI_ENABLE
+    DeepDogFaceControlInit();
+    impl_->face.InitRegistryHook();
+#endif
 }
 
 DeepDogMqtt::~DeepDogMqtt() {

@@ -166,7 +166,7 @@ typedef int deep_dog_ext_pin_mode_t;
 #define DEEP_DOG_CAMERA_H_MIRROR 0
 #endif
 #ifndef DEEP_DOG_CAMERA_V_FLIP
-#define DEEP_DOG_CAMERA_V_FLIP 0
+#define DEEP_DOG_CAMERA_V_FLIP 1
 #endif
 #define SPARKBOT_LEDC_TIMER       (LEDC_TIMER_0)
 #define SPARKBOT_LEDC_CHANNEL     (LEDC_CHANNEL_0)

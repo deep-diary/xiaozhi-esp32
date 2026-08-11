@@ -113,9 +113,19 @@
 #define DEEP_DOG_FACE_RECOG_ENABLE 1
 #endif
 
-/** 本地库最大人数 */
+/** 本地库最大 feat 条数（含 alias embedding；canonical 人数通常更少） */
 #ifndef DEEP_DOG_FACE_RECOG_MAX
-#define DEEP_DOG_FACE_RECOG_MAX 16
+#define DEEP_DOG_FACE_RECOG_MAX 64
+#endif
+
+/** 自动 enroll 最低检测 score（质量门控） */
+#ifndef DEEP_DOG_FACE_RECOG_MIN_ENROLL_SCORE
+#define DEEP_DOG_FACE_RECOG_MIN_ENROLL_SCORE 0.55f
+#endif
+
+/** registry 条目 aliases 数组上限（单 canonical） */
+#ifndef DEEP_DOG_FACE_REGISTRY_MAX_ALIASES
+#define DEEP_DOG_FACE_REGISTRY_MAX_ALIASES 8
 #endif
 
 /** 会话去重窗口（ms）：窗口内相似则复用同一 local_id */
@@ -158,6 +168,18 @@
 #define DEEP_DOG_FACE_IMMICH_DEFAULT_URL "http://192.168.31.25:2283/api"
 #endif
 
+/** 可选：复制 face_ai_secrets.h.example → face_ai_secrets.h 注入联调 Key（勿提交） */
+#if __has_include("face_ai_secrets.h")
+#include "face_ai_secrets.h"
+#endif
+#ifndef DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY
+#ifdef DEEP_DOG_FACE_IMMICH_SECRET_API_KEY
+#define DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY DEEP_DOG_FACE_IMMICH_SECRET_API_KEY
+#else
+#define DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY ""
+#endif
+#endif
+
 /** 失败后同一 local_id 的退避（秒）。联调 15；量产可改 60 */
 #ifndef DEEP_DOG_FACE_IMMICH_BACKOFF_S
 #define DEEP_DOG_FACE_IMMICH_BACKOFF_S 15
@@ -169,6 +191,11 @@
 #endif
 #ifndef DEEP_DOG_FACE_IMMICH_POLL_MS
 #define DEEP_DOG_FACE_IMMICH_POLL_MS 1500
+#endif
+
+/** 延迟 poll：对已存 asset_id 且 name_pending 的条目周期重试（秒） */
+#ifndef DEEP_DOG_FACE_IMMICH_DEFERRED_POLL_S
+#define DEEP_DOG_FACE_IMMICH_DEFERRED_POLL_S 300
 #endif
 
 /** 裁剪脸 JPEG 质量 */

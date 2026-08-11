@@ -6,6 +6,7 @@
 #include "config.h"
 #include "net/net_config.h"
 #include "mcp_server.h"
+#include "ws-mcp/ws_mcp_config.h"
 #if DEEP_DOG_WS_MCP_ENABLE
 #include "ws-mcp/deep_dog_ws_mcp_server.h"
 #endif
@@ -132,6 +133,9 @@
 #if DEEP_DOG_MQTT_ENABLE
 #include "mqtt/deep_dog_mqtt.h"
 #include "pairing/pairing_mcp.h"
+#if DEEP_DOG_FACE_AI_ENABLE
+#include "face_mcp.h"
+#endif
 #endif
 
 #define TAG "deep_dog"
@@ -738,7 +742,10 @@ private:
             RegisterPairingMcpTools(mcp_server, board_mqtt_.get());
         }
 #endif
-#if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_LED_ENABLE && !DEEP_DOG_SERVO_ENABLE && !DEEP_DOG_MQTT_ENABLE
+#if DEEP_DOG_FACE_AI_ENABLE
+        RegisterFaceMcpTools(mcp_server);
+#endif
+#if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_LED_ENABLE && !DEEP_DOG_SERVO_ENABLE && !DEEP_DOG_MQTT_ENABLE && !DEEP_DOG_FACE_AI_ENABLE
         (void)mcp_server;
 #endif
     }
@@ -900,6 +907,9 @@ public:
             static DeepDogWsMcpServer ws_mcp;
             if (ws_mcp.Start()) {
                 ESP_LOGI(TAG, "WS MCP on port %u path %s", (unsigned)ws_mcp.Port(), ws_mcp.Path());
+                Application::GetInstance().RegisterMcpBroadcastCallback([&ws_mcp](const std::string& payload) {
+                    ws_mcp.BroadcastMessage(payload);
+                });
 #if DEEP_DOG_MQTT_ENABLE
                 if (board_mqtt_) {
                     board_mqtt_->SetWsMcpEndpoint(ws_mcp.Port(), ws_mcp.Path());

@@ -12,6 +12,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,15 +41,29 @@ static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static bool s_fs_mounted = false;
 static bool s_ready = false;
 
-/** meta_ver=2：display_name 扩到 32。旧 blob 尺寸不匹配则丢弃并按 facedb 重建。 */
-static constexpr uint8_t kFaceMetaVer = 2;
+/** meta_ver=3：+immich_asset_id、canonical_id、name_pending */
+static constexpr uint8_t kFaceMetaVer = 3;
+static constexpr uint8_t kFaceMetaVerLegacy = 2;
 
-struct FaceMeta {
+struct FaceMetaV2 {
     int local_id = 0;
     char display_name[32] = {};
     uint32_t updated_at = 0;
     char immich_person_id[40] = {};
 };
+
+struct FaceMeta {
+    int local_id = 0;
+    int canonical_id = 0;
+    char display_name[32] = {};
+    char immich_person_id[40] = {};
+    char immich_asset_id[48] = {};
+    uint32_t updated_at = 0;
+    uint8_t name_pending = 0;
+    uint8_t reserved[3] = {};
+};
+
+static std::function<void()> s_registry_changed_cb;
 
 static bool IsPlaceholderName(int local_id, const char* name) {
     if (!name || name[0] == '\0') {
@@ -88,6 +104,55 @@ static FaceMeta* FindMeta(int local_id) {
         }
     }
     return nullptr;
+}
+
+static void NotifyRegistryChanged() {
+    if (s_registry_changed_cb) {
+        s_registry_changed_cb();
+    }
+}
+
+static bool IsCanonicalMeta(const FaceMeta* m) {
+    return m && (m->canonical_id <= 0 || m->canonical_id == m->local_id);
+}
+
+static int FindCanonicalByPersonId(const char* person_id, int exclude_local_id) {
+    if (!person_id || !person_id[0]) {
+        return 0;
+    }
+    for (int i = 0; i < s_meta_count; i++) {
+        const FaceMeta& m = s_meta[i];
+        if (m.local_id == exclude_local_id) {
+            continue;
+        }
+        if (!IsCanonicalMeta(&m)) {
+            continue;
+        }
+        if (m.immich_person_id[0] && strcmp(m.immich_person_id, person_id) == 0) {
+            return m.local_id;
+        }
+    }
+    return 0;
+}
+
+static void MetaToEntry(const FaceMeta& m, DeepDogFaceEnrolledEntry* out) {
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->local_id = m.local_id;
+    out->canonical_id = m.canonical_id;
+    strncpy(out->display_name, m.display_name, sizeof(out->display_name) - 1);
+    strncpy(out->immich_person_id, m.immich_person_id, sizeof(out->immich_person_id) - 1);
+    strncpy(out->immich_asset_id, m.immich_asset_id, sizeof(out->immich_asset_id) - 1);
+    out->updated_at = m.updated_at;
+    out->name_pending = m.name_pending != 0;
+    for (int i = 0; i < s_meta_count && out->alias_count < DEEP_DOG_FACE_REGISTRY_MAX_ALIASES; i++) {
+        const FaceMeta& a = s_meta[i];
+        if (a.local_id != m.local_id && a.canonical_id == m.local_id) {
+            out->aliases[out->alias_count++] = a.local_id;
+        }
+    }
 }
 
 static void EnsureDisplayName(FaceMeta* m) {
@@ -139,6 +204,21 @@ static void LoadMetaFromNvs() {
         size_t sz = need;
         if (ver == kFaceMetaVer && nvs_get_blob(h, "meta", s_meta, &sz) == ESP_OK && sz == need) {
             s_meta_count = count;
+        } else if (ver == kFaceMetaVerLegacy && sz == sizeof(FaceMetaV2) * count) {
+            std::vector<FaceMetaV2> legacy(count);
+            if (nvs_get_blob(h, "meta", legacy.data(), &sz) == ESP_OK) {
+                s_meta_count = 0;
+                for (int i = 0; i < count && s_meta_count < DEEP_DOG_FACE_RECOG_MAX; i++) {
+                    FaceMeta* m = &s_meta[s_meta_count++];
+                    memset(m, 0, sizeof(*m));
+                    m->local_id = legacy[(size_t)i].local_id;
+                    strncpy(m->display_name, legacy[(size_t)i].display_name, sizeof(m->display_name) - 1);
+                    m->updated_at = legacy[(size_t)i].updated_at;
+                    strncpy(m->immich_person_id, legacy[(size_t)i].immich_person_id, sizeof(m->immich_person_id) - 1);
+                }
+                ESP_LOGI(TAG, "migrated meta ver2->3 count=%d", s_meta_count);
+                (void)SaveMetaToNvs();
+            }
         } else {
             ESP_LOGW(TAG, "face meta ver/size mismatch (ver=%u), rebuild from facedb", (unsigned)ver);
             s_meta_count = 0;
@@ -294,16 +374,20 @@ static int MatchBoxIndex(const std::vector<DeepDogFaceBox>& boxes, const dl::det
     return best;
 }
 
-static void ApplyMetaToBox(DeepDogFaceBox* box, int local_id, DeepDogFaceRecognizeSource src) {
-    box->local_id = local_id;
+static void ApplyMetaToBox(DeepDogFaceBox* box, int raw_local_id, DeepDogFaceRecognizeSource src) {
+    const int cid = DeepDogFaceRecognizeResolveCanonicalId(raw_local_id);
+    box->local_id = cid;
     box->recognize_source = src;
-    FaceMeta* m = FindMeta(local_id);
+    FaceMeta* m = FindMeta(cid);
+    if (!m && cid != raw_local_id) {
+        m = FindMeta(raw_local_id);
+    }
     if (m) {
         EnsureDisplayName(m);
         strncpy(box->display_name, m->display_name, sizeof(box->display_name) - 1);
         box->display_name[sizeof(box->display_name) - 1] = '\0';
     } else {
-        snprintf(box->display_name, sizeof(box->display_name), "#%d", local_id);
+        snprintf(box->display_name, sizeof(box->display_name), "#%d", cid);
     }
 }
 
@@ -362,6 +446,10 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
         ESP_LOGW(TAG, "gallery full (%d), skip enroll", DEEP_DOG_FACE_RECOG_MAX);
         return;
     }
+    if (box->score > 0.f && box->score < DEEP_DOG_FACE_RECOG_MIN_ENROLL_SCORE) {
+        ESP_LOGD(TAG, "enroll skipped low score=%.2f", box->score);
+        return;
+    }
     if (s_recog->enroll(img, one) != ESP_OK) {
         ESP_LOGW(TAG, "enroll failed");
         return;
@@ -378,6 +466,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
     EnsureDisplayName(m);
     (void)SaveMetaToNvs();
     ApplyMetaToBox(box, new_id, DeepDogFaceRecognizeSource::Enrolled);
+    NotifyRegistryChanged();
     if (update_session && feat_t && feat_len > 0) {
         auto* fptr = feat_t->get_element_ptr<float>();
         if (fptr) {
@@ -499,7 +588,242 @@ bool DeepDogFaceRecognizeClearAll() {
         ESP_LOGW(TAG, "clear_db: feats cleared but NVS meta save failed");
     }
     ESP_LOGI(TAG, "clear_db ok (feats=%d)", s_recog->get_num_feats());
+    NotifyRegistryChanged();
     return true;
+}
+
+int DeepDogFaceRecognizeResolveCanonicalId(int local_id) {
+    if (local_id <= 0) {
+        return 0;
+    }
+    FaceMeta* m = FindMeta(local_id);
+    if (!m) {
+        return local_id;
+    }
+    if (m->canonical_id <= 0 || m->canonical_id == local_id) {
+        return local_id;
+    }
+    return m->canonical_id;
+}
+
+bool DeepDogFaceRecognizeIsCanonical(int local_id) {
+    FaceMeta* m = FindMeta(local_id);
+    return m && IsCanonicalMeta(m);
+}
+
+bool DeepDogFaceRecognizeBindImmichAsset(int local_id, const char* asset_id) {
+    if (local_id <= 0 || !asset_id || !asset_id[0]) {
+        return false;
+    }
+    FaceMeta* m = UpsertMeta(local_id);
+    if (!m) {
+        return false;
+    }
+    strncpy(m->immich_asset_id, asset_id, sizeof(m->immich_asset_id) - 1);
+    m->immich_asset_id[sizeof(m->immich_asset_id) - 1] = '\0';
+    m->name_pending = 1;
+    m->updated_at = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    const bool ok = SaveMetaToNvs() == ESP_OK;
+    if (ok) {
+        NotifyRegistryChanged();
+    }
+    return ok;
+}
+
+bool DeepDogFaceRecognizeRename(int local_id, const char* display_name) {
+    const int cid = DeepDogFaceRecognizeResolveCanonicalId(local_id);
+    if (cid <= 0 || !display_name || !display_name[0]) {
+        return false;
+    }
+    FaceMeta* m = UpsertMeta(cid);
+    if (!m) {
+        return false;
+    }
+    strncpy(m->display_name, display_name, sizeof(m->display_name) - 1);
+    m->display_name[sizeof(m->display_name) - 1] = '\0';
+    m->updated_at = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    const bool ok = SaveMetaToNvs() == ESP_OK;
+    if (ok) {
+        NotifyRegistryChanged();
+    }
+    return ok;
+}
+
+bool DeepDogFaceRecognizeDeleteOne(int local_id) {
+    if (local_id <= 0) {
+        return false;
+    }
+    if (s_recog) {
+        (void)s_recog->delete_feat(static_cast<uint16_t>(local_id));
+    }
+    int write = 0;
+    for (int i = 0; i < s_meta_count; i++) {
+        if (s_meta[i].local_id == local_id) {
+            continue;
+        }
+        if (write != i) {
+            s_meta[write] = s_meta[i];
+        }
+        write++;
+    }
+    if (write < s_meta_count) {
+        s_meta_count = write;
+    }
+    for (int i = 0; i < s_meta_count; i++) {
+        if (s_meta[i].canonical_id == local_id) {
+            s_meta[i].canonical_id = 0;
+        }
+    }
+    if (s_session_id == local_id) {
+        ClearSession();
+    }
+    const bool ok = SaveMetaToNvs() == ESP_OK;
+    NotifyRegistryChanged();
+    return ok;
+}
+
+bool DeepDogFaceRecognizeMergeAlias(int source_local_id, int target_local_id) {
+    if (source_local_id <= 0 || target_local_id <= 0 || source_local_id == target_local_id) {
+        return false;
+    }
+    FaceMeta* src = FindMeta(source_local_id);
+    if (!src) {
+        FaceMeta* created = UpsertMeta(source_local_id);
+        if (!created) {
+            return false;
+        }
+        src = created;
+    }
+    FaceMeta* tgt = UpsertMeta(target_local_id);
+    if (!tgt) {
+        return false;
+    }
+    src->canonical_id = target_local_id;
+    if (tgt->immich_person_id[0] && !src->immich_person_id[0]) {
+        strncpy(src->immich_person_id, tgt->immich_person_id, sizeof(src->immich_person_id) - 1);
+    }
+    if (!IsPlaceholderName(target_local_id, tgt->display_name) && IsPlaceholderName(source_local_id, src->display_name)) {
+        strncpy(src->display_name, tgt->display_name, sizeof(src->display_name) - 1);
+    }
+    src->updated_at = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    const bool ok = SaveMetaToNvs() == ESP_OK;
+    if (ok) {
+        NotifyRegistryChanged();
+    }
+    ESP_LOGI(TAG, "merge alias %d -> %d", source_local_id, target_local_id);
+    return ok;
+}
+
+int DeepDogFaceRecognizeListCanonical(std::vector<DeepDogFaceEnrolledEntry>* out) {
+    if (!out) {
+        return 0;
+    }
+    out->clear();
+    for (int i = 0; i < s_meta_count; i++) {
+        if (!IsCanonicalMeta(&s_meta[i])) {
+            continue;
+        }
+        DeepDogFaceEnrolledEntry e{};
+        MetaToEntry(s_meta[i], &e);
+        out->push_back(e);
+    }
+    return static_cast<int>(out->size());
+}
+
+static void JsonEscape(const char* in, char* out, size_t out_sz) {
+    if (!out || out_sz == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (!in) {
+        return;
+    }
+    size_t j = 0;
+    for (size_t i = 0; in[i] && j + 2 < out_sz; i++) {
+        const char c = in[i];
+        if (c == '"' || c == '\\') {
+            if (j + 2 >= out_sz) {
+                break;
+            }
+            out[j++] = '\\';
+        }
+        out[j++] = c;
+    }
+    out[j] = '\0';
+}
+
+size_t DeepDogFaceRecognizeFormatRegistryJson(char* buf, size_t buf_size) {
+    if (!buf || buf_size < 32) {
+        return 0;
+    }
+    std::vector<DeepDogFaceEnrolledEntry> entries;
+    (void)DeepDogFaceRecognizeListCanonical(&entries);
+    int n = snprintf(buf, buf_size, "{\"version\":1,\"count\":%d,\"entries\":[", static_cast<int>(entries.size()));
+    if (n < 0 || static_cast<size_t>(n) >= buf_size) {
+        return 0;
+    }
+    size_t off = static_cast<size_t>(n);
+    char esc[96];
+    for (size_t i = 0; i < entries.size(); i++) {
+        const auto& e = entries[i];
+        JsonEscape(e.display_name, esc, sizeof(esc));
+        char esc_pid[48] = {};
+        char esc_aid[56] = {};
+        JsonEscape(e.immich_person_id, esc_pid, sizeof(esc_pid));
+        JsonEscape(e.immich_asset_id, esc_aid, sizeof(esc_aid));
+        char aliases[64] = {};
+        aliases[0] = '\0';
+        if (e.alias_count > 0) {
+            int ap = snprintf(aliases, sizeof(aliases), ",\"aliases\":[");
+            for (int a = 0; a < e.alias_count && ap > 0 && static_cast<size_t>(ap) < sizeof(aliases) - 8; a++) {
+                ap += snprintf(aliases + ap, sizeof(aliases) - static_cast<size_t>(ap), "%s%d", a ? "," : "", e.aliases[a]);
+            }
+            if (ap > 0 && static_cast<size_t>(ap) < sizeof(aliases) - 2) {
+                snprintf(aliases + ap, sizeof(aliases) - static_cast<size_t>(ap), "]");
+            }
+        }
+        const int w = snprintf(buf + off, buf_size - off,
+                               "%s{\"local_id\":%d,\"display_name\":\"%s\",\"immich_person_id\":\"%s\","
+                               "\"immich_asset_id\":\"%s\",\"name_pending\":%s,\"updated_at\":%u%s}",
+                               i ? "," : "", e.local_id, esc, esc_pid, esc_aid, e.name_pending ? "true" : "false",
+                               (unsigned)e.updated_at, e.alias_count > 0 ? aliases : "");
+        if (w < 0 || static_cast<size_t>(w) >= buf_size - off) {
+            break;
+        }
+        off += static_cast<size_t>(w);
+    }
+    const time_t now = time(nullptr);
+    const int64_t ts = (now > 1000000000) ? static_cast<int64_t>(now) : static_cast<int64_t>(esp_timer_get_time() / 1000000LL);
+    const int t = snprintf(buf + off, buf_size - off, "],\"ts\":%ld}", static_cast<long>(ts));
+    if (t < 0) {
+        return off;
+    }
+    off += static_cast<size_t>(t);
+    return off;
+}
+
+int DeepDogFaceRecognizeVisitPendingImmich(DeepDogFacePendingImmichVisitFn fn, void* ctx) {
+    if (!fn) {
+        return 0;
+    }
+    int n = 0;
+    for (int i = 0; i < s_meta_count; i++) {
+        const FaceMeta& m = s_meta[i];
+        if (!m.immich_asset_id[0]) {
+            continue;
+        }
+        if (!DeepDogFaceRecognizeNeedsImmichName(m.local_id)) {
+            continue;
+        }
+        if (fn(m.local_id, m.immich_asset_id, ctx)) {
+            n++;
+        }
+    }
+    return n;
+}
+
+void DeepDogFaceRecognizeSetRegistryChangedCallback(std::function<void()> cb) {
+    s_registry_changed_cb = std::move(cb);
 }
 
 bool DeepDogFaceRecognizeReady() {
@@ -510,18 +834,33 @@ bool DeepDogFaceRecognizeNeedsImmichName(int local_id) {
     if (local_id <= 0) {
         return false;
     }
+    const int cid = DeepDogFaceRecognizeResolveCanonicalId(local_id);
     FaceMeta* m = FindMeta(local_id);
+    if (!m) {
+        m = FindMeta(cid);
+    }
     if (!m) {
         return true;
     }
-    return m->immich_person_id[0] == '\0' || IsPlaceholderName(local_id, m->display_name);
+    if (m->immich_asset_id[0] && (m->immich_person_id[0] == '\0' || IsPlaceholderName(cid, m->display_name))) {
+        return true;
+    }
+    return m->immich_person_id[0] == '\0' || IsPlaceholderName(cid, m->display_name);
 }
 
 bool DeepDogFaceRecognizeBindImmichName(int local_id, const char* display_name, const char* immich_person_id) {
     if (local_id <= 0 || !display_name || !display_name[0]) {
         return false;
     }
-    FaceMeta* m = UpsertMeta(local_id);
+    int cid = DeepDogFaceRecognizeResolveCanonicalId(local_id);
+    if (immich_person_id && immich_person_id[0]) {
+        const int existing = FindCanonicalByPersonId(immich_person_id, local_id);
+        if (existing > 0 && existing != cid) {
+            (void)DeepDogFaceRecognizeMergeAlias(local_id, existing);
+            cid = existing;
+        }
+    }
+    FaceMeta* m = UpsertMeta(cid);
     if (!m) {
         return false;
     }
@@ -531,8 +870,17 @@ bool DeepDogFaceRecognizeBindImmichName(int local_id, const char* display_name, 
         strncpy(m->immich_person_id, immich_person_id, sizeof(m->immich_person_id) - 1);
         m->immich_person_id[sizeof(m->immich_person_id) - 1] = '\0';
     }
+    m->name_pending = 0;
     m->updated_at = static_cast<uint32_t>(esp_timer_get_time() / 1000);
-    return SaveMetaToNvs() == ESP_OK;
+    FaceMeta* raw = FindMeta(local_id);
+    if (raw && raw->local_id != cid) {
+        raw->name_pending = 0;
+    }
+    const bool ok = SaveMetaToNvs() == ESP_OK;
+    if (ok) {
+        NotifyRegistryChanged();
+    }
+    return ok;
 }
 
 #else  // stub
@@ -551,6 +899,34 @@ bool DeepDogFaceRecognizeNeedsImmichName(int) {
     return false;
 }
 bool DeepDogFaceRecognizeBindImmichName(int, const char*, const char*) {
+    return false;
+}
+bool DeepDogFaceRecognizeBindImmichAsset(int, const char*) {
+    return false;
+}
+bool DeepDogFaceRecognizeRename(int, const char*) {
+    return false;
+}
+bool DeepDogFaceRecognizeDeleteOne(int) {
+    return false;
+}
+bool DeepDogFaceRecognizeMergeAlias(int, int) {
+    return false;
+}
+int DeepDogFaceRecognizeListCanonical(std::vector<DeepDogFaceEnrolledEntry>*) {
+    return 0;
+}
+size_t DeepDogFaceRecognizeFormatRegistryJson(char*, size_t) {
+    return 0;
+}
+int DeepDogFaceRecognizeVisitPendingImmich(DeepDogFacePendingImmichVisitFn, void*) {
+    return 0;
+}
+void DeepDogFaceRecognizeSetRegistryChangedCallback(std::function<void()>) {}
+int DeepDogFaceRecognizeResolveCanonicalId(int local_id) {
+    return local_id;
+}
+bool DeepDogFaceRecognizeIsCanonical(int) {
     return false;
 }
 

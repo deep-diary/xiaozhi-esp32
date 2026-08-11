@@ -10,6 +10,8 @@ bool DeepDogFaceAiRuntimeStart();
 void DeepDogFaceAiRuntimeStop();
 void DeepDogFaceAiSetEnabled(bool on);
 bool DeepDogFaceAiIsEnabled();
+void DeepDogFaceAiSetRecognitionEnabled(bool on);
+bool DeepDogFaceAiIsRecognitionEnabled();
 void DeepDogFaceAiSetPipeline(DeepDogFacePipeline pipeline);
 DeepDogFacePipeline DeepDogFaceAiGetPipeline();
 /** 夹紧到 [INTERVAL_MIN, INTERVAL_MAX] 后生效。 */

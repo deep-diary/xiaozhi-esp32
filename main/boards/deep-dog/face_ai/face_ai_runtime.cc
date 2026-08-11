@@ -38,6 +38,7 @@ struct FaceFrameJob {
 static QueueHandle_t s_queue = nullptr;
 static TaskHandle_t s_task = nullptr;
 static std::atomic<bool> s_user_enabled{DEEP_DOG_FACE_AI_DEFAULT_ENABLED != 0};
+static std::atomic<bool> s_recognition_enabled{true};
 static std::atomic<bool> s_runtime_started{false};
 static std::atomic<int> s_detect_interval_ms{DEEP_DOG_FACE_AI_MIN_INTERVAL_MS};
 static std::atomic<uint8_t> s_pipeline{static_cast<uint8_t>(DeepDogFacePipeline::Live)};
@@ -352,9 +353,11 @@ static void FaceAiTask(void* /*arg*/) {
                 const DeepDogFacePipeline pipe =
                     static_cast<DeepDogFacePipeline>(s_pipeline.load(std::memory_order_relaxed));
                 const int64_t now_us = esp_timer_get_time();
+                const bool recog_on = s_recognition_enabled.load(std::memory_order_relaxed);
                 const bool run_recog =
-                    (pipe == DeepDogFacePipeline::Identity) ||
-                    ((now_us - s_last_recog_us) >= (int64_t)DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS * 1000);
+                    recog_on &&
+                    ((pipe == DeepDogFacePipeline::Identity) ||
+                     ((now_us - s_last_recog_us) >= (int64_t)DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS * 1000));
                 int recog_ms = -1;
                 if (run_recog && !boxes.empty()) {
                     dl::image::img_t img{};
@@ -369,7 +372,7 @@ static void FaceAiTask(void* /*arg*/) {
                         }
                         vTaskDelay(pdMS_TO_TICKS(5));
                         for (const auto& b : boxes) {
-                            if (b.local_id > 0) {
+                            if (b.local_id > 0 && recog_on) {
                                 MaybeRequestImmichName(job.data, job.w, job.h, b);
                             }
                         }
@@ -423,6 +426,8 @@ bool DeepDogFaceAiRuntimeStart() {
 #if DEEP_DOG_FACE_IMMICH_ENABLE
     if (!DeepDogImmichInit()) {
         ESP_LOGW(TAG, "immich worker init failed (local id still available)");
+    } else {
+        DeepDogImmichApplyDefaultsIfEmpty();
     }
 #endif
     s_queue = xQueueCreate(1, sizeof(FaceFrameJob));
@@ -511,6 +516,15 @@ void DeepDogFaceAiSetEnabled(bool on) {
 
 bool DeepDogFaceAiIsEnabled() {
     return s_user_enabled.load(std::memory_order_relaxed);
+}
+
+void DeepDogFaceAiSetRecognitionEnabled(bool on) {
+    s_recognition_enabled.store(on, std::memory_order_relaxed);
+    ESP_LOGI(TAG, "recognition_enabled=%d", on ? 1 : 0);
+}
+
+bool DeepDogFaceAiIsRecognitionEnabled() {
+    return s_recognition_enabled.load(std::memory_order_relaxed);
 }
 
 void DeepDogFaceAiSetPipeline(DeepDogFacePipeline pipeline) {
@@ -680,6 +694,10 @@ bool DeepDogFaceAiRuntimeStart() {
 void DeepDogFaceAiRuntimeStop() {}
 void DeepDogFaceAiSetEnabled(bool) {}
 bool DeepDogFaceAiIsEnabled() {
+    return false;
+}
+void DeepDogFaceAiSetRecognitionEnabled(bool) {}
+bool DeepDogFaceAiIsRecognitionEnabled() {
     return false;
 }
 void DeepDogFaceAiSetPipeline(DeepDogFacePipeline) {}

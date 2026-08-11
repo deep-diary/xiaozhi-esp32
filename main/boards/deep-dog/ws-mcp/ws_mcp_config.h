@@ -2,13 +2,15 @@
 #define _DEEP_DOG_WS_MCP_CONFIG_H_
 
 #include "config.h"
+#include "board_features.h"
+#include "face_ai_config.h"
 
 #if DEEP_DOG_HTTP_SERVER_ENABLE
 #include "http-server/http_server_config.h"
 #endif
 
 #ifndef DEEP_DOG_WS_MCP_ENABLE
-#if DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_DOG_ENABLE
+#if (DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_DOG_ENABLE) || DEEP_DOG_FACE_AI_ENABLE
 #define DEEP_DOG_WS_MCP_ENABLE 1
 #else
 #define DEEP_DOG_WS_MCP_ENABLE 0

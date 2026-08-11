@@ -19,6 +19,15 @@ bool DeepDogImmichIsConfigured();
  */
 bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset = -1);
 
+/** NVS 无 Key 时应用编译期默认 URL/Key（若有）并写入 NVS。 */
+void DeepDogImmichApplyDefaultsIfEmpty();
+
+/** GET {url}/server/ping；更新内部 server_ok/ping_ms 并触发 status 回调。 */
+bool DeepDogImmichPingServer();
+
+using DeepDogImmichStatusChangedFn = void (*)();
+void DeepDogImmichSetStatusChangedCallback(DeepDogImmichStatusChangedFn cb);
+
 /** 状态 JSON（无 Key 明文），写入 buf。 */
 size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size);
 
@@ -31,3 +40,5 @@ bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool
 /** 标记下次出镜时强制刷新该 local_id（0=当前 primary，由 runtime 填）。 */
 void DeepDogImmichRequestRefresh(int local_id);
 bool DeepDogImmichConsumeForceRefresh(int local_id);
+/** 对 NVS 中已存 asset_id 立即 poll（无 upload）。 */
+bool DeepDogImmichPollStoredAsset(int local_id);

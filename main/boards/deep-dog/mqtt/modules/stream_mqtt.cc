@@ -10,9 +10,11 @@
 #include "vision/vision_frame_hub.h"
 
 #include <cJSON.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/idf_additions.h>
 #include <freertos/task.h>
 
 #include <ctime>
@@ -264,11 +266,15 @@ void DeepDogStreamMqtt::EnqueueTakePhoto(const char* question) {
     job->question[sizeof(job->question) - 1] = '\0';
 
     constexpr uint32_t kStackWords = 12288;
-    if (xTaskCreate(TakePhotoTask, "dog_stream_photo", kStackWords, job, 3, nullptr) != pdPASS) {
+    TaskHandle_t photo_task = nullptr;
+    // 推流 + 人脸 + Immich 并发时 internal SRAM 常 <20KB；栈放 PSRAM（与 VisionFrameHub 一致）
+    if (xTaskCreateWithCaps(TakePhotoTask, "dog_stream_photo", kStackWords, job, 3, &photo_task,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         delete job;
         photo_busy_.store(false, std::memory_order_release);
         PublishPhotoResult(false, "", "task_fail", 0);
-        ESP_LOGE(TAG, "take_photo task create failed");
+        ESP_LOGE(TAG, "take_photo task create failed (internal free=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     } else {
         ESP_LOGI(TAG, "take_photo queued q=%s", q);
     }
