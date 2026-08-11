@@ -3,9 +3,12 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 
+#include "application.h"
 #include "board.h"
 #include "camera.h"
 #include "http-server/deep_dog_http_server.h"
+#include "http-server/http_server_config.h"
+#include "vision/stream_audio_gate.h"
 #include "vision/vision_config.h"
 #include "vision/vision_frame_hub.h"
 
@@ -76,10 +79,24 @@ DeepDogStreamMqtt::DeepDogStreamMqtt(DeepDogMqttClient* client) : client_(client
         .skip_unhandled_events = true,
     };
     esp_timer_create(&args, &poll_timer_);
+
+    esp_timer_create_args_t auto_args = {
+        .callback = &DeepDogStreamMqtt::AutoStopTimerCb,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "dog_stream_autostop",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&auto_args, &auto_stop_timer_);
 }
 
 DeepDogStreamMqtt::~DeepDogStreamMqtt() {
     Stop();
+    if (auto_stop_timer_) {
+        esp_timer_stop(auto_stop_timer_);
+        esp_timer_delete(auto_stop_timer_);
+        auto_stop_timer_ = nullptr;
+    }
     if (poll_timer_) {
         esp_timer_delete(poll_timer_);
         poll_timer_ = nullptr;
@@ -117,6 +134,41 @@ bool DeepDogStreamMqtt::ParseMode(const char* s, VisionPublishMode* out) {
     return false;
 }
 
+void DeepDogStreamMqtt::StartAutoStopTimer() {
+    if (!auto_stop_timer_) {
+        return;
+    }
+    esp_timer_stop(auto_stop_timer_);
+    const uint64_t us = static_cast<uint64_t>(DEEP_DOG_STREAM_RTSP_MAX_S) * 1000000ULL;
+    esp_timer_start_once(auto_stop_timer_, us);
+    ESP_LOGI(TAG, "RTSP auto-stop in %ds", DEEP_DOG_STREAM_RTSP_MAX_S);
+}
+
+void DeepDogStreamMqtt::StopAutoStopTimer() {
+    if (auto_stop_timer_) {
+        esp_timer_stop(auto_stop_timer_);
+    }
+}
+
+void DeepDogStreamMqtt::AutoStopTimerCb(void* arg) {
+    auto* self = static_cast<DeepDogStreamMqtt*>(arg);
+    if (!self) {
+        return;
+    }
+    Application::GetInstance().Schedule([self]() {
+#if DEEP_DOG_VISION_HUB_ENABLE
+        if (!self->hub_ || self->hub_->GetPublishMode() != VisionPublishMode::RtspPush) {
+            return;
+        }
+#endif
+        self->last_error_ = "auto_stop_timeout";
+        self->ApplyMode(VisionPublishMode::Off);
+        self->last_fingerprint_.clear();
+        self->PublishStatus("auto_stop_timeout");
+        ESP_LOGI(TAG, "RTSP auto-stopped after %ds", DEEP_DOG_STREAM_RTSP_MAX_S);
+    });
+}
+
 void DeepDogStreamMqtt::ApplyMode(VisionPublishMode mode) {
 #if DEEP_DOG_HTTP_SERVER_ENABLE
     if (http_) {
@@ -134,6 +186,11 @@ void DeepDogStreamMqtt::ApplyMode(VisionPublishMode mode) {
                 break;
         }
         http_->SetCaptureMode(cm);
+        if (mode == VisionPublishMode::RtspPush) {
+            StartAutoStopTimer();
+        } else {
+            StopAutoStopTimer();
+        }
         return;
     }
 #endif
@@ -144,6 +201,11 @@ void DeepDogStreamMqtt::ApplyMode(VisionPublishMode mode) {
 #else
     (void)mode;
 #endif
+    if (mode == VisionPublishMode::RtspPush) {
+        StartAutoStopTimer();
+    } else {
+        StopAutoStopTimer();
+    }
 }
 
 void DeepDogStreamMqtt::PollTimerCb(void* arg) {
@@ -172,6 +234,7 @@ void DeepDogStreamMqtt::OnDisconnected() {
     if (poll_timer_) {
         esp_timer_stop(poll_timer_);
     }
+    StopAutoStopTimer();
 }
 
 void DeepDogStreamMqtt::Stop() {
@@ -334,6 +397,14 @@ void DeepDogStreamMqtt::OnMessage(const std::string& topic, const std::string& p
             PublishStatus(last_error_.c_str());
             return;
         }
+#if !DEEP_DOG_HTTP_SERVER_ENABLE
+        if (mode == VisionPublishMode::HttpMjpeg) {
+            last_error_ = "http_stream_disabled";
+            cJSON_Delete(root);
+            PublishStatus(last_error_.c_str());
+            return;
+        }
+#endif
         ok = true;
     } else if (action_str == "stop") {
         mode = VisionPublishMode::Off;
@@ -407,10 +478,12 @@ bool DeepDogStreamMqtt::PublishStatus(const char* error_override) {
     const int64_t ts = UnixTs();
     const std::string ts_iso = IsoTs(ts);
 
+    const bool voice_paused = DeepDogStreamAudioGateIsVoicePaused();
+
     char fingerprint[384];
-    snprintf(fingerprint, sizeof(fingerprint), "%s|%s|%s|%s|%s|%s", VisionPushStatusStr(state),
+    snprintf(fingerprint, sizeof(fingerprint), "%s|%s|%s|%s|%s|%s|%d", VisionPushStatusStr(state),
              ProtocolModeStr(mode), url.c_str(), lan_url.c_str(), push_url.c_str(),
-             error ? error : "");
+             error ? error : "", voice_paused ? 1 : 0);
     if (error_override == nullptr && fingerprint == last_fingerprint_) {
         return true;  // no change
     }
@@ -423,6 +496,7 @@ bool DeepDogStreamMqtt::PublishStatus(const char* error_override) {
     cJSON_AddStringToObject(root, "lan_url", lan_url.c_str());
     cJSON_AddStringToObject(root, "push_url", push_url.c_str());
     cJSON_AddStringToObject(root, "error", error ? error : "");
+    cJSON_AddBoolToObject(root, "voice_paused", voice_paused);
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", ts_iso.c_str());
 

@@ -70,4 +70,9 @@
 #define DEEP_DOG_VISION_RECONNECT_MAX_MS 30000
 #endif
 
+/** RTSP 推流最长时长（秒）；超时自动 stop 并恢复语音（V-S08） */
+#ifndef DEEP_DOG_STREAM_RTSP_MAX_S
+#define DEEP_DOG_STREAM_RTSP_MAX_S 300
+#endif
+
 #endif  // _DEEP_DOG_VISION_CONFIG_H_

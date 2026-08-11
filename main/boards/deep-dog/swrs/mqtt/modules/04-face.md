@@ -222,7 +222,7 @@
 - `live` / `identity` 分频；`detect_interval_ms` 运行时夹紧 200–5000。
 - **`face/registry` retain 与 `face/status` 语义分离**：status 为实时框；registry 为 canonical 已注册库。
 - **boot 默认关 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=0`）时，MQTT 首连可能先于 recognizer 就绪而 retain 空库；**recognizer 从 NVS/facedb 恢复后必须 republish registry**（覆盖陈旧 retain）。
-- **`face/cmd` lazy-start**：先 `xQueueCreate` + `dog_face_ai` task（占栈），再加载检测/识别模型；避免 RTSP 推流时 internal 碎片化导致 `xTaskCreate` 失败。启动在 `face_boot` 任务异步完成；**不得**在 `mqtt_task` 上同步加载模型。
+- **`face/cmd` lazy-start**：先创建 `dog_face_ai` + `dog_immich` task（占 internal 栈），再加载检测/识别模型；栈大小见 `face_ai_config.h`（按 `stack_hwm` 留 1.5～2× 余量）。
 - **`face/cmd` 变更检测/识别开关成功后**，须 republish registry（`esp_timer` 异步 publish）。
 
 ## 验收

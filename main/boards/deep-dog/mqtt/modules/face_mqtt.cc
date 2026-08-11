@@ -105,7 +105,7 @@ bool HandleCmdAction(const char* action, cJSON* root) {
     if (strcmp(action, "ping_immich") == 0) {
         const bool ok = DeepDogImmichPingServer();
         ESP_LOGI(TAG, "face/cmd ping_immich ok=%d", ok ? 1 : 0);
-        return ok;
+        return true;
     }
     if (strcmp(action, "refresh_status") == 0) {
         ESP_LOGI(TAG, "face/cmd refresh_status");

@@ -12,6 +12,7 @@
 #include "esp_video.h"
 #include "camera.h"
 #include "face_ai_bridge.h"
+#include "vision/stream_audio_gate.h"
 #include "face_ai_config.h"
 #include "image_to_jpeg.h"
 
@@ -19,7 +20,9 @@
 
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
 #include <freertos/idf_additions.h>
+#include <freertos/task.h>
 
 #include <cstring>
 #include <linux/videodev2.h>
@@ -169,6 +172,7 @@ void VisionFrameHub::SetPublishMode(VisionPublishMode mode) {
 #if DEEP_DOG_FACE_AI_ENABLE
     DeepDogFaceAiSetVisionRtspActive(mode == VisionPublishMode::RtspPush);
 #endif
+    DeepDogStreamAudioGateSetRtspActive(mode == VisionPublishMode::RtspPush);
 }
 
 void VisionFrameHub::PublishJpeg(std::vector<uint8_t>&& jpeg) {
@@ -440,6 +444,7 @@ void VisionFrameHub::TaskLoop() {
                             ++s_enc_fail;
                         }
                     }
+                    taskYIELD();
                 }
 #else
                 std::vector<uint8_t> jpeg;

@@ -47,7 +47,12 @@
 
 /** RTSP/H264 推流活跃时送帧最小间隔下限（ms），减轻与 vision_hub 并发 WDT */
 #ifndef DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS
-#define DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS 1500
+#define DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS 2000
+#endif
+
+/** RTSP 推流活跃时识别最小间隔（ms），仅运行时抬高，不写 NVS */
+#ifndef DEEP_DOG_FACE_AI_RTSP_RECOG_MIN_INTERVAL_MS
+#define DEEP_DOG_FACE_AI_RTSP_RECOG_MIN_INTERVAL_MS 4000
 #endif
 
 /** 1=检测前对 RGB565 每像素做高/低字节对调（仅在 INPUT_RGB888=0 时有意义） */
@@ -226,6 +231,22 @@
  */
 #ifndef DEEP_DOG_FACE_IMMICH_DELETE_ASSET
 #define DEEP_DOG_FACE_IMMICH_DELETE_ASSET 0
+#endif
+
+/**
+ * FreeRTOS 任务栈（字节，internal DRAM，不可放 PSRAM）。
+ * 评估方法：启用 CONFIG_FREERTOS_USE_TRACE_FACILITY 后读 uxTaskGetStackHighWaterMark
+ * 或 MCP self.board.diagnostics → tasks[].stack_hwm；分配值 ≈ hwm × 1.5～2（留 HTTP/Flash 路径余量）。
+ * 实测见 swrs/AUDIT_REPORT.md（face 启用后 dog_face_ai hwm≈4352，dog_immich hwm≈6580）。
+ */
+#ifndef DEEP_DOG_FACE_AI_TASK_STACK
+#define DEEP_DOG_FACE_AI_TASK_STACK 8192
+#endif
+#ifndef DEEP_DOG_FACE_IMMICH_TASK_STACK
+#define DEEP_DOG_FACE_IMMICH_TASK_STACK 10240
+#endif
+#ifndef DEEP_DOG_FACE_BOOT_TASK_STACK
+#define DEEP_DOG_FACE_BOOT_TASK_STACK 16384
 #endif
 
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

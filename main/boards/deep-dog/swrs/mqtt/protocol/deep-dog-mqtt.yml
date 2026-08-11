@@ -358,7 +358,11 @@ topics:
       error:
         type: string
         optional: true
-        note: "empty when ok; codes: invalid_json|missing_action|bad_mode|start_requires_mode|unknown_action|stream_unavailable|push_error|no_rtp"
+        note: "empty when ok; codes: invalid_json|missing_action|bad_mode|start_requires_mode|unknown_action|stream_unavailable|push_error|no_rtp|auto_stop_timeout|http_stream_disabled"
+      voice_paused:
+        type: bool
+        optional: true
+        note: "true while RTSP push active and voice/AFE paused"
       ts: { type: int }
       ts_iso: { type: string, optional: true, note: "UTC ISO8601 for UI display" }
 

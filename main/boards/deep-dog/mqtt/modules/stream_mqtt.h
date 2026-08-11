@@ -30,10 +30,13 @@ public:
 
 private:
     static void PollTimerCb(void* arg);
+    static void AutoStopTimerCb(void* arg);
     static void TakePhotoTask(void* arg);
     void EnqueueTakePhoto(const char* question);
     void PublishPhotoResult(bool ok, const std::string& result, const char* error, int elapsed_ms);
     void ApplyMode(VisionPublishMode mode);
+    void StartAutoStopTimer();
+    void StopAutoStopTimer();
     static const char* ProtocolModeStr(VisionPublishMode m);
     static bool ParseMode(const char* s, VisionPublishMode* out);
 
@@ -41,6 +44,7 @@ private:
     VisionFrameHub* hub_ = nullptr;
     DeepDogHttpServer* http_ = nullptr;
     esp_timer_handle_t poll_timer_ = nullptr;
+    esp_timer_handle_t auto_stop_timer_ = nullptr;
     bool enabled_ = false;
 
     std::string last_fingerprint_;

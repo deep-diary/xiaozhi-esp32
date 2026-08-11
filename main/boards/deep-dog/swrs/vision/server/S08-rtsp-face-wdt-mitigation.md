@@ -4,8 +4,8 @@
 |----|------|
 | 路线图 ID | **V-S08** |
 | 依赖 | [C02](../client/C02-device-push-stream.md) · [S04](./S04-local-face-numeric-id.md) · [04-face MQTT](../../mqtt/modules/04-face.md) |
-| 代码落点 | `face_ai/face_ai_runtime.cc` · `face_ai_config.h` · `vision/vision_frame_hub.cc` |
-| 状态 | **已落地（间隔下限）**；帧零拷贝仍为后续 POC |
+| 代码落点 | `face_ai/face_ai_runtime.cc` · `face_ai_config.h` · `vision/vision_frame_hub.cc` · `vision/stream_audio_gate.*` · `mqtt/modules/stream_mqtt.cc` |
+| 状态 | **已落地（间隔下限 + 语音互斥 + 5min 自动停）**；帧零拷贝仍为后续 POC |
 
 ## 1. 背景
 
@@ -24,15 +24,21 @@ internal RAM 瓶颈在 **固定 task 栈 + WiFi/MQTT**，与注册人脸人数�
 | 宏 | 默认 | 行为 |
 |----|------|------|
 | `DEEP_DOG_FACE_AI_DURING_RTSP` | 1 | 推流时仍送帧 |
-| `DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS` | **1500** | RTSP 模式 active 时，送帧间隔 **max(user, 1500ms)** |
+| `DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS` | **2000** | RTSP 模式 active 时，送帧间隔 **max(user, 2000ms)** |
+| `DEEP_DOG_STREAM_RTSP_MAX_S` | **300** | RTSP 推流最长 5 分钟，超时自动 `stop` |
+| `stream_audio_gate` | — | RTSP 开：停唤醒+语音；关：恢复待机唤醒 |
 
-`VisionFrameHub::SetPublishMode(RtspPush)` → `DeepDogFaceAiSetVisionRtspActive(true)`。
+`VisionFrameHub::SetPublishMode(RtspPush)` → `DeepDogFaceAiSetVisionRtspActive(true)` + `DeepDogStreamAudioGateSetRtspActive(true)`。
 
-用户仍可通过 MQTT `face/cmd.detect_interval_ms` 抬高间隔；低于下限时固件自动夹紧。
+RTSP 推流期间 **暂停 AFE**（`EnableWakeWordDetection(false)` + `EnableVoiceProcessing(false)`），消除 `AFE Ringbuffer full`；推流结束或 5min 超时后恢复唤醒。
+
+用户仍可通过 MQTT `face/cmd.detect_interval_ms` 抬高间隔；低于下限时固件自动夹紧。推流期间识别最小间隔临时抬高至 **4000ms**（不写 NVS）。
 
 ## 4. 验收
 
-- [ ] `stream/cmd start`（RTSP）+ 流媒体页 **关检测→开检测** 循环 ≥5 次，无 `mqtt_task` stack overflow / reboot
+- [ ] RTSP 推流期间无（或极少）`AFE: Ringbuffer ... full`
+- [ ] 推流 5 分钟后 `stream/status` → `idle`，`error=auto_stop_timeout`，唤醒恢复
+- [ ] `stream/status.voice_paused` 推流中为 `true`
 - [ ] 推流时串口可见送帧间隔 ≥ `RTSP_MIN_INTERVAL_MS`（或用户更大值）
 - [ ] `device/status.mem.internal.min` 不低于健康阈值（见 01-device `low_internal_heap`）
 - [ ] `scripts/deep_dog/deep_dog_device_audit.py` 可输出 `tasks[]` 与 `face_summary`

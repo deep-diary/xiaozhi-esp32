@@ -497,11 +497,18 @@ bool DeepDogImmichInit() {
     TrimTrailingSlash(s_api_url);
     s_queue = xQueueCreate(1, sizeof(ImmichJob));
     if (!s_queue) {
+        ESP_LOGW(TAG, "immich queue create failed (free_int=%u largest_int=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         return false;
     }
     // 必须用内部 DRAM 栈：ProcessJob → BindImmichName → SaveMetaToNvs 会写 Flash。
     // PSRAM 任务栈会触发 esp_task_stack_is_sane_cache_disabled 断言，连带搞挂摄像头。
-    if (xTaskCreate(ImmichTask, "dog_immich", 12288, nullptr, 2, &s_task) != pdPASS) {
+    if (xTaskCreate(ImmichTask, "dog_immich", DEEP_DOG_FACE_IMMICH_TASK_STACK, nullptr, 2, &s_task) != pdPASS) {
+        ESP_LOGW(TAG, "immich task create failed stack=%u (free_int=%u largest_int=%u)",
+                 (unsigned)DEEP_DOG_FACE_IMMICH_TASK_STACK,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         vQueueDelete(s_queue);
         s_queue = nullptr;
         return false;

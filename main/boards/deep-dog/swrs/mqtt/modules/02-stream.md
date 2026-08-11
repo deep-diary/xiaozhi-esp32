@@ -84,6 +84,7 @@
 | `lan_url` | string | 否 | 局域网 HLS |
 | `push_url` | string | 否 | 设备 RTSP 发布地址；未推流时可为空 |
 | `error` | string | 否 | 空字符串表示无错；见下表 |
+| `voice_paused` | bool | 否 | RTSP 推流中为 `true`（语音/AFE 已暂停） |
 | `ts` | int | 是 | Unix 秒 |
 | `ts_iso` | string | 否 | UTC ISO8601；前端展示优先用此字段 |
 
@@ -111,8 +112,13 @@
 | `stream_unavailable` | 固件 | Hub/HTTP 未就绪 |
 | `push_error` | 推流 | `state=error` 且无更细错误 |
 | `no_rtp` | 推流 | `starting` 且尚未收到 RTP |
+| `auto_stop_timeout` | 固件 | RTSP 推流超过 5 分钟自动 stop |
+| `http_stream_disabled` | cmd | `mode=stream` 但 `DEEP_DOG_HTTP_SERVER_ENABLE=0` |
 
-## 样例 JSON · `stream/cmd`
+### RTSP 与语音互斥
+
+- **`start` 缺省 / `mode=rtsp_push`**：H264 → MediaMTX；**暂停唤醒与语音**；最长 **5 分钟** 自动停并恢复语音。
+- **`mode=stream`**：仅 `DEEP_DOG_HTTP_SERVER_ENABLE=1` 时有效（HTTP `/stream` MJPEG）；当前联调剖面 HTTP 关，应返回 `http_stream_disabled`。
 
 **开始推流（推荐缺省）**
 

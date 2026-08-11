@@ -53,7 +53,7 @@
 | 任务 | 栈 | 域 |
 |------|-----|-----|
 | `vision_hub` | 48 KB | PSRAM |
-| `dog_face_ai` / `dog_immich` | 各 12 KB | internal（不可迁） |
+| `dog_face_ai` / `dog_immich` | **8 KB / 10 KB**（config 可调） | internal；hwm 审计见 §2 |
 | `opus_codec` | 24 KB | internal |
 | IMU | **无独立 task** | `esp_timer` 10ms |
 
