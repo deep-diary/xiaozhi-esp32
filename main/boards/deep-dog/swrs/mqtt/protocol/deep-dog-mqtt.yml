@@ -262,7 +262,11 @@ topics:
           warn:
             type: array
             items: { type: string }
-            note: "e.g. low_internal_heap (<32KiB free); motor faults stay in dog/status"
+            note: "e.g. low_internal_heap (<32KiB free); clock_unsynced; motor faults stay in dog/status"
+      clock_synced:
+        type: bool
+        optional: true
+        note: "true when time() is plausible Unix sec (>=1e9); see swrs/net/N01-sntp-clock-sync.md"
       task_count: { type: int, optional: true, note: "requires CONFIG_FREERTOS_USE_TRACE_FACILITY" }
       tasks:
         type: array

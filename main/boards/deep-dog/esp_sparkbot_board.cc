@@ -5,6 +5,7 @@
 #include "button.h"
 #include "config.h"
 #include "net/net_config.h"
+#include "net/deep_dog_sntp.h"
 #include "mcp_server.h"
 #include "ws-mcp/ws_mcp_config.h"
 #if DEEP_DOG_WS_MCP_ENABLE
@@ -820,6 +821,7 @@ public:
         }
 #endif
         WifiBoard::StartNetwork();
+        DeepDogSntpInit();
 #if DEEP_DOG_WIFI_USE_STATIC_IP
         if (s_deep_dog_sta_connected_hook == nullptr) {
             esp_err_t er = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, DeepDogOnWifiStaConnected,

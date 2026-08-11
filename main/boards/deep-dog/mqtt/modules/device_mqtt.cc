@@ -6,6 +6,7 @@
 #include "config.h"
 #include "face_ai_config.h"
 #include "face_greet.h"
+#include "net/deep_dog_sntp.h"
 #include "system_info.h"
 
 #include <wifi_manager.h>
@@ -30,11 +31,7 @@ namespace {
 constexpr size_t kLowInternalHeapBytes = 32 * 1024;
 
 int64_t UnixTs() {
-    const time_t now = time(nullptr);
-    if (now > 1000000000) {
-        return static_cast<int64_t>(now);
-    }
-    return static_cast<int64_t>(esp_timer_get_time() / 1000000LL);
+    return static_cast<int64_t>(DeepDogNowUnixSec());
 }
 
 std::string IsoTs(int64_t unix_s) {
@@ -235,6 +232,14 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     cJSON* warn = cJSON_CreateArray();
     if (internal_free < kLowInternalHeapBytes) {
         cJSON_AddItemToArray(warn, cJSON_CreateString("low_internal_heap"));
+    }
+    const bool clock_synced = DeepDogClockIsSynced();
+    cJSON_AddBoolToObject(root, "clock_synced", clock_synced);
+    if (!clock_synced) {
+        wifi_ap_record_t ap_check{};
+        if (esp_wifi_sta_get_ap_info(&ap_check) == ESP_OK) {
+            cJSON_AddItemToArray(warn, cJSON_CreateString("clock_unsynced"));
+        }
     }
     cJSON_AddBoolToObject(health, "ok", cJSON_GetArraySize(warn) == 0);
     cJSON_AddItemToObject(health, "warn", warn);

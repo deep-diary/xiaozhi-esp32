@@ -23,6 +23,7 @@
 #include "config.h"
 #include "face_control.h"
 #include "http-server/http_server_config.h"
+#include "net/deep_dog_sntp.h"
 #include "sensor/imu_config.h"
 #if DEEP_DOG_IMU_ENABLE
 #include "sensor/imu_sensor.h"
@@ -36,6 +37,14 @@
 #define TAG "dog_mqtt"
 
 #if DEEP_DOG_MQTT_ENABLE
+
+static DeepDogMqtt* s_sntp_owner = nullptr;
+
+static void SntpOwnerSyncedCb(void) {
+    if (s_sntp_owner) {
+        s_sntp_owner->NotifyClockSynced();
+    }
+}
 
 struct DeepDogMqtt::Impl {
     DeepDogMqttClient client;
@@ -66,6 +75,7 @@ struct DeepDogMqtt::Impl {
 
     void OnConnection(bool connected);
     void OnMessage(const std::string& topic, const std::string& payload);
+    void OnClockSynced();
     void ApplyVisionStreamUrl(const DeepDogMqttSettings& settings);
     void StopModulesForReload();
 };
@@ -114,6 +124,18 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     gimbal.OnMessage(topic, payload);
     can.OnMessage(topic, payload);
     motor.OnMessage(topic, payload);
+}
+
+void DeepDogMqtt::Impl::OnClockSynced() {
+    if (!client.IsConnected()) {
+        return;
+    }
+    (void)device.PublishStatus();
+    (void)device.PublishInfo();
+#if DEEP_DOG_FACE_AI_ENABLE
+    (void)face.PublishRegistry(true);
+#endif
+    ESP_LOGI(TAG, "clock synced: republished device/* + face/registry");
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {
@@ -255,6 +277,12 @@ void DeepDogMqtt::SetWsMcpEndpoint(int port, const char* path) {
 
 bool DeepDogMqtt::IsRunning() const {
     return impl_ && impl_->started;
+}
+
+void DeepDogMqtt::NotifyClockSynced() {
+    if (impl_ && impl_->started) {
+        impl_->OnClockSynced();
+    }
 }
 
 void DeepDogMqtt::StartPairingSessionOrAnnounceBound() {
@@ -423,6 +451,8 @@ bool DeepDogMqtt::Start() {
     impl_->ApplyVisionStreamUrl(settings);
     const bool ok = impl_->client.Start(settings);
     impl_->started = true;
+    s_sntp_owner = this;
+    DeepDogSntpSetOnSynced(&SntpOwnerSyncedCb);
     ESP_LOGI(TAG,
              "board MQTT started (connected=%d) stream=%d face=%d track=%d imu=%d led=%d servo=%d "
              "gimbal=%d handle=%d can=%d motor=%d",
@@ -435,6 +465,9 @@ bool DeepDogMqtt::Start() {
 void DeepDogMqtt::Stop() {
     if (!impl_ || !impl_->started) {
         return;
+    }
+    if (s_sntp_owner == this) {
+        s_sntp_owner = nullptr;
     }
     impl_->StopModulesForReload();
     impl_->started = false;
@@ -458,6 +491,7 @@ void DeepDogMqtt::SetHandleHub(HandleEventHub*) {}
 void DeepDogMqtt::SetDeepMotor(DeepMotor*) {}
 void DeepDogMqtt::SetWsMcpEndpoint(int, const char*) {}
 bool DeepDogMqtt::Start() { return false; }
+void DeepDogMqtt::NotifyClockSynced() {}
 void DeepDogMqtt::Stop() {}
 void DeepDogMqtt::ReloadDeviceIdentity() {}
 bool DeepDogMqtt::IsRunning() const { return false; }
