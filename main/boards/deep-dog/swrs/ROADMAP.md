@@ -29,6 +29,7 @@
 | **V-S05** | Immich 真名 | [vision/server/S05](./vision/server/S05-immich-real-name.md) | S04 | ✅ |
 | **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | ✅（真名待 Immich 队列空闲复验） |
 | **V-S07** | 人脸 MCP + registry | [vision/server/S07](./vision/server/S07-face-control-mcp.md) | S05 · M01 | 本轮 |
+| **V-S08** | RTSP+人脸 WDT 缓解 | [vision/server/S08](./vision/server/S08-rtsp-face-wdt-mitigation.md) | C02 · S04 | 已落地间隔下限 |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 基建可达；完整推拉待稳定 LAN 复验 |
 | V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | **固件已实现**（人脸永驻 + MJPEG/RTSP 互斥）；实机长稳待勾 |
 | **M01** | 板级 MQTT 总览 | [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md) / [YAML](./mqtt/protocol/deep-dog-mqtt.yml) / [modules](./mqtt/modules/) | infra | **文档 ✅**（入口卡+详情页规格） |

@@ -28,15 +28,19 @@ public:
 
 private:
     static void PollTimerCb(void* arg);
+    static void RegistryPublishTimerCb(void* arg);
 
+    void ScheduleRegistryPublish();
     void MaybePublishPersonActive(const struct DeepDogFaceSnapshot& snap);
 
     DeepDogMqttClient* client_;
     esp_timer_handle_t poll_timer_ = nullptr;
+    esp_timer_handle_t registry_publish_timer_ = nullptr;
     bool enabled_ = false;
     std::string last_fingerprint_;
     std::string last_registry_fp_;
     std::string last_immich_fp_;
     int last_person_active_id_ = 0;
     uint32_t immich_ping_every_n_ = 0;
+    uint32_t status_poll_n_ = 0;
 };

@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <memory>
+#include <string>
 
 #define TAG "dog_mqtt_face"
 
@@ -105,6 +107,10 @@ bool HandleCmdAction(const char* action, cJSON* root) {
         ESP_LOGI(TAG, "face/cmd ping_immich ok=%d", ok ? 1 : 0);
         return ok;
     }
+    if (strcmp(action, "refresh_status") == 0) {
+        ESP_LOGI(TAG, "face/cmd refresh_status");
+        return true;
+    }
     ESP_LOGW(TAG, "face/cmd unknown action=%s", action);
     return false;
 }
@@ -121,6 +127,14 @@ DeepDogFaceMqtt::DeepDogFaceMqtt(DeepDogMqttClient* client) : client_(client) {
         .skip_unhandled_events = true,
     };
     esp_timer_create(&args, &poll_timer_);
+    esp_timer_create_args_t reg_args = {
+        .callback = &DeepDogFaceMqtt::RegistryPublishTimerCb,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "dog_face_reg_pub",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&reg_args, &registry_publish_timer_);
 }
 
 DeepDogFaceMqtt::~DeepDogFaceMqtt() {
@@ -128,16 +142,36 @@ DeepDogFaceMqtt::~DeepDogFaceMqtt() {
         s_immich_status_target = nullptr;
     }
     Stop();
+    if (registry_publish_timer_) {
+        esp_timer_stop(registry_publish_timer_);
+        esp_timer_delete(registry_publish_timer_);
+        registry_publish_timer_ = nullptr;
+    }
     if (poll_timer_) {
         esp_timer_delete(poll_timer_);
         poll_timer_ = nullptr;
     }
 }
 
+void DeepDogFaceMqtt::ScheduleRegistryPublish() {
+    if (!registry_publish_timer_) {
+        return;
+    }
+    esp_timer_stop(registry_publish_timer_);
+    esp_timer_start_once(registry_publish_timer_, 0);
+}
+
+void DeepDogFaceMqtt::RegistryPublishTimerCb(void* arg) {
+    auto* self = static_cast<DeepDogFaceMqtt*>(arg);
+    if (self) {
+        self->PublishRegistry(true);
+    }
+}
+
 void DeepDogFaceMqtt::InitRegistryHook() {
 #if DEEP_DOG_FACE_AI_ENABLE
     DeepDogFaceControlSetRegistryChangedCallback([this]() {
-        PublishRegistry(true);
+        ScheduleRegistryPublish();
     });
 #if DEEP_DOG_FACE_IMMICH_ENABLE
     DeepDogImmichSetStatusChangedCallback(+[]() {
@@ -152,7 +186,13 @@ void DeepDogFaceMqtt::InitRegistryHook() {
 void DeepDogFaceMqtt::PollTimerCb(void* arg) {
     auto* self = static_cast<DeepDogFaceMqtt*>(arg);
     if (self) {
-        self->PublishStatus(false);
+        self->status_poll_n_++;
+        const bool heartbeat =
+            self->status_poll_n_ >= static_cast<uint32_t>(DEEP_DOG_MQTT_FACE_STATUS_HEARTBEAT_POLLS);
+        if (heartbeat) {
+            self->status_poll_n_ = 0;
+        }
+        self->PublishStatus(heartbeat);
         self->immich_ping_every_n_++;
         if (self->immich_ping_every_n_ >= 120) {
             self->immich_ping_every_n_ = 0;
@@ -174,6 +214,7 @@ void DeepDogFaceMqtt::OnConnected() {
     last_registry_fp_.clear();
     last_immich_fp_.clear();
     immich_ping_every_n_ = 0;
+    status_poll_n_ = 0;
     PublishStatus(true);
     PublishRegistry(true);
 #if DEEP_DOG_FACE_IMMICH_ENABLE
@@ -279,6 +320,7 @@ void DeepDogFaceMqtt::OnMessage(const std::string& topic, const std::string& pay
     }
     last_fingerprint_.clear();
     PublishStatus(true);
+    ScheduleRegistryPublish();
 #endif
 }
 
@@ -323,16 +365,18 @@ bool DeepDogFaceMqtt::PublishRegistry(bool force) {
 #if !DEEP_DOG_FACE_AI_ENABLE
     return client_->Publish("face/registry", "{\"version\":1,\"count\":0,\"entries\":[],\"ts\":0}", 0, true);
 #else
-    char buf[4096];
-    const size_t n = DeepDogFaceControlFormatRegistryJson(buf, sizeof(buf));
+    auto buf = std::make_unique<char[]>(4096);
+    const size_t n = DeepDogFaceControlFormatRegistryJson(buf.get(), 4096);
     if (n == 0) {
+        ESP_LOGW(TAG, "PublishRegistry: FormatRegistryJson returned 0 (recognizer not ready?)");
         return false;
     }
-    if (!force && last_registry_fp_ == buf) {
+    const std::string payload(buf.get(), n);
+    if (!force && last_registry_fp_ == payload) {
         return true;
     }
-    last_registry_fp_ = buf;
-    return client_->Publish("face/registry", buf, 0, true);
+    last_registry_fp_ = payload;
+    return client_->Publish("face/registry", payload.c_str(), 0, true);
 #endif
 }
 

@@ -40,8 +40,10 @@ static TaskHandle_t s_task = nullptr;
 static std::atomic<bool> s_user_enabled{DEEP_DOG_FACE_AI_DEFAULT_ENABLED != 0};
 static std::atomic<bool> s_recognition_enabled{true};
 static std::atomic<bool> s_runtime_started{false};
+static std::atomic<bool> s_runtime_start_inflight{false};
 static std::atomic<int> s_detect_interval_ms{DEEP_DOG_FACE_AI_MIN_INTERVAL_MS};
 static std::atomic<uint8_t> s_pipeline{static_cast<uint8_t>(DeepDogFacePipeline::Live)};
+static std::atomic<bool> s_vision_rtsp_active{false};
 static int64_t s_last_submit_us = 0;
 static int64_t s_last_recog_us = 0;
 static std::mutex s_snap_mu;
@@ -410,12 +412,59 @@ static void FaceAiTask(void* /*arg*/) {
     }
 }
 
+static void TeardownRuntimeTask() {
+    if (s_task) {
+        vTaskDelete(s_task);
+        s_task = nullptr;
+    }
+    if (s_queue) {
+        FaceFrameJob j{};
+        while (xQueueReceive(s_queue, &j, 0) == pdTRUE) {
+            if (j.data) {
+                heap_caps_free(j.data);
+            }
+        }
+        vQueueDelete(s_queue);
+        s_queue = nullptr;
+    }
+}
+
+static void TeardownRuntimeAll() {
+    TeardownRuntimeTask();
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    DeepDogImmichDeinit();
+#endif
+#if DEEP_DOG_FACE_RECOG_ENABLE
+    DeepDogFaceRecognizeDeinit();
+#endif
+    DeepDogFaceDetectDeinit();
+}
+
+static void LogRuntimeStartFail(const char* step) {
+    ESP_LOGW(TAG, "runtime start failed at %s (largest_int=%u free_int=%u)", step,
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+
 bool DeepDogFaceAiRuntimeStart() {
-    if (s_runtime_started.exchange(true)) {
+    if (s_runtime_started.load(std::memory_order_acquire)) {
         return true;
     }
+    // 先占 task 栈再加载模型，避免 RTSP 等场景下 internal 碎片化导致 xTaskCreate 失败
+    s_queue = xQueueCreate(1, sizeof(FaceFrameJob));
+    if (!s_queue) {
+        LogRuntimeStartFail("queue");
+        return false;
+    }
+    if (xTaskCreate(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task) != pdPASS) {
+        LogRuntimeStartFail("dog_face_ai task");
+        vQueueDelete(s_queue);
+        s_queue = nullptr;
+        return false;
+    }
     if (!DeepDogFaceDetectInit()) {
-        s_runtime_started = false;
+        LogRuntimeStartFail("detect init");
+        TeardownRuntimeAll();
         return false;
     }
 #if DEEP_DOG_FACE_RECOG_ENABLE
@@ -430,33 +479,7 @@ bool DeepDogFaceAiRuntimeStart() {
         DeepDogImmichApplyDefaultsIfEmpty();
     }
 #endif
-    s_queue = xQueueCreate(1, sizeof(FaceFrameJob));
-    if (!s_queue) {
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-        DeepDogImmichDeinit();
-#endif
-#if DEEP_DOG_FACE_RECOG_ENABLE
-        DeepDogFaceRecognizeDeinit();
-#endif
-        DeepDogFaceDetectDeinit();
-        s_runtime_started = false;
-        return false;
-    }
-    // facedb/FAT 会关 flash cache；任务栈必须在内部 DRAM（PSRAM 栈会触发
-    // esp_task_stack_is_sane_cache_disabled 断言，导致采帧/推流中断）。
-    if (xTaskCreate(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task) != pdPASS) {
-        vQueueDelete(s_queue);
-        s_queue = nullptr;
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-        DeepDogImmichDeinit();
-#endif
-#if DEEP_DOG_FACE_RECOG_ENABLE
-        DeepDogFaceRecognizeDeinit();
-#endif
-        DeepDogFaceDetectDeinit();
-        s_runtime_started = false;
-        return false;
-    }
+    s_runtime_started.store(true, std::memory_order_release);
     ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms, recog_min=%d ms, during_rtsp=%d, recog=%d immich=%d)",
              DEEP_DOG_FACE_AI_MIN_INTERVAL_MS, DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS, DEEP_DOG_FACE_AI_DURING_RTSP,
              DEEP_DOG_FACE_RECOG_ENABLE, DEEP_DOG_FACE_IMMICH_ENABLE);
@@ -467,38 +490,45 @@ void DeepDogFaceAiRuntimeStop() {
     if (!s_runtime_started.load()) {
         return;
     }
-    if (s_task) {
-        vTaskDeleteWithCaps(s_task);
-        s_task = nullptr;
+    TeardownRuntimeAll();
+    s_runtime_started.store(false, std::memory_order_release);
+}
+
+static void FaceRuntimeStartWorker(void*) {
+    if (!s_user_enabled.load(std::memory_order_acquire)) {
+        s_runtime_start_inflight.store(false, std::memory_order_release);
+        vTaskDelete(nullptr);
+        return;
     }
-    if (s_queue) {
-        FaceFrameJob j{};
-        while (xQueueReceive(s_queue, &j, 0) == pdTRUE) {
-            if (j.data) {
-                heap_caps_free(j.data);
-            }
-        }
-        vQueueDelete(s_queue);
-        s_queue = nullptr;
+    if (s_runtime_started.load(std::memory_order_acquire)) {
+        s_runtime_start_inflight.store(false, std::memory_order_release);
+        vTaskDelete(nullptr);
+        return;
     }
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-    DeepDogImmichDeinit();
-#endif
-#if DEEP_DOG_FACE_RECOG_ENABLE
-    DeepDogFaceRecognizeDeinit();
-#endif
-    DeepDogFaceDetectDeinit();
-    s_runtime_started = false;
+    if (!DeepDogFaceAiRuntimeStart()) {
+        ESP_LOGW(TAG, "deferred runtime start failed");
+        // 保留 user_enabled：status 仍显示用户意图；下次 face/cmd 可重试
+    } else if (!s_user_enabled.load(std::memory_order_acquire)) {
+        // 启动过程中用户已关检测：不跑推理，但 runtime 已就绪
+    }
+    s_runtime_start_inflight.store(false, std::memory_order_release);
+    vTaskDelete(nullptr);
 }
 
 void DeepDogFaceAiSetEnabled(bool on) {
     if (on) {
         if (!s_runtime_started.load(std::memory_order_acquire)) {
-            if (!DeepDogFaceAiRuntimeStart()) {
-                ESP_LOGW(TAG, "SetEnabled(true) failed: runtime start failed");
-                return;
+            if (!s_runtime_start_inflight.exchange(true, std::memory_order_acq_rel)) {
+                // 模型加载栈深；禁止在 mqtt_task（~6KB）上同步 RuntimeStart
+                if (xTaskCreate(FaceRuntimeStartWorker, "face_boot", 16384, nullptr, 2, nullptr) != pdPASS) {
+                    s_runtime_start_inflight.store(false, std::memory_order_release);
+                    ESP_LOGW(TAG, "SetEnabled(true) failed: face_boot task");
+                    return;
+                }
             }
         }
+    } else {
+        s_runtime_start_inflight.store(false, std::memory_order_release);
     }
     s_user_enabled.store(on, std::memory_order_relaxed);
     if (!on) {
@@ -551,6 +581,14 @@ int DeepDogFaceAiGetDetectIntervalMs() {
     return s_detect_interval_ms.load(std::memory_order_relaxed);
 }
 
+void DeepDogFaceAiSetVisionRtspActive(bool active) {
+    s_vision_rtsp_active.store(active, std::memory_order_relaxed);
+}
+
+bool DeepDogFaceAiIsVisionRtspActive() {
+    return s_vision_rtsp_active.load(std::memory_order_relaxed);
+}
+
 bool DeepDogFaceAiClearDb() {
 #if DEEP_DOG_FACE_RECOG_ENABLE
     const bool ok = DeepDogFaceRecognizeClearAll();
@@ -572,14 +610,20 @@ bool DeepDogFaceAiClearDb() {
 }
 
 void DeepDogFaceAiSubmitFrameIfDue(const uint8_t* rgb565, size_t len, uint16_t width, uint16_t height) {
-    if (!s_runtime_started.load() || !rgb565 || width == 0 || height == 0) {
+    if (!s_runtime_started.load(std::memory_order_acquire) || !s_queue || !rgb565 || width == 0 || height == 0) {
         return;
     }
     if (!s_user_enabled.load(std::memory_order_relaxed)) {
         return;
     }
     const int64_t now = esp_timer_get_time();
-    const int interval_ms = s_detect_interval_ms.load(std::memory_order_relaxed);
+    int interval_ms = s_detect_interval_ms.load(std::memory_order_relaxed);
+#if DEEP_DOG_FACE_AI_DURING_RTSP
+    if (s_vision_rtsp_active.load(std::memory_order_relaxed) &&
+        interval_ms < DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS) {
+        interval_ms = DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS;
+    }
+#endif
     if ((now - s_last_submit_us) < (int64_t)interval_ms * 1000) {
         return;
     }
@@ -707,6 +751,10 @@ DeepDogFacePipeline DeepDogFaceAiGetPipeline() {
 void DeepDogFaceAiSetDetectIntervalMs(int) {}
 int DeepDogFaceAiGetDetectIntervalMs() {
     return DEEP_DOG_FACE_AI_MIN_INTERVAL_MS;
+}
+void DeepDogFaceAiSetVisionRtspActive(bool) {}
+bool DeepDogFaceAiIsVisionRtspActive() {
+    return false;
 }
 bool DeepDogFaceAiClearDb() {
     return true;

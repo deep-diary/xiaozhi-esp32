@@ -18,7 +18,8 @@
                 "# CONFIG_FLASH_HUMAN_FACE_FEAT_MBF_S8_V1 is not set",
                 "CONFIG_HUMAN_FACE_FEAT_MFN_S8_V1=y",
                 "# CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA is not set",
-                "CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_PARTITION=y"
+                "CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_PARTITION=y",
+                "CONFIG_FREERTOS_USE_TRACE_FACILITY=y"
             ]
         }
     ]

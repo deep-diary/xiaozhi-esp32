@@ -166,6 +166,9 @@ void VisionFrameHub::SetPublishMode(VisionPublishMode mode) {
         jpeg_latest_.clear();
     }
     ESP_LOGI(TAG, "publish mode -> %s", VisionPublishModeStr(mode));
+#if DEEP_DOG_FACE_AI_ENABLE
+    DeepDogFaceAiSetVisionRtspActive(mode == VisionPublishMode::RtspPush);
+#endif
 }
 
 void VisionFrameHub::PublishJpeg(std::vector<uint8_t>&& jpeg) {

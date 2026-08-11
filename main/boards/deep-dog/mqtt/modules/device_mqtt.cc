@@ -1,5 +1,6 @@
 #include "mqtt/modules/device_mqtt.h"
 
+#include "mqtt/device_diagnostics.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "config.h"
@@ -235,6 +236,8 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     }
     cJSON_AddBoolToObject(health, "ok", cJSON_GetArraySize(warn) == 0);
     cJSON_AddItemToObject(health, "warn", warn);
+
+    DeepDogDeviceDiagnosticsAppendTasks(root);
 
     const int64_t ts = UnixTs();
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));

@@ -135,6 +135,7 @@
 #include "pairing/pairing_mcp.h"
 #if DEEP_DOG_FACE_AI_ENABLE
 #include "face_mcp.h"
+#include "board_diagnostics_mcp.h"
 #endif
 #endif
 
@@ -745,6 +746,7 @@ private:
 #if DEEP_DOG_FACE_AI_ENABLE
         RegisterFaceMcpTools(mcp_server);
 #endif
+        RegisterBoardDiagnosticsMcpTools(mcp_server);
 #if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_LED_ENABLE && !DEEP_DOG_SERVO_ENABLE && !DEEP_DOG_MQTT_ENABLE && !DEEP_DOG_FACE_AI_ENABLE
         (void)mcp_server;
 #endif

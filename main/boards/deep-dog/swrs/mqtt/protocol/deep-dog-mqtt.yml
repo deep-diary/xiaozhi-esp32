@@ -263,6 +263,17 @@ topics:
             type: array
             items: { type: string }
             note: "e.g. low_internal_heap (<32KiB free); motor faults stay in dog/status"
+      task_count: { type: int, optional: true, note: "requires CONFIG_FREERTOS_USE_TRACE_FACILITY" }
+      tasks:
+        type: array
+        optional: true
+        items:
+          type: object
+          fields:
+            name: { type: string }
+            prio: { type: int }
+            stack_hwm: { type: int, note: "FreeRTOS high water mark bytes" }
+            state: { type: int, note: "eTaskState enum value" }
       ts: { type: int }
       ts_iso: { type: string, optional: true }
 
@@ -362,9 +373,9 @@ topics:
       enabled: { type: bool, optional: true, note: "master switch; default false at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED); lazy-loads runtime on first true" }
       action:
         type: enum
-        values: [clear_db, rename, delete_one, merge, refresh_immich, set_immich_config, ping_immich]
+        values: [clear_db, rename, delete_one, merge, refresh_immich, set_immich_config, ping_immich, refresh_status]
         optional: true
-        note: "clear_db= wipe all; merge=alias; set_immich_config= NVS fdog_im; ping_immich= probe server/ping"
+        note: "clear_db= wipe all; merge=alias; refresh_status= force uplink face/status (UI sync); set_immich_config= NVS fdog_im; ping_immich= probe server/ping"
       local_id: { type: int, optional: true }
       target_local_id: { type: int, optional: true, note: "merge canonical target" }
       display_name: { type: string, optional: true, note: "rename" }
@@ -388,10 +399,12 @@ topics:
     dir: uplink
     qos: 0
     retain: false
-    when: on_change_or_poll
+    when: on_change_or_poll_heartbeat
+    note: "retain=false; ~30s forced publish of control fields (enabled/recognize_enabled) for late subscribers; boxes on_change when detect on"
     http: "GET /api/face"
     payload:
       enabled: { type: bool }
+      recognize_enabled: { type: bool, optional: true }
       pipeline: { type: enum, values: [live, identity], optional: true }
       detect_interval_ms: { type: int, optional: true }
       has_person: { type: bool, alias: has_face }
@@ -424,7 +437,8 @@ topics:
     dir: uplink
     qos: 0
     retain: true
-    when: on_enroll_bind_rename_merge_delete_clear
+    when: on_connect, on_recognizer_ready, on_face_cmd, on_enroll_bind_rename_merge_delete_clear
+    note: "MQTT connect publishes current snapshot; recognizer NVS restore must republish to overwrite stale empty retain when Face AI lazy-starts"
     payload:
       version: { type: int }
       count: { type: int }

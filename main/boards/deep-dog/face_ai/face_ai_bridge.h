@@ -17,6 +17,9 @@ DeepDogFacePipeline DeepDogFaceAiGetPipeline();
 /** 夹紧到 [INTERVAL_MIN, INTERVAL_MAX] 后生效。 */
 void DeepDogFaceAiSetDetectIntervalMs(int ms);
 int DeepDogFaceAiGetDetectIntervalMs();
+/** vision_hub RTSP 推流活跃时 true；用于抬高送帧间隔下限。 */
+void DeepDogFaceAiSetVisionRtspActive(bool active);
+bool DeepDogFaceAiIsVisionRtspActive();
 /** 清空本地已注册人脸（facedb+NVS+session+快照）。 */
 bool DeepDogFaceAiClearDb();
 void DeepDogFaceAiSubmitFrameIfDue(const uint8_t* rgb565, size_t len, uint16_t width, uint16_t height);

@@ -45,6 +45,11 @@
 #define DEEP_DOG_FACE_AI_DURING_RTSP 1
 #endif
 
+/** RTSP/H264 推流活跃时送帧最小间隔下限（ms），减轻与 vision_hub 并发 WDT */
+#ifndef DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS
+#define DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS 1500
+#endif
+
 /** 1=检测前对 RGB565 每像素做高/低字节对调（仅在 INPUT_RGB888=0 时有意义） */
 #ifndef DEEP_DOG_FACE_DETECT_RGB565_SWAP
 #define DEEP_DOG_FACE_DETECT_RGB565_SWAP 0

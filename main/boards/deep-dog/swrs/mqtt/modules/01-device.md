@@ -79,6 +79,8 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 | `wifi_channel` | int | 否 | 信道 |
 | `health.ok` | bool | 否 | 无系统级告警时为 `true` |
 | `health.warn` | string[] | 否 | 如 `low_internal_heap`（internal free &lt; 32KiB） |
+| `task_count` | int | 否 | 当前 FreeRTOS 任务数（需 `CONFIG_FREERTOS_USE_TRACE_FACILITY`） |
+| `tasks[]` | array | 否 | `{ name, prio, stack_hwm, state }`；`stack_hwm` 为栈高水位（字节），用于 RAM 审计 |
 | `ts` / `ts_iso` | int / string | 是 / 否 | 时间戳 |
 
 ## 样例 JSON · `device/info`

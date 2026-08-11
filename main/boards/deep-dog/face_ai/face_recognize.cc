@@ -555,6 +555,9 @@ bool DeepDogFaceRecognizeInit() {
     s_ready = true;
     ESP_LOGI(TAG, "recognizer ready (feats=%d meta=%d next_id=%d thr=%.2f multi=%d)", n, s_meta_count, s_next_id,
              (double)DEEP_DOG_FACE_RECOG_SIM_THR, DEEP_DOG_FACE_RECOG_MULTI_MAX);
+    if (n > 0 || s_meta_count > 0) {
+        NotifyRegistryChanged();
+    }
     return true;
 }
 
