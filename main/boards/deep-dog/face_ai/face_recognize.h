@@ -30,6 +30,8 @@ bool DeepDogFaceRecognizeDeleteOne(int local_id);
 bool DeepDogFaceRecognizeMergeAlias(int source_local_id, int target_local_id);
 
 int DeepDogFaceRecognizeListCanonical(std::vector<DeepDogFaceEnrolledEntry>* out);
+int DeepDogFaceRecognizeGetFeatCount();
+int DeepDogFaceRecognizeGetMaxFeats();
 size_t DeepDogFaceRecognizeFormatRegistryJson(char* buf, size_t buf_size);
 
 typedef bool (*DeepDogFacePendingImmichVisitFn)(int local_id, const char* asset_id, void* ctx);

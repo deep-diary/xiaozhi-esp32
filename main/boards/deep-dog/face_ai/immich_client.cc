@@ -45,6 +45,9 @@ static bool s_started = false;
 static char s_api_url[96] = DEEP_DOG_FACE_IMMICH_DEFAULT_URL;
 static char s_api_key[96] = {};
 static uint8_t s_delete_asset = DEEP_DOG_FACE_IMMICH_DELETE_ASSET ? 1 : 0;
+static double s_latitude = 0.0;
+static double s_longitude = 0.0;
+static bool s_gps_configured = false;
 static std::atomic<int> s_force_refresh_id{0};
 static std::atomic<int> s_inflight_id{0};
 static int64_t s_backoff_until_us[DEEP_DOG_FACE_RECOG_MAX + 1]{};
@@ -95,6 +98,22 @@ static void LoadConfigFromNvs() {
         s_delete_asset = del ? 1 : 0;
     } else {
         s_delete_asset = DEEP_DOG_FACE_IMMICH_DELETE_ASSET ? 1 : 0;
+    }
+    uint8_t gps_cfg = 0;
+    if (nvs_get_u8(h, "gps_cfg", &gps_cfg) == ESP_OK && gps_cfg) {
+        double lat = 0.0;
+        double lon = 0.0;
+        size_t blob_sz = sizeof(lat);
+        if (nvs_get_blob(h, "gps_lat", &lat, &blob_sz) == ESP_OK && blob_sz == sizeof(lat)) {
+            blob_sz = sizeof(lon);
+            if (nvs_get_blob(h, "gps_lon", &lon, &blob_sz) == ESP_OK && blob_sz == sizeof(lon)) {
+                s_latitude = lat;
+                s_longitude = lon;
+                s_gps_configured = true;
+            }
+        }
+    } else {
+        s_gps_configured = false;
     }
     nvs_close(h);
 }
@@ -161,6 +180,15 @@ static bool SaveConfigToNvs() {
         err = nvs_set_u8(h, "del_asset", s_delete_asset ? 1 : 0);
     }
     if (err == ESP_OK) {
+        err = nvs_set_u8(h, "gps_cfg", s_gps_configured ? 1 : 0);
+    }
+    if (err == ESP_OK && s_gps_configured) {
+        err = nvs_set_blob(h, "gps_lat", &s_latitude, sizeof(s_latitude));
+    }
+    if (err == ESP_OK && s_gps_configured) {
+        err = nvs_set_blob(h, "gps_lon", &s_longitude, sizeof(s_longitude));
+    }
+    if (err == ESP_OK) {
         err = nvs_commit(h);
     }
     nvs_close(h);
@@ -172,6 +200,48 @@ static void TrimTrailingSlash(char* url) {
     while (n > 0 && url[n - 1] == '/') {
         url[--n] = '\0';
     }
+}
+
+static void FormatUtcIso8601Ms(char* buf, size_t sz) {
+    if (!buf || sz < 25) {
+        if (buf && sz) {
+            buf[0] = '\0';
+        }
+        return;
+    }
+    const time_t now = time(nullptr);
+    if (now <= 1000000000) {
+        strncpy(buf, "1970-01-01T00:00:00.000Z", sz - 1);
+        buf[sz - 1] = '\0';
+        return;
+    }
+    struct tm tm_utc {};
+    gmtime_r(&now, &tm_utc);
+    if (strftime(buf, sz, "%Y-%m-%dT%H:%M:%S.000Z", &tm_utc) == 0) {
+        strncpy(buf, "1970-01-01T00:00:00.000Z", sz - 1);
+        buf[sz - 1] = '\0';
+    }
+}
+
+static bool PutAssetGps(const char* asset_id) {
+    if (!asset_id || !asset_id[0] || !s_gps_configured) {
+        return false;
+    }
+    char url[160];
+    snprintf(url, sizeof(url), "%s/assets/%s", s_api_url, asset_id);
+    char body[96];
+    const int body_len =
+        snprintf(body, sizeof(body), "{\"latitude\":%.7f,\"longitude\":%.7f}", s_latitude, s_longitude);
+    if (body_len <= 0 || (size_t)body_len >= sizeof(body)) {
+        return false;
+    }
+    HttpBuf resp{};
+    const int status = HttpDo(HTTP_METHOD_PUT, url, "application/json", (const uint8_t*)body,
+                              (size_t)body_len, &resp);
+    heap_caps_free(resp.data);
+    const bool ok = (status == 200);
+    ESP_LOGI(TAG, "asset gps put id=%s http=%d ok=%d", asset_id, status, ok ? 1 : 0);
+    return ok;
 }
 
 static esp_err_t HttpEvent(esp_http_client_event_t* evt) {
@@ -283,15 +353,17 @@ static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out
              (unsigned)(esp_timer_get_time() & 0xffffffffu));
 
     char meta[512];
+    char iso_ts[40];
+    FormatUtcIso8601Ms(iso_ts, sizeof(iso_ts));
     int meta_len = snprintf(
         meta, sizeof(meta),
         "--%s\r\nContent-Disposition: form-data; name=\"deviceAssetId\"\r\n\r\n%s\r\n"
         "--%s\r\nContent-Disposition: form-data; name=\"deviceId\"\r\n\r\ndeep-dog\r\n"
-        "--%s\r\nContent-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n2026-01-01T00:00:00.000Z\r\n"
-        "--%s\r\nContent-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n2026-01-01T00:00:00.000Z\r\n"
+        "--%s\r\nContent-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n%s\r\n"
+        "--%s\r\nContent-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n%s\r\n"
         "--%s\r\nContent-Disposition: form-data; name=\"assetData\"; filename=\"face.jpg\"\r\n"
         "Content-Type: image/jpeg\r\n\r\n",
-        boundary, device_asset_id, boundary, boundary, boundary, boundary);
+        boundary, device_asset_id, boundary, boundary, iso_ts, boundary, iso_ts, boundary);
     if (meta_len <= 0 || (size_t)meta_len >= sizeof(meta)) {
         return false;
     }
@@ -455,6 +527,7 @@ static void ProcessJob(ImmichJob job) {
 
         (void)DeepDogFaceRecognizeBindImmichAsset(job.local_id, asset_id);
         SetLastResult("upload_ok", job.local_id);
+        (void)PutAssetGps(asset_id);
 
         if (PollAssetForName(job.local_id, asset_id)) {
             if (s_delete_asset) {
@@ -519,6 +592,10 @@ bool DeepDogImmichInit() {
     return true;
 }
 
+bool DeepDogImmichIsWorkerReady() {
+    return s_started;
+}
+
 void DeepDogImmichDeinit() {
     if (!s_started) {
         return;
@@ -544,7 +621,8 @@ bool DeepDogImmichIsConfigured() {
     return s_api_key[0] != '\0';
 }
 
-bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset) {
+bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset,
+                            const double* latitude, const double* longitude) {
     const bool has_key = api_key && api_key[0];
     if (!has_key && !DeepDogImmichIsConfigured()) {
         return false;
@@ -567,9 +645,14 @@ bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete
     if (delete_asset == 0 || delete_asset == 1) {
         s_delete_asset = (uint8_t)delete_asset;
     }
+    if (latitude && longitude) {
+        s_latitude = *latitude;
+        s_longitude = *longitude;
+        s_gps_configured = true;
+    }
     const bool ok = SaveConfigToNvs();
-    ESP_LOGI(TAG, "config saved ok=%d url=%s key_len=%u delete_asset=%u", (int)ok, s_api_url,
-             (unsigned)strlen(s_api_key), (unsigned)s_delete_asset);
+    ESP_LOGI(TAG, "config saved ok=%d url=%s key_len=%u delete_asset=%u gps=%d", (int)ok, s_api_url,
+             (unsigned)strlen(s_api_key), (unsigned)s_delete_asset, s_gps_configured ? 1 : 0);
     if (ok) {
         (void)DeepDogImmichPingServer();
     } else {
@@ -581,6 +664,20 @@ bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete
 size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size) {
     if (!buf || buf_size < 32) {
         return 0;
+    }
+    if (s_gps_configured) {
+        return (size_t)snprintf(
+            buf, buf_size,
+            "{\"configured\":%s,\"url\":\"%s\",\"key_len\":%u,\"delete_asset\":%u,\"latitude\":%.7f,"
+            "\"longitude\":%.7f,\"server_ok\":%s,"
+            "\"server_http\":%d,\"ping_ms\":%d,\"inflight\":%d,\"last\":\"%s\",\"last_local_id\":%d,"
+            "\"ts\":%ld}",
+            DeepDogImmichIsConfigured() ? "true" : "false", s_api_url, (unsigned)strlen(s_api_key),
+            (unsigned)s_delete_asset, s_latitude, s_longitude, s_server_ok ? "true" : "false",
+            s_server_http, s_ping_ms, s_inflight_id.load(std::memory_order_relaxed), s_last_result,
+            s_last_local_id,
+            static_cast<long>(time(nullptr) > 1000000000 ? time(nullptr)
+                                                         : esp_timer_get_time() / 1000000LL));
     }
     return (size_t)snprintf(
         buf, buf_size,
@@ -600,6 +697,9 @@ bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool
     auto free_jpeg = [&]() {
         heap_caps_free(jpeg);
     };
+    if (!s_started) {
+        (void)DeepDogImmichInit();
+    }
     if (!s_started || !s_queue || local_id <= 0 || jpeg_len == 0) {
         free_jpeg();
         return false;
@@ -681,13 +781,16 @@ bool DeepDogImmichPollStoredAsset(int local_id) {
 #else  // stub
 
 bool DeepDogImmichInit() {
-    return true;
+    return false;
+}
+bool DeepDogImmichIsWorkerReady() {
+    return false;
 }
 void DeepDogImmichDeinit() {}
 bool DeepDogImmichIsConfigured() {
     return false;
 }
-bool DeepDogImmichSetConfig(const char*, const char*, int) {
+bool DeepDogImmichSetConfig(const char*, const char*, int, const double*, const double*) {
     return false;
 }
 void DeepDogImmichApplyDefaultsIfEmpty() {}

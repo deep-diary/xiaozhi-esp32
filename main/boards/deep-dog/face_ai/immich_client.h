@@ -10,6 +10,9 @@
 bool DeepDogImmichInit();
 void DeepDogImmichDeinit();
 
+/** dog_immich 任务是否已创建（upload/poll 依赖此项） */
+bool DeepDogImmichIsWorkerReady();
+
 bool DeepDogImmichIsConfigured();
 /**
  * 写入 NVS。api_url 可空则用默认局域网地址。
@@ -17,7 +20,8 @@ bool DeepDogImmichIsConfigured();
  * 若 api_key 为空但已配置过 Key，仍可只更新 delete_asset。
  * 禁止把 Key 打进完整日志。
  */
-bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset = -1);
+bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset = -1,
+                            const double* latitude = nullptr, const double* longitude = nullptr);
 
 /** NVS 无 Key 时应用编译期默认 URL/Key（若有）并写入 NVS。 */
 void DeepDogImmichApplyDefaultsIfEmpty();

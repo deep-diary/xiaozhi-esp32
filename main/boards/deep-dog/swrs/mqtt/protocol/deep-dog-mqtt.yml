@@ -386,6 +386,8 @@ topics:
       api_url: { type: string, optional: true, note: "Immich API root for set_immich_config" }
       api_key: { type: string, optional: true, note: "Immich x-api-key; never echoed on uplink" }
       delete_asset: { type: int, optional: true, note: "0 keep temp asset / 1 delete after naming" }
+      latitude: { type: number, optional: true, note: "home GPS for Immich timeline (set_immich_config, with longitude)" }
+      longitude: { type: number, optional: true, note: "home GPS for Immich timeline (set_immich_config, with latitude)" }
       recognize_enabled: { type: bool, optional: true, note: "false=detect only, no enroll" }
       pipeline:
         type: enum
@@ -445,7 +447,9 @@ topics:
     note: "MQTT connect publishes current snapshot; recognizer NVS restore must republish to overwrite stale empty retain when Face AI lazy-starts"
     payload:
       version: { type: int }
-      count: { type: int }
+      count: { type: int, note: "canonical entries count" }
+      feat_count: { type: int, note: "embedding slots in use (may differ from count when aliases exist)" }
+      max_count: { type: int, note: "DEEP_DOG_FACE_RECOG_MAX (128)" }
       entries:
         type: array
         item:
@@ -454,7 +458,8 @@ topics:
           immich_person_id: { type: string, optional: true }
           immich_asset_id: { type: string, optional: true }
           aliases: { type: array, item: { type: int }, optional: true }
-          updated_at: { type: int }
+          updated_at: { type: int, note: "meta write time (rename/Immich bind)" }
+          last_seen_at: { type: int, optional: true, note: "Unix sec, last successful recognition" }
       ts: { type: int }
 
   face/immich/status:

@@ -92,13 +92,25 @@ bool HandleCmdAction(const char* action, cJSON* root) {
         const cJSON* url = cJSON_GetObjectItem(root, "api_url");
         const cJSON* key = cJSON_GetObjectItem(root, "api_key");
         const cJSON* del = cJSON_GetObjectItem(root, "delete_asset");
+        const cJSON* lat = cJSON_GetObjectItem(root, "latitude");
+        const cJSON* lon = cJSON_GetObjectItem(root, "longitude");
         const char* url_s = cJSON_IsString(url) ? url->valuestring : nullptr;
         const char* key_s = cJSON_IsString(key) ? key->valuestring : nullptr;
         int delete_asset = -1;
         if (cJSON_IsNumber(del)) {
             delete_asset = del->valueint ? 1 : 0;
         }
-        const bool ok = DeepDogImmichSetConfig(url_s, key_s, delete_asset);
+        double lat_v = 0.0;
+        double lon_v = 0.0;
+        const double* lat_p = nullptr;
+        const double* lon_p = nullptr;
+        if (cJSON_IsNumber(lat) && cJSON_IsNumber(lon)) {
+            lat_v = lat->valuedouble;
+            lon_v = lon->valuedouble;
+            lat_p = &lat_v;
+            lon_p = &lon_v;
+        }
+        const bool ok = DeepDogImmichSetConfig(url_s, key_s, delete_asset, lat_p, lon_p);
         ESP_LOGI(TAG, "face/cmd set_immich_config ok=%d", ok ? 1 : 0);
         return ok;
     }
@@ -300,14 +312,27 @@ void DeepDogFaceMqtt::OnMessage(const std::string& topic, const std::string& pay
     const cJSON* api_url = cJSON_GetObjectItem(root, "api_url");
     const cJSON* api_key = cJSON_GetObjectItem(root, "api_key");
     const cJSON* del_asset = cJSON_GetObjectItem(root, "delete_asset");
-    if (cJSON_IsString(api_url) || cJSON_IsString(api_key) || cJSON_IsNumber(del_asset)) {
+    const cJSON* lat = cJSON_GetObjectItem(root, "latitude");
+    const cJSON* lon = cJSON_GetObjectItem(root, "longitude");
+    if (cJSON_IsString(api_url) || cJSON_IsString(api_key) || cJSON_IsNumber(del_asset) ||
+        (cJSON_IsNumber(lat) && cJSON_IsNumber(lon))) {
         const char* url_s = cJSON_IsString(api_url) ? api_url->valuestring : nullptr;
         const char* key_s = cJSON_IsString(api_key) ? api_key->valuestring : nullptr;
         int delete_asset = -1;
         if (cJSON_IsNumber(del_asset)) {
             delete_asset = del_asset->valueint ? 1 : 0;
         }
-        if (DeepDogImmichSetConfig(url_s, key_s, delete_asset)) {
+        double lat_v = 0.0;
+        double lon_v = 0.0;
+        const double* lat_p = nullptr;
+        const double* lon_p = nullptr;
+        if (cJSON_IsNumber(lat) && cJSON_IsNumber(lon)) {
+            lat_v = lat->valuedouble;
+            lon_v = lon->valuedouble;
+            lat_p = &lat_v;
+            lon_p = &lon_v;
+        }
+        if (DeepDogImmichSetConfig(url_s, key_s, delete_asset, lat_p, lon_p)) {
             touched = true;
         }
     }
@@ -365,10 +390,10 @@ bool DeepDogFaceMqtt::PublishRegistry(bool force) {
 #if !DEEP_DOG_FACE_AI_ENABLE
     return client_->Publish("face/registry", "{\"version\":1,\"count\":0,\"entries\":[],\"ts\":0}", 0, true);
 #else
-    auto buf = std::make_unique<char[]>(4096);
-    const size_t n = DeepDogFaceControlFormatRegistryJson(buf.get(), 4096);
+    auto buf = std::make_unique<char[]>(DEEP_DOG_FACE_REGISTRY_JSON_BUF);
+    const size_t n = DeepDogFaceControlFormatRegistryJson(buf.get(), DEEP_DOG_FACE_REGISTRY_JSON_BUF);
     if (n == 0) {
-        ESP_LOGW(TAG, "PublishRegistry: FormatRegistryJson returned 0 (recognizer not ready?)");
+        ESP_LOGW(TAG, "PublishRegistry: FormatRegistryJson returned 0 (recognizer not ready or buf too small?)");
         return false;
     }
     const std::string payload(buf.get(), n);
@@ -391,7 +416,7 @@ bool DeepDogFaceMqtt::PublishImmichStatus(bool force) {
                             "\"last\":\"disabled\",\"last_local_id\":0,\"ts\":0}",
                             0, true);
 #else
-    char buf[512];
+    char buf[768];
     const size_t n = DeepDogImmichFormatStatusJson(buf, sizeof(buf));
     if (n == 0) {
         return false;

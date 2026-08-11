@@ -62,6 +62,7 @@
 | `api_url` | string | 否 | Immich API 根（`set_immich_config` 或稀疏更新） |
 | `api_key` | string | 否 | Immich Key（写入 NVS；status 仅回 `key_len`） |
 | `delete_asset` | int | 否 | 0 保留临时图 / 1 识别后删除 |
+| `latitude` / `longitude` | number | 否 | 可选家庭 GPS；upload 后 `PUT /assets/{id}` 写入 Immich 时间轴 |
 | `pipeline` | enum | 否 | `live` \| `identity` |
 | `detect_interval_ms` | int | 否 | **200–5000**；越界夹紧；status 回显生效值 |
 | `ts` | int | 否 | Unix 秒 |
@@ -182,6 +183,8 @@
 {
   "version": 1,
   "count": 1,
+  "feat_count": 20,
+  "max_count": 128,
   "entries": [
     {
       "local_id": 2,
@@ -189,12 +192,17 @@
       "immich_person_id": "uuid",
       "immich_asset_id": "asset-uuid",
       "aliases": [3],
-      "updated_at": 1710000000
+      "updated_at": 1710000000,
+      "last_seen_at": 1710001200
     }
   ],
   "ts": 1710000000
 }
 ```
+
+- **`feat_count` / `max_count`**：embedding 槽用量（UI 显示 `20/128`）；`count` 为 canonical 人数。
+- **`last_seen_at`**：上次成功识别（Unix 秒）；与 `updated_at`（meta 写入）分离。
+- **满库 LRU**：`feat_count >= max_count` 时新人 enroll 淘汰 `last_seen_at` 最久槽位（tie：优先 placeholder / 无 Immich）。
 
 ## `person/active`
 

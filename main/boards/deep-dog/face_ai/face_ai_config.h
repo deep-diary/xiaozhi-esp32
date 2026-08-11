@@ -125,7 +125,7 @@
 
 /** 本地库最大 feat 条数（含 alias embedding；canonical 人数通常更少） */
 #ifndef DEEP_DOG_FACE_RECOG_MAX
-#define DEEP_DOG_FACE_RECOG_MAX 64
+#define DEEP_DOG_FACE_RECOG_MAX 128
 #endif
 
 /** 自动 enroll 最低检测 score（质量门控） */
@@ -136,6 +136,11 @@
 /** registry 条目 aliases 数组上限（单 canonical） */
 #ifndef DEEP_DOG_FACE_REGISTRY_MAX_ALIASES
 #define DEEP_DOG_FACE_REGISTRY_MAX_ALIASES 8
+#endif
+
+/** MQTT retain face/registry JSON 缓冲（128 槽 + Immich 字段；4096 不足会截断致前端解析失败） */
+#ifndef DEEP_DOG_FACE_REGISTRY_JSON_BUF
+#define DEEP_DOG_FACE_REGISTRY_JSON_BUF 32768
 #endif
 
 /** 会话去重窗口（ms）：窗口内相似则复用同一 local_id */
@@ -243,7 +248,7 @@
 #define DEEP_DOG_FACE_AI_TASK_STACK 8192
 #endif
 #ifndef DEEP_DOG_FACE_IMMICH_TASK_STACK
-#define DEEP_DOG_FACE_IMMICH_TASK_STACK 10240
+#define DEEP_DOG_FACE_IMMICH_TASK_STACK 8192
 #endif
 #ifndef DEEP_DOG_FACE_BOOT_TASK_STACK
 #define DEEP_DOG_FACE_BOOT_TASK_STACK 16384

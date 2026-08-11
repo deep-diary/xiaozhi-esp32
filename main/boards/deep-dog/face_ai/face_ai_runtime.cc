@@ -327,7 +327,16 @@ static void StickyApplyPrevIds(std::vector<DeepDogFaceBox>* boxes, DeepDogFaceSn
 
 static void FaceAiTask(void* /*arg*/) {
     FaceFrameJob job{};
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    int immich_retry_ticks = 0;
+#endif
     for (;;) {
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+        if (!DeepDogImmichIsWorkerReady() && ++immich_retry_ticks >= 120) {
+            immich_retry_ticks = 0;
+            (void)DeepDogImmichInit();
+        }
+#endif
         if (xQueueReceive(s_queue, &job, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -471,11 +480,6 @@ bool DeepDogFaceAiRuntimeStart() {
         s_queue = nullptr;
         return false;
     }
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-    if (!DeepDogImmichInit()) {
-        ESP_LOGW(TAG, "immich worker init failed (local id still available)");
-    }
-#endif
     if (!DeepDogFaceDetectInit()) {
         LogRuntimeStartFail("detect init");
         TeardownRuntimeAll();
@@ -501,6 +505,10 @@ void DeepDogFaceAiRuntimeStop() {
     s_runtime_started.store(false, std::memory_order_release);
 }
 
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+static void ScheduleImmichWorkerAfterBoot();
+#endif
+
 static void FaceRuntimeStartWorker(void*) {
     if (!s_user_enabled.load(std::memory_order_acquire)) {
         s_runtime_start_inflight.store(false, std::memory_order_release);
@@ -512,15 +520,42 @@ static void FaceRuntimeStartWorker(void*) {
         vTaskDelete(nullptr);
         return;
     }
-    if (!DeepDogFaceAiRuntimeStart()) {
+    const bool started = DeepDogFaceAiRuntimeStart();
+    if (!started) {
         ESP_LOGW(TAG, "deferred runtime start failed");
-        // 保留 user_enabled：status 仍显示用户意图；下次 face/cmd 可重试
-    } else if (!s_user_enabled.load(std::memory_order_acquire)) {
-        // 启动过程中用户已关检测：不跑推理，但 runtime 已就绪
+    } else if (s_user_enabled.load(std::memory_order_acquire)) {
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+        ScheduleImmichWorkerAfterBoot();
+#endif
     }
     s_runtime_start_inflight.store(false, std::memory_order_release);
     vTaskDelete(nullptr);
 }
+
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+/** face_boot 退出释放 16KB internal 后再建 dog_immich（避免模型加载期 largest_int<8K 误报失败）。 */
+static void ImmichLateStartTask(void* /*arg*/) {
+    vTaskDelay(pdMS_TO_TICKS(150));
+    if (DeepDogImmichIsWorkerReady()) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    if (DeepDogImmichInit()) {
+        ESP_LOGI(TAG, "immich worker started (post-boot)");
+    } else {
+        ESP_LOGW(TAG, "immich post-boot init failed (free_int=%u largest_int=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    }
+    vTaskDelete(nullptr);
+}
+
+static void ScheduleImmichWorkerAfterBoot() {
+    if (xTaskCreate(ImmichLateStartTask, "immich_late", 4096, nullptr, 2, nullptr) != pdPASS) {
+        ESP_LOGW(TAG, "immich_late task create failed");
+    }
+}
+#endif
 
 void DeepDogFaceAiSetEnabled(bool on) {
     if (on) {

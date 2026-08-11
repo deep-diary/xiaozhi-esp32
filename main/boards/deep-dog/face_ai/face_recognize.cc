@@ -41,9 +41,21 @@ static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static bool s_fs_mounted = false;
 static bool s_ready = false;
 
-/** meta_ver=3：+immich_asset_id、canonical_id、name_pending */
-static constexpr uint8_t kFaceMetaVer = 3;
+/** meta_ver=4：+last_seen_at（LRU / 上次见面） */
+static constexpr uint8_t kFaceMetaVer = 4;
 static constexpr uint8_t kFaceMetaVerLegacy = 2;
+static constexpr uint8_t kFaceMetaVer3 = 3;
+
+struct FaceMetaV3 {
+    int local_id = 0;
+    int canonical_id = 0;
+    char display_name[32] = {};
+    char immich_person_id[40] = {};
+    char immich_asset_id[48] = {};
+    uint32_t updated_at = 0;
+    uint8_t name_pending = 0;
+    uint8_t reserved[3] = {};
+};
 
 struct FaceMetaV2 {
     int local_id = 0;
@@ -59,6 +71,7 @@ struct FaceMeta {
     char immich_person_id[40] = {};
     char immich_asset_id[48] = {};
     uint32_t updated_at = 0;
+    uint32_t last_seen_at = 0;
     uint8_t name_pending = 0;
     uint8_t reserved[3] = {};
 };
@@ -78,11 +91,80 @@ static FaceMeta s_meta[DEEP_DOG_FACE_RECOG_MAX]{};
 static int s_meta_count = 0;
 static int s_next_id = 1;
 
+static FaceMeta* FindMeta(int local_id);
+
 /** 会话：最近一次成功识别的 feat 向量副本 */
 static float* s_session_feat = nullptr;
 static int s_session_feat_len = 0;
 static int s_session_id = 0;
 static int64_t s_session_us = 0;
+
+static uint32_t NowUnixSec() {
+    const time_t now = time(nullptr);
+    if (now > 1000000000) {
+        return static_cast<uint32_t>(now);
+    }
+    return static_cast<uint32_t>(esp_timer_get_time() / 1000000LL);
+}
+
+static void TouchLastSeen(int local_id) {
+    if (local_id <= 0) {
+        return;
+    }
+    FaceMeta* m = FindMeta(local_id);
+    if (m) {
+        m->last_seen_at = NowUnixSec();
+    }
+    const int cid = DeepDogFaceRecognizeResolveCanonicalId(local_id);
+    if (cid > 0 && cid != local_id) {
+        FaceMeta* c = FindMeta(cid);
+        if (c) {
+            c->last_seen_at = NowUnixSec();
+        }
+    }
+}
+
+static uint32_t MetaLastSeenForLru(const FaceMeta& m) {
+    if (m.last_seen_at > 0) {
+        return m.last_seen_at;
+    }
+    if (m.updated_at > 0) {
+        return m.updated_at / 1000u;
+    }
+    return 0;
+}
+
+static bool EvictOldestFeatSlot() {
+    if (s_meta_count <= 0) {
+        return false;
+    }
+    int victim_id = 0;
+    uint32_t oldest = UINT32_MAX;
+    int victim_score = -1;
+    for (int i = 0; i < s_meta_count; i++) {
+        const FaceMeta& m = s_meta[i];
+        const uint32_t seen = MetaLastSeenForLru(m);
+        int score = 0;
+        if (IsPlaceholderName(m.local_id, m.display_name)) {
+            score += 0;
+        } else {
+            score += 2;
+        }
+        if (m.immich_person_id[0]) {
+            score += 4;
+        }
+        if (victim_id <= 0 || seen < oldest || (seen == oldest && score < victim_score)) {
+            oldest = seen;
+            victim_score = score;
+            victim_id = m.local_id;
+        }
+    }
+    if (victim_id <= 0) {
+        return false;
+    }
+    ESP_LOGI(TAG, "LRU evict local_id=%d last_seen=%u", victim_id, oldest);
+    return DeepDogFaceRecognizeDeleteOne(victim_id);
+}
 
 static float CosineSim(const float* a, const float* b, int n) {
     double dot = 0, na = 0, nb = 0;
@@ -146,6 +228,7 @@ static void MetaToEntry(const FaceMeta& m, DeepDogFaceEnrolledEntry* out) {
     strncpy(out->immich_person_id, m.immich_person_id, sizeof(out->immich_person_id) - 1);
     strncpy(out->immich_asset_id, m.immich_asset_id, sizeof(out->immich_asset_id) - 1);
     out->updated_at = m.updated_at;
+    out->last_seen_at = m.last_seen_at;
     out->name_pending = m.name_pending != 0;
     for (int i = 0; i < s_meta_count && out->alias_count < DEEP_DOG_FACE_REGISTRY_MAX_ALIASES; i++) {
         const FaceMeta& a = s_meta[i];
@@ -204,6 +287,44 @@ static void LoadMetaFromNvs() {
         size_t sz = need;
         if (ver == kFaceMetaVer && nvs_get_blob(h, "meta", s_meta, &sz) == ESP_OK && sz == need) {
             s_meta_count = count;
+        } else if (ver == kFaceMetaVer && sz == sizeof(FaceMetaV3) * count) {
+            std::vector<FaceMetaV3> legacy(count);
+            if (nvs_get_blob(h, "meta", legacy.data(), &sz) == ESP_OK) {
+                s_meta_count = 0;
+                for (int i = 0; i < count && s_meta_count < DEEP_DOG_FACE_RECOG_MAX; i++) {
+                    FaceMeta* m = &s_meta[s_meta_count++];
+                    memset(m, 0, sizeof(*m));
+                    m->local_id = legacy[(size_t)i].local_id;
+                    m->canonical_id = legacy[(size_t)i].canonical_id;
+                    strncpy(m->display_name, legacy[(size_t)i].display_name, sizeof(m->display_name) - 1);
+                    m->updated_at = legacy[(size_t)i].updated_at;
+                    m->last_seen_at = legacy[(size_t)i].updated_at / 1000u;
+                    strncpy(m->immich_person_id, legacy[(size_t)i].immich_person_id, sizeof(m->immich_person_id) - 1);
+                    strncpy(m->immich_asset_id, legacy[(size_t)i].immich_asset_id, sizeof(m->immich_asset_id) - 1);
+                    m->name_pending = legacy[(size_t)i].name_pending;
+                }
+                ESP_LOGI(TAG, "migrated meta ver4(v3-layout)->4 count=%d", s_meta_count);
+                (void)SaveMetaToNvs();
+            }
+        } else if (ver == kFaceMetaVer3 && sz == sizeof(FaceMetaV3) * count) {
+            std::vector<FaceMetaV3> legacy(count);
+            if (nvs_get_blob(h, "meta", legacy.data(), &sz) == ESP_OK) {
+                s_meta_count = 0;
+                for (int i = 0; i < count && s_meta_count < DEEP_DOG_FACE_RECOG_MAX; i++) {
+                    FaceMeta* m = &s_meta[s_meta_count++];
+                    memset(m, 0, sizeof(*m));
+                    m->local_id = legacy[(size_t)i].local_id;
+                    m->canonical_id = legacy[(size_t)i].canonical_id;
+                    strncpy(m->display_name, legacy[(size_t)i].display_name, sizeof(m->display_name) - 1);
+                    m->updated_at = legacy[(size_t)i].updated_at;
+                    m->last_seen_at = legacy[(size_t)i].updated_at / 1000u;
+                    strncpy(m->immich_person_id, legacy[(size_t)i].immich_person_id, sizeof(m->immich_person_id) - 1);
+                    strncpy(m->immich_asset_id, legacy[(size_t)i].immich_asset_id, sizeof(m->immich_asset_id) - 1);
+                    m->name_pending = legacy[(size_t)i].name_pending;
+                }
+                ESP_LOGI(TAG, "migrated meta ver3->4 count=%d", s_meta_count);
+                (void)SaveMetaToNvs();
+            }
         } else if (ver == kFaceMetaVerLegacy && sz == sizeof(FaceMetaV2) * count) {
             std::vector<FaceMetaV2> legacy(count);
             if (nvs_get_blob(h, "meta", legacy.data(), &sz) == ESP_OK) {
@@ -214,6 +335,7 @@ static void LoadMetaFromNvs() {
                     m->local_id = legacy[(size_t)i].local_id;
                     strncpy(m->display_name, legacy[(size_t)i].display_name, sizeof(m->display_name) - 1);
                     m->updated_at = legacy[(size_t)i].updated_at;
+                    m->last_seen_at = legacy[(size_t)i].updated_at / 1000u;
                     strncpy(m->immich_person_id, legacy[(size_t)i].immich_person_id, sizeof(m->immich_person_id) - 1);
                 }
                 ESP_LOGI(TAG, "migrated meta ver2->3 count=%d", s_meta_count);
@@ -415,6 +537,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
                         UpsertMeta(s_session_id);
                     }
                     ApplyMetaToBox(box, s_session_id, DeepDogFaceRecognizeSource::Session);
+                    TouchLastSeen(s_session_id);
                     UpdateSession(s_session_id, fptr, feat_len);
                     return;
                 }
@@ -430,6 +553,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
             (void)SaveMetaToNvs();
         }
         ApplyMetaToBox(box, id, DeepDogFaceRecognizeSource::Nvs);
+        TouchLastSeen(id);
         if (update_session && feat_t && feat_len > 0) {
             auto* fptr = feat_t->get_element_ptr<float>();
             if (fptr) {
@@ -443,8 +567,10 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
     }
 
     if (s_recog->get_num_feats() >= DEEP_DOG_FACE_RECOG_MAX) {
-        ESP_LOGW(TAG, "gallery full (%d), skip enroll", DEEP_DOG_FACE_RECOG_MAX);
-        return;
+        if (!EvictOldestFeatSlot()) {
+            ESP_LOGW(TAG, "gallery full (%d), evict failed", DEEP_DOG_FACE_RECOG_MAX);
+            return;
+        }
     }
     if (box->score > 0.f && box->score < DEEP_DOG_FACE_RECOG_MIN_ENROLL_SCORE) {
         ESP_LOGD(TAG, "enroll skipped low score=%.2f", box->score);
@@ -466,6 +592,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
     EnsureDisplayName(m);
     (void)SaveMetaToNvs();
     ApplyMetaToBox(box, new_id, DeepDogFaceRecognizeSource::Enrolled);
+    TouchLastSeen(new_id);
     NotifyRegistryChanged();
     if (update_session && feat_t && feat_len > 0) {
         auto* fptr = feat_t->get_element_ptr<float>();
@@ -761,7 +888,10 @@ size_t DeepDogFaceRecognizeFormatRegistryJson(char* buf, size_t buf_size) {
     }
     std::vector<DeepDogFaceEnrolledEntry> entries;
     (void)DeepDogFaceRecognizeListCanonical(&entries);
-    int n = snprintf(buf, buf_size, "{\"version\":1,\"count\":%d,\"entries\":[", static_cast<int>(entries.size()));
+    const int feat_count = s_recog ? s_recog->get_num_feats() : 0;
+    int n = snprintf(buf, buf_size,
+                     "{\"version\":1,\"count\":%d,\"feat_count\":%d,\"max_count\":%d,\"entries\":[",
+                     static_cast<int>(entries.size()), feat_count, DEEP_DOG_FACE_RECOG_MAX);
     if (n < 0 || static_cast<size_t>(n) >= buf_size) {
         return 0;
     }
@@ -787,13 +917,20 @@ size_t DeepDogFaceRecognizeFormatRegistryJson(char* buf, size_t buf_size) {
         }
         const int w = snprintf(buf + off, buf_size - off,
                                "%s{\"local_id\":%d,\"display_name\":\"%s\",\"immich_person_id\":\"%s\","
-                               "\"immich_asset_id\":\"%s\",\"name_pending\":%s,\"updated_at\":%u%s}",
+                               "\"immich_asset_id\":\"%s\",\"name_pending\":%s,\"updated_at\":%u,"
+                               "\"last_seen_at\":%u%s}",
                                i ? "," : "", e.local_id, esc, esc_pid, esc_aid, e.name_pending ? "true" : "false",
-                               (unsigned)e.updated_at, e.alias_count > 0 ? aliases : "");
+                               (unsigned)e.updated_at, (unsigned)e.last_seen_at,
+                               e.alias_count > 0 ? aliases : "");
         if (w < 0 || static_cast<size_t>(w) >= buf_size - off) {
             break;
         }
         off += static_cast<size_t>(w);
+    }
+    if (off + 32 >= buf_size) {
+        ESP_LOGW(TAG, "registry json buffer too small (entries=%u need>%u)", (unsigned)entries.size(),
+                 (unsigned)(off + 32));
+        return 0;
     }
     const time_t now = time(nullptr);
     const int64_t ts = (now > 1000000000) ? static_cast<int64_t>(now) : static_cast<int64_t>(esp_timer_get_time() / 1000000LL);
@@ -827,6 +964,14 @@ int DeepDogFaceRecognizeVisitPendingImmich(DeepDogFacePendingImmichVisitFn fn, v
 
 void DeepDogFaceRecognizeSetRegistryChangedCallback(std::function<void()> cb) {
     s_registry_changed_cb = std::move(cb);
+}
+
+int DeepDogFaceRecognizeGetFeatCount() {
+    return s_recog ? s_recog->get_num_feats() : 0;
+}
+
+int DeepDogFaceRecognizeGetMaxFeats() {
+    return DEEP_DOG_FACE_RECOG_MAX;
 }
 
 bool DeepDogFaceRecognizeReady() {
@@ -918,6 +1063,12 @@ bool DeepDogFaceRecognizeMergeAlias(int, int) {
 }
 int DeepDogFaceRecognizeListCanonical(std::vector<DeepDogFaceEnrolledEntry>*) {
     return 0;
+}
+int DeepDogFaceRecognizeGetFeatCount() {
+    return 0;
+}
+int DeepDogFaceRecognizeGetMaxFeats() {
+    return DEEP_DOG_FACE_RECOG_MAX;
 }
 size_t DeepDogFaceRecognizeFormatRegistryJson(char*, size_t) {
     return 0;

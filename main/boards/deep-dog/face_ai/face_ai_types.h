@@ -79,6 +79,8 @@ struct DeepDogFaceEnrolledEntry {
     char immich_person_id[40] = {};
     char immich_asset_id[48] = {};
     uint32_t updated_at = 0;
+    /** Unix 秒；最后一次识别命中该槽（LRU / UI「上次见面」） */
+    uint32_t last_seen_at = 0;
     bool name_pending = false;
     int aliases[DEEP_DOG_FACE_REGISTRY_MAX_ALIASES] = {};
     int alias_count = 0;

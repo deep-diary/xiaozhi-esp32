@@ -16,7 +16,7 @@
 
 | action | 字段 | 说明 |
 |--------|------|------|
-| `set_immich_config` | `api_url?`, `api_key?`, `delete_asset?` | 写入 NVS `fdog_im`；`api_key` 省略则保留原 Key |
+| `set_immich_config` | `api_url?`, `api_key?`, `delete_asset?`, `latitude?`, `longitude?` | 写入 NVS `fdog_im`；GPS 成对下发；upload 后 PUT asset 经纬度 |
 | `ping_immich` | — | 立即 `GET {api_url}/server/ping`，刷新 `face/immich/status` |
 
 也可在**无 action** 时仅带 `api_url` / `api_key` / `delete_asset`（稀疏更新，与 HTTP POST 等价）。
@@ -35,11 +35,14 @@
   "inflight": 0,
   "last": "idle",
   "last_local_id": 0,
+  "latitude": 31.2304,
+  "longitude": 121.4737,
   "ts": 1710000000
 }
 ```
 
 - **禁止**下发 Key 明文；仅 `key_len`。
+- `latitude` / `longitude`：仅当 NVS 已配置 GPS 时出现。
 - `server_ok`：`configured && ping 200`。
 - `last`：`idle` / `no_key` / `upload_ok` / `upload_fail` / `unknown` / `has_name` 等。
 

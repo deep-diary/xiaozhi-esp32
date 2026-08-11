@@ -112,3 +112,13 @@ Key：NVS（`fdog_im`）；禁止 git 明文。
 ## 9. 不包含
 
 DeepDiary 后台中转主路径；Kiosk 正文（[P01](../product/P01-kiosk-personalization.md)）。分辨率提升见 **S06**。
+
+## 10. 时间轴与 GPS
+
+| 阶段 | 做法 | 效果 |
+|------|------|------|
+| **A** | multipart `fileCreatedAt` / `fileModifiedAt` = SNTP 同步后的 UTC ISO8601 | Immich 时间轴按真实拍摄/upload 分散 |
+| **B** | MQTT `set_immich_config` 可选 `latitude`/`longitude` 写入 NVS；upload 成功后 `PUT /assets/{id}` | 地图/地点视图有 pin |
+
+- 禁止写死 `2026-01-01`（会导致时间轴堆叠）。
+- 不推荐公网 IP geolocation（LAN 精度差、隐私与延迟）。
