@@ -402,6 +402,7 @@ bool DeepDogMqtt::Start() {
     impl_->imu.SetSwitchHub(impl_->imu_switch);
 #endif
     impl_->face.SetEnabled(caps.face);
+    DeepDogFaceMqtt::SetDeviceMqttTarget(&impl_->device);
     impl_->track.SetModuleEnabled(caps.track);
     impl_->touch.SetEnabled(caps.touch);
     impl_->touch.SetHub(impl_->touch_hub);

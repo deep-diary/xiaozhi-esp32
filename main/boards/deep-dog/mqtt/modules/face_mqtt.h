@@ -26,6 +26,11 @@ public:
     bool PublishRegistry(bool force = false);
     bool PublishImmichStatus(bool force = false);
 
+    /** 由 face_greet 模拟/识别触发，发布 person/active */
+    void PublishPersonActiveSpeaker(int local_id, const char* display_name, const char* immich_person_id);
+
+    static void SetDeviceMqttTarget(class DeepDogDeviceMqtt* device);
+
 private:
     static void PollTimerCb(void* arg);
     static void RegistryPublishTimerCb(void* arg);

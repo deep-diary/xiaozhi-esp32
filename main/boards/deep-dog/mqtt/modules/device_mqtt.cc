@@ -4,6 +4,8 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "config.h"
+#include "face_ai_config.h"
+#include "face_greet.h"
 #include "system_info.h"
 
 #include <wifi_manager.h>
@@ -238,6 +240,22 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     cJSON_AddItemToObject(health, "warn", warn);
 
     DeepDogDeviceDiagnosticsAppendTasks(root);
+
+#if DEEP_DOG_FACE_AI_ENABLE
+    const DeepDogFaceSpeaker sp = DeepDogFaceGreetGetSpeaker();
+    if (sp.present && sp.local_id > 0) {
+        cJSON* cs = cJSON_AddObjectToObject(root, "current_speaker");
+        cJSON_AddNumberToObject(cs, "local_id", sp.local_id);
+        if (sp.display_name[0]) {
+            cJSON_AddStringToObject(cs, "display_name", sp.display_name);
+        }
+        if (sp.immich_person_id[0]) {
+            cJSON_AddStringToObject(cs, "immich_person_id", sp.immich_person_id);
+        }
+        cJSON_AddNumberToObject(cs, "since", static_cast<double>(sp.since));
+        cJSON_AddStringToObject(cs, "source", DeepDogFaceGreetSourceStr(sp.source));
+    }
+#endif
 
     const int64_t ts = UnixTs();
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));

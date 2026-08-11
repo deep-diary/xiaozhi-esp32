@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <string>
 #include <vector>
 
 /** 人脸统一控制层（S07）：MQTT / MCP / HTTP 共用。 */
@@ -31,3 +32,8 @@ size_t DeepDogFaceControlFormatRegistryJson(char* buf, size_t buf_size);
 void DeepDogFaceControlCopySnapshot(DeepDogFaceSnapshot* out);
 
 void DeepDogFaceControlSetRegistryChangedCallback(std::function<void()> cb);
+
+bool DeepDogFaceControlSetGreetConfig(bool enabled, int gap_sec);
+bool DeepDogFaceControlSimulateGreet(const char* name, int local_id);
+void DeepDogFaceControlClearSpeaker();
+std::string DeepDogFaceControlGetIdentityJson();

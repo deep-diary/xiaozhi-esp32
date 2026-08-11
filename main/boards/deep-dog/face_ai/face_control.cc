@@ -1,6 +1,7 @@
 #include "face_control.h"
 
 #include "face_ai_bridge.h"
+#include "face_greet.h"
 #include "face_recognize.h"
 #include "immich_client.h"
 
@@ -114,5 +115,39 @@ void DeepDogFaceControlSetRegistryChangedCallback(std::function<void()> cb) {
     DeepDogFaceRecognizeSetRegistryChangedCallback(std::move(cb));
 #else
     (void)cb;
+#endif
+}
+
+bool DeepDogFaceControlSetGreetConfig(bool enabled, int gap_sec) {
+#if DEEP_DOG_FACE_AI_ENABLE
+    return DeepDogFaceGreetSetConfig(enabled, gap_sec);
+#else
+    (void)enabled;
+    (void)gap_sec;
+    return false;
+#endif
+}
+
+bool DeepDogFaceControlSimulateGreet(const char* name, int local_id) {
+#if DEEP_DOG_FACE_AI_ENABLE
+    return DeepDogFaceGreetSimulateAndWake(name, local_id);
+#else
+    (void)name;
+    (void)local_id;
+    return false;
+#endif
+}
+
+void DeepDogFaceControlClearSpeaker() {
+#if DEEP_DOG_FACE_AI_ENABLE
+    DeepDogFaceGreetClearSpeaker();
+#endif
+}
+
+std::string DeepDogFaceControlGetIdentityJson() {
+#if DEEP_DOG_FACE_AI_ENABLE
+    return DeepDogFaceGreetFormatIdentityJson();
+#else
+    return "{}";
 #endif
 }

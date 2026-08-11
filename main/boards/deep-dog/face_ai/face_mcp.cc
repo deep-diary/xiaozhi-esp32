@@ -35,6 +35,9 @@ std::string EnrolledListJson(bool include_live) {
         }
         cJSON_AddBoolToObject(o, "name_pending", e.name_pending);
         cJSON_AddNumberToObject(o, "updated_at", e.updated_at);
+        if (e.last_seen_at > 0) {
+            cJSON_AddNumberToObject(o, "last_seen_at", static_cast<double>(e.last_seen_at));
+        }
         if (e.alias_count > 0) {
             cJSON* aliases = cJSON_CreateArray();
             for (int i = 0; i < e.alias_count; ++i) {
@@ -126,6 +129,46 @@ void RegisterFaceMcpTools(McpServer& mcp_server) {
         PropertyList({Property("include_live", kPropertyTypeBoolean, false)}),
         [](const PropertyList& p) -> ReturnValue {
             return EnrolledListJson(p["include_live"].value<bool>());
+        });
+
+    mcp_server.AddTool(
+        "self.face.get_identity",
+        "Return current conversation partner from last face recognition or simulate_greet.",
+        PropertyList(),
+        [](const PropertyList& /*p*/) -> ReturnValue {
+            return DeepDogFaceControlGetIdentityJson();
+        });
+
+    mcp_server.AddTool(
+        "self.face.simulate_greet",
+        "E2E test: inject display_name as current speaker and trigger face_greet wake.",
+        PropertyList({Property("name", kPropertyTypeString, std::string("")),
+                      Property("local_id", kPropertyTypeInteger, 0, 0, DEEP_DOG_FACE_RECOG_MAX)}),
+        [](const PropertyList& p) -> ReturnValue {
+            const std::string name = p["name"].value<std::string>();
+            if (name.empty()) {
+                return std::string("missing name");
+            }
+            return DeepDogFaceControlSimulateGreet(name.c_str(), p["local_id"].value<int>());
+        });
+
+    mcp_server.AddTool(
+        "self.face.clear_speaker",
+        "Clear current_speaker / person/active test state.",
+        PropertyList(),
+        [](const PropertyList& /*p*/) -> ReturnValue {
+            DeepDogFaceControlClearSpeaker();
+            return true;
+        });
+
+    mcp_server.AddTool(
+        "self.face.set_greet_config",
+        "Set proactive greet: greet_enabled, greet_gap_sec (10-86400).",
+        PropertyList({Property("greet_enabled", kPropertyTypeBoolean, true),
+                      Property("greet_gap_sec", kPropertyTypeInteger, 10, 10, 86400)}),
+        [](const PropertyList& p) -> ReturnValue {
+            return DeepDogFaceControlSetGreetConfig(p["greet_enabled"].value<bool>(),
+                                                    p["greet_gap_sec"].value<int>());
         });
 
     ESP_LOGI(TAG, "registered face MCP tools");

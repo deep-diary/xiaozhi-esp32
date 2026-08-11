@@ -7,6 +7,7 @@
 #include "face_ai_config.h"
 #include "face_recognize.h"
 #include "face_ai_types.h"
+#include "face_greet.h"
 
 #include <algorithm>
 #include <cmath>
@@ -537,6 +538,15 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
                         UpsertMeta(s_session_id);
                     }
                     ApplyMetaToBox(box, s_session_id, DeepDogFaceRecognizeSource::Session);
+                    uint32_t last_seen = 0;
+                    const char* pid = nullptr;
+                    if (FaceMeta* m = FindMeta(s_session_id)) {
+                        last_seen = m->last_seen_at;
+                        if (m->immich_person_id[0]) {
+                            pid = m->immich_person_id;
+                        }
+                    }
+                    (void)DeepDogFaceGreetMaybeFromRecognition(s_session_id, box->display_name, pid, last_seen);
                     TouchLastSeen(s_session_id);
                     UpdateSession(s_session_id, fptr, feat_len);
                     return;
@@ -553,6 +563,15 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
             (void)SaveMetaToNvs();
         }
         ApplyMetaToBox(box, id, DeepDogFaceRecognizeSource::Nvs);
+        uint32_t last_seen = 0;
+        const char* pid = nullptr;
+        if (FaceMeta* m = FindMeta(id)) {
+            last_seen = m->last_seen_at;
+            if (m->immich_person_id[0]) {
+                pid = m->immich_person_id;
+            }
+        }
+        (void)DeepDogFaceGreetMaybeFromRecognition(id, box->display_name, pid, last_seen);
         TouchLastSeen(id);
         if (update_session && feat_t && feat_len > 0) {
             auto* fptr = feat_t->get_element_ptr<float>();
@@ -592,7 +611,6 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
     EnsureDisplayName(m);
     (void)SaveMetaToNvs();
     ApplyMetaToBox(box, new_id, DeepDogFaceRecognizeSource::Enrolled);
-    TouchLastSeen(new_id);
     NotifyRegistryChanged();
     if (update_session && feat_t && feat_len > 0) {
         auto* fptr = feat_t->get_element_ptr<float>();
