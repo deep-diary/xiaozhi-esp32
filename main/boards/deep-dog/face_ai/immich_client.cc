@@ -339,6 +339,36 @@ static bool ParsePeopleName(const char* json, char* name_out, size_t name_sz, ch
     return ok;
 }
 
+static void LogPollTimeoutDiag(const char* asset_id, int attempts, int last_http, const char* json) {
+    int people_n = 0;
+    int unnamed_n = 0;
+    if (json) {
+        cJSON* root = cJSON_Parse(json);
+        if (root) {
+            cJSON* people = cJSON_GetObjectItem(root, "people");
+            if (cJSON_IsArray(people)) {
+                people_n = cJSON_GetArraySize(people);
+                for (int i = 0; i < people_n; i++) {
+                    cJSON* p = cJSON_GetArrayItem(people, i);
+                    cJSON* name = cJSON_GetObjectItem(p, "name");
+                    if (!cJSON_IsString(name) || !name->valuestring || !name->valuestring[0] ||
+                        strcmp(name->valuestring, "未命名") == 0) {
+                        unnamed_n++;
+                    }
+                }
+            }
+            cJSON_Delete(root);
+        }
+    }
+    const int approx_s =
+        (attempts > 1) ? ((attempts - 1) * DEEP_DOG_FACE_IMMICH_POLL_MS) / 1000 : 0;
+    ESP_LOGW(TAG,
+             "poll timeout asset=%s attempts=%d (~%ds) http=%d people=%d unnamed=%d "
+             "(Immich ML pending, not LAN timeout; deferred retry in %ds)",
+             asset_id, attempts, approx_s, last_http, people_n, unnamed_n,
+             (int)DEEP_DOG_FACE_IMMICH_DEFERRED_POLL_S);
+}
+
 static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out, size_t asset_id_sz) {
     if (!jpeg || jpeg_len == 0 || !asset_id_out || asset_id_sz == 0) {
         return false;
@@ -419,20 +449,26 @@ static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out
 static bool PollPerson(const char* asset_id, char* name_out, size_t name_sz, char* pid_out, size_t pid_sz) {
     char url[160];
     snprintf(url, sizeof(url), "%s/assets/%s", s_api_url, asset_id);
+    int last_http = 0;
+    char* last_json = nullptr;
     for (int i = 0; i < DEEP_DOG_FACE_IMMICH_POLL_MAX; i++) {
         HttpBuf resp{};
         const int status = HttpDo(HTTP_METHOD_GET, url, nullptr, nullptr, 0, &resp);
+        last_http = status;
         if (status == 200 && resp.data && ParsePeopleName(resp.data, name_out, name_sz, pid_out, pid_sz)) {
             heap_caps_free(resp.data);
+            heap_caps_free(last_json);
             ESP_LOGI(TAG, "poll#%d matched name=%s", i, name_out);
             return true;
         }
-        heap_caps_free(resp.data);
+        heap_caps_free(last_json);
+        last_json = resp.data;
         if (i + 1 < DEEP_DOG_FACE_IMMICH_POLL_MAX) {
             vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_FACE_IMMICH_POLL_MS));
         }
     }
-    ESP_LOGW(TAG, "poll timeout asset=%s", asset_id);
+    LogPollTimeoutDiag(asset_id, DEEP_DOG_FACE_IMMICH_POLL_MAX, last_http, last_json);
+    heap_caps_free(last_json);
     return false;
 }
 

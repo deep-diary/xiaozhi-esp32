@@ -635,6 +635,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
         return;
     }
     EnsureDisplayName(m);
+    TouchLastSeen(new_id);
     (void)SaveMetaToNvs();
     ApplyMetaToBox(box, new_id, DeepDogFaceRecognizeSource::Enrolled);
     NotifyRegistryChanged();

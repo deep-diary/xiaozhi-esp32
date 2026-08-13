@@ -13,10 +13,13 @@
 #include <ctime>
 #include <cstring>
 #include <mutex>
+#include <string>
 
 #define TAG "dog_face_greet"
 
 namespace {
+
+constexpr const char* kWakeKindPrefix = "face_greet";
 
 constexpr const char* kNvsNs = "fdog_greet";
 constexpr const char* kKeyEnabled = "g_en";
@@ -88,10 +91,15 @@ void SaveNvs() {
     nvs_close(h);
 }
 
-void TriggerWake() {
+void TriggerWake(const char* display_name) {
 #if DEEP_DOG_FACE_AI_ENABLE
-    Application::GetInstance().Schedule([]() {
-        Application::GetInstance().WakeWordInvoke("face_greet");
+    std::string wake = kWakeKindPrefix;
+    if (display_name && display_name[0]) {
+        wake += ':';
+        wake += display_name;
+    }
+    Application::GetInstance().Schedule([wake = std::move(wake)]() {
+        Application::GetInstance().WakeWordInvoke(wake);
     });
 #endif
 }
@@ -237,9 +245,9 @@ bool DeepDogFaceGreetMaybeFromRecognition(int local_id, const char* display_name
     }
     Notify();
     if (do_greet) {
-        ESP_LOGI(TAG, "greet triggered id=%d name=%s last_seen=%u", local_id, display_name,
+        ESP_LOGI(TAG, "greet triggered id=%d wake=%s:%s last_seen=%u", local_id, kWakeKindPrefix, display_name,
                  (unsigned)last_seen_before);
-        TriggerWake();
+        TriggerWake(display_name);
     }
     return do_greet;
 }
@@ -257,8 +265,8 @@ bool DeepDogFaceGreetSimulateAndWake(const char* name, int local_id) {
         s_absent_streak = 0;
     }
     Notify();
-    ESP_LOGI(TAG, "simulate_greet name=%s local_id=%d ok=1", name, lid);
-    TriggerWake();
+    ESP_LOGI(TAG, "simulate_greet wake=%s:%s local_id=%d ok=1", kWakeKindPrefix, name, lid);
+    TriggerWake(name);
     return true;
 }
 

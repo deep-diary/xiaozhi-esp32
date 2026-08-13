@@ -201,7 +201,7 @@
 ```
 
 - **`feat_count` / `max_count`**：embedding 槽用量（UI 显示 `20/128`）；`count` 为 canonical 人数。
-- **`last_seen_at`**：上次成功识别（Unix 秒）；与 `updated_at`（meta 写入，同为 Unix 秒）分离。
+- **`last_seen_at`**：上次成功识别或 **enroll 成功**（Unix 秒）；与 `updated_at`（meta 写入，同为 Unix 秒）分离。init 补 orphan 槽不写此字段。
 - **`updated_at`**：元数据变更时刻（Unix 秒，`time()` / SNTP）；**禁止**使用 `esp_timer`  boot 毫秒。时钟前提见 [N01 SNTP](../../net/N01-sntp-clock-sync.md)。
 - **满库 LRU**：`feat_count >= max_count` 时新人 enroll 淘汰 `last_seen_at` 最久槽位（tie：优先 placeholder / 无 Immich）。
 

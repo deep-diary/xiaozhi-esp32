@@ -202,10 +202,10 @@
 
 /** 轮询 GET /assets/{id} 次数与间隔 */
 #ifndef DEEP_DOG_FACE_IMMICH_POLL_MAX
-#define DEEP_DOG_FACE_IMMICH_POLL_MAX 40
+#define DEEP_DOG_FACE_IMMICH_POLL_MAX 60
 #endif
 #ifndef DEEP_DOG_FACE_IMMICH_POLL_MS
-#define DEEP_DOG_FACE_IMMICH_POLL_MS 1500
+#define DEEP_DOG_FACE_IMMICH_POLL_MS 2000
 #endif
 
 /** 延迟 poll：对已存 asset_id 且 name_pending 的条目周期重试（秒） */

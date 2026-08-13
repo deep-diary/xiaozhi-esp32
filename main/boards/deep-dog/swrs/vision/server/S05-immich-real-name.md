@@ -22,7 +22,7 @@ S04 已用数字 ID 区分人。本阶段在**已有或新建 local_id** 上，�
          → （可选）DELETE 临时 asset；默认不删，便于在 Immich 网页核对
 ```
 
-延迟秒级；须配合 S04 去重，禁止 1Hz 狂刷。详见 [infra](../infra.md)。
+延迟秒级～数十秒（Immich ML 队列，**非** HTTP 超时）；设备轮询上限见 `DEEP_DOG_FACE_IMMICH_POLL_MAX` × `POLL_MS`（默认 **60×2000ms≈120s**）。超时后保留 asset 并 `name_pending=1`，每 `DEFERRED_POLL_S`（默认 300s）重试 poll。须配合 S04 去重，禁止 1Hz 狂刷。详见 [infra](../infra.md)。
 
 Immich 开启 Facial Recognition 后，**上传本身会入队**检测/识别；设备**不得** `PUT /jobs/faceDetection|facialRecognition`，以免误伤全局队列或已命名库。
 
