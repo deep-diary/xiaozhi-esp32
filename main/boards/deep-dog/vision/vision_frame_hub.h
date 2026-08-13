@@ -60,6 +60,7 @@ private:
                     std::vector<uint8_t>* out);
     void EnsurePusherConnected();
     void TearDownPusher();
+    bool EnsureStreamScaledBuffer();
 
     EspVideo* camera_;
     TaskHandle_t task_ = nullptr;
@@ -75,6 +76,8 @@ private:
 #if DEEP_DOG_VISION_CODEC_H264
     std::unique_ptr<RtspH264Pusher> pusher_;
     std::unique_ptr<H264SwEncoder> h264_enc_;
+    std::vector<uint8_t> stream_scaled_;
+    bool stream_scaled_ready_ = false;
 #else
     std::unique_ptr<RtspJpegPusher> pusher_;
 #endif

@@ -71,3 +71,20 @@
 - [S08 RTSP+人脸 WDT](../main/boards/deep-dog/swrs/vision/server/S08-rtsp-face-wdt-mitigation.md)
 - [M02 MCP 控制面](../main/boards/deep-dog/swrs/mqtt/M02-mcp-call-control-plane.md)
 - [01-device status 字段](../main/boards/deep-dog/swrs/mqtt/modules/01-device.md)
+
+## 7. S06 §9 双分辨率压测对比（2026-08-13）
+
+| 剖面 | CAN | MOTOR | HANDLE | 采集 | RTSP 编码 | internal.free | internal.min | task_count | WDT | 备注 |
+|------|-----|-------|--------|------|-----------|---------------|--------------|------------|-----|------|
+| **瘦剖面（默认）** | 0 | 0 | 0 | 640×480 | 320×240 | 22914 | **2542** | 21 | 无 | face+RTSP 并发；`dog_face_ai` 栈 7680 |
+| +handle | 0 | 0 | 1 | 640×480 | 320×240 | 35890 | 24954 | 20 | 无 | idle 无 face；`capabilities.handle=true` |
+| +CAN+电机（源码=1） | 1* | 1* | 0 | 640×480 | 320×240 | 17642 | 2162 | 22 | 无 | *`EXT_PIN=LED` 钳位，CAN/电机未实际编入 |
+| 240² 回退 | 0 | 0 | 0 | 240×240 | 240×240 | — | — | — | — | §8.1 应急 |
+
+**RTSP 验收**：ffmpeg 探测 `h264 320x240 @5fps`；串口 `H264 push ok capture=640x480 encode=320x240`。
+
+**face 验收**：MQTT `face/status` `w/h=640/480`；`stream_face_stress_test.py` 7/7 PASS。
+
+**栈调整**：VGA 下 `largest_int≈7936` 不足以 `xTaskCreate(...,8192)` → `DEEP_DOG_FACE_AI_TASK_STACK=7680`。
+
+采集方式：MCP `self.board.diagnostics` / MQTT `device/status`；RTSP：`ffmpeg -i rtsp://...`。

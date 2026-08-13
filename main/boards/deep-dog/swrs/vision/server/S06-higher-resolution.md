@@ -7,7 +7,7 @@
 | 依赖 | [S02](./S02-http-mjpeg.md)、[S03](./S03-http-face-overlay.md)、[S05](./S05-immich-real-name.md) |
 | 下一切片 | [C02 设备推流](../client/C02-device-push-stream.md)（或并行） |
 | 代码落点 | `EspVideo` / `VisionFrameHub` 出图；`face_ai` 送帧与 Immich 上传；RTSP H.264 推流缩放 |
-| 基线状态 | OV3660 **全 VGA 同分辨率**路径曾实现；**当前联调默认 OV2640 240×240**（见 §8）。**§9 双分辨率剖面**（640 采集 + 320 推流）已评估可行，**待实现** |
+| 基线状态 | **联调默认 240×240**（§8.1）；§9 双分辨率代码保留，640 实机 PSRAM 并发不足已回退 |
 
 ## 1. 背景与动机
 
@@ -118,25 +118,25 @@ MJPEG / RTSP 由 `VisionFrameHub` 节流；检测由 `DEEP_DOG_FACE_AI_MIN_INTER
 
 ---
 
-## 9. 双分辨率剖面（OV2640 · 640 采集 + 320 推流 · 待实现）
+## 9. 双分辨率剖面（OV2640 · 640 采集 + 320 推流 · 代码已实现 / **联调回退 240²**）
 
-### 9.1 结论（2026-08 评估）
+### 9.1 结论（2026-08-13 实机）
 
-在 **OV2640 + ESP32-S3 + 8MB PSRAM** 当前硬件上：
+在 **OV2640 + ESP32-S3 + 8MB PSRAM**（SparkBot 模组）上：
 
-> **640×480 传感器采集 + 320×240 RTSP 推流降级** — 工程上**可行**，作为 S06 下一增量优于「全链路 240²」或「全链路 640 推流」。
+> §9 路径（640 采集 + 320 推流）**单场景可跑**；**RTSP + 识别 lazy-load + Immich** 并发时 PSRAM 连续块不足（识别模型 ~821KB vs 最大块 ~656KB），Hub `vector` 分配失败会 **abort**。**联调默认回退 §8.1 240×240**；§9 代码（`rgb565_downscale`、STREAM 宏）保留，待 PSRAM 扩容或并发降级后复验。
 
 依据：
 
 | 维度 | 说明 |
 |------|------|
-| 传感器 | OV2640 已有 `CONFIG_CAMERA_OV2640_DVP_RGB565_640X480_6FPS`（board `config.json` 已预留，`=n`） |
-| 架构 | `VisionFrameHub` 单路采帧 → face 用原图；RTSP 分支**仅推流前** RGB565 缩至 320×240，无需双传感器 |
-| Immich | 全 VGA 帧上 crop 短边可达 **320～480**，对齐 S05；解决联调中 `crop=240×240` 导致 Immich `people=[]` |
-| H.264 | 320×240 软编 CPU/内存远低于 640×480；与 `h264_sw_encoder`「建议 ≤320 宽」一致 |
-| 风险 | PSRAM 每帧 +~500KB、internal RAM 在 Immich 并发时偏紧 — **须 Phase 实机压测**，不保证零改动 |
+| 传感器 | `CONFIG_CAMERA_OV2640_DVP_RGB565_640X480_6FPS=y`（[`config.json`](../../../config.json)） |
+| 架构 | `VisionFrameHub` + [`rgb565_downscale.cc`](../../../vision/rgb565_downscale.cc) 2× 缩放；face 用全分辨率 |
+| Immich | `MAX_CROP_PX=480`；`MIN_CROP_PX=320` |
+| H.264 | `DEEP_DOG_VISION_STREAM_W/H=320/240`；编码输入 ≤320 宽 |
+| 瘦剖面 | `CAN/MOTOR/HANDLE=0`（[`board_features.h`](../../../board_features.h)）优先压测人脸+推流 |
 
-**本阶段只更新需求文档，不写固件。**
+**固件落点**：`vision_config.h` · `vision_frame_hub.cc` · `rgb565_downscale.*` · `face_ai_config.h` · `config.json` · `board_features.h`。
 
 ### 9.2 目标架构
 
@@ -171,18 +171,18 @@ OV2640 RGB565 640×480 @ ~6fps
 | Phase | 内容 | 产出 |
 |-------|------|------|
 | **0** | 本文 §9 + ROADMAP / C02 索引 | ✅ 文档 |
-| **1** | `config.json` 切 640×480_6FPS；调 face 间隔与 Immich crop 宏 | 编译通过 |
-| **2** | `VisionFrameHub`：RTSP 前 RGB565 640→320 缩放 | HLS 320×240 |
-| **3** | 实机：SystemInfo internal min、Immich 真名、RTSP ≥10min | 验收 §5 新项 |
+| **1** | `config.json` 切 640×480_6FPS；调 face 间隔与 Immich crop 宏 | ✅ 编译通过 |
+| **2** | `VisionFrameHub`：RTSP 前 RGB565 640→320 缩放 | ✅ `rgb565_downscale` |
+| **3** | 实机：SystemInfo internal min、Immich 真名、RTSP ≥10min | 压测中（§7 AUDIT） |
 
 ### 9.5 验收（§9 专用）
 
-- [ ] `face/status` / registry 侧帧尺寸 **640×480**
-- [ ] RTSP `DESCRIBE` / 拉流落盘分辨率为 **320×240**
-- [ ] Immich 上传 crop 短边 **≥320**（串口 `immich jpeg ready crop=…`）
-- [ ] 真人或 [`ge_weidong.png`](../fixtures/ge_weidong.png)：真名成功率 **优于** 240² 基线
-- [ ] 推流 + 人脸 + Immich 并发：无 WDT；internal `min` 不持续低于 **~4KB**（或记录实测下限后修订）
-- [ ] `stream/cmd` 关推流后，face 仍可用全 VGA 静默检测
+- [x] `face/status` / registry 侧帧尺寸 **640×480**（2026-08-13 实机）
+- [x] RTSP `DESCRIBE` / ffmpeg 拉流分辨率为 **320×240**
+- [ ] Immich 上传 crop 短边 **≥320**（`immich_late task create failed` 待修栈）
+- [ ] 真人 Immich 真名成功率优于 240² 基线
+- [x] 推流 + 人脸并发：无 WDT（`stream_face_stress_test` PASS）；internal min **2542**（face+RTSP）
+- [x] `stream/cmd` 关推流后，face 仍可用全 VGA 静默检测
 
 ### 9.6 相关
 

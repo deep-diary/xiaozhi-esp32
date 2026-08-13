@@ -70,6 +70,14 @@
 #define DEEP_DOG_VISION_RECONNECT_MAX_MS 30000
 #endif
 
+/** S06 §9：RTSP H.264 推流分辨率（采集可为 640×480，推流前缩放） */
+#ifndef DEEP_DOG_VISION_STREAM_W
+#define DEEP_DOG_VISION_STREAM_W 320
+#endif
+#ifndef DEEP_DOG_VISION_STREAM_H
+#define DEEP_DOG_VISION_STREAM_H 240
+#endif
+
 /** RTSP 推流最长时长（秒）；超时自动 stop 并恢复语音（V-S08） */
 #ifndef DEEP_DOG_STREAM_RTSP_MAX_S
 #define DEEP_DOG_STREAM_RTSP_MAX_S 300
