@@ -9,6 +9,7 @@
 #include "face_recognize.h"
 #include "face_ai_types.h"
 #include "face_greet.h"
+#include "face_persist.h"
 
 #include <algorithm>
 #include <cmath>
@@ -101,7 +102,22 @@ static int s_session_feat_len = 0;
 static int s_session_id = 0;
 static int64_t s_session_us = 0;
 
-static esp_err_t SaveMetaToNvs();
+static esp_err_t SaveMetaToNvsDirect();
+
+static void PersistMetaAsync() {
+    if (DeepDogFacePersistIsReady()) {
+        DeepDogFacePersistFlushAsync();
+        return;
+    }
+    (void)SaveMetaToNvsDirect();
+}
+
+static bool PersistMetaSync() {
+    if (DeepDogFacePersistIsReady()) {
+        return DeepDogFacePersistFlushSync();
+    }
+    return SaveMetaToNvsDirect() == ESP_OK;
+}
 
 static uint32_t NowUnixSec() {
     return DeepDogNowUnixSec();
@@ -127,7 +143,7 @@ static void SanitizeMetaTimestamps() {
     }
     if (dirty) {
         ESP_LOGW(TAG, "sanitized meta timestamps (legacy boot-ms -> 0)");
-        (void)SaveMetaToNvs();
+        (void)SaveMetaToNvsDirect();
     }
 }
 
@@ -270,7 +286,7 @@ static void EnsureDisplayName(FaceMeta* m) {
     }
 }
 
-static esp_err_t SaveMetaToNvs() {
+static esp_err_t SaveMetaToNvsDirect() {
     nvs_handle_t h;
     esp_err_t err = nvs_open(DEEP_DOG_FACE_RECOG_NVS_NS, NVS_READWRITE, &h);
     if (err != ESP_OK) {
@@ -291,6 +307,10 @@ static esp_err_t SaveMetaToNvs() {
     }
     nvs_close(h);
     return err;
+}
+
+esp_err_t DeepDogFaceRecognizeSaveMetaToNvs() {
+    return SaveMetaToNvsDirect();
 }
 
 static void LoadMetaFromNvs() {
@@ -330,7 +350,7 @@ static void LoadMetaFromNvs() {
                     m->name_pending = legacy[(size_t)i].name_pending;
                 }
                 ESP_LOGI(TAG, "migrated meta ver4(v3-layout)->4 count=%d", s_meta_count);
-                (void)SaveMetaToNvs();
+                (void)SaveMetaToNvsDirect();
             }
         } else if (ver == kFaceMetaVer3 && sz == sizeof(FaceMetaV3) * count) {
             std::vector<FaceMetaV3> legacy(count);
@@ -349,7 +369,7 @@ static void LoadMetaFromNvs() {
                     m->name_pending = legacy[(size_t)i].name_pending;
                 }
                 ESP_LOGI(TAG, "migrated meta ver3->4 count=%d", s_meta_count);
-                (void)SaveMetaToNvs();
+                (void)SaveMetaToNvsDirect();
             }
         } else if (ver == kFaceMetaVerLegacy && sz == sizeof(FaceMetaV2) * count) {
             std::vector<FaceMetaV2> legacy(count);
@@ -365,7 +385,7 @@ static void LoadMetaFromNvs() {
                     strncpy(m->immich_person_id, legacy[(size_t)i].immich_person_id, sizeof(m->immich_person_id) - 1);
                 }
                 ESP_LOGI(TAG, "migrated meta ver2->3 count=%d", s_meta_count);
-                (void)SaveMetaToNvs();
+                (void)SaveMetaToNvsDirect();
             }
         } else {
             ESP_LOGW(TAG, "face meta ver/size mismatch (ver=%u), rebuild from facedb", (unsigned)ver);
@@ -586,7 +606,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
         const int id = static_cast<int>(hits[0].id);
         if (!FindMeta(id)) {
             UpsertMeta(id);
-            (void)SaveMetaToNvs();
+            PersistMetaAsync();
         }
         ApplyMetaToBox(box, id, DeepDogFaceRecognizeSource::Nvs);
         uint32_t last_seen = 0;
@@ -636,7 +656,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
     }
     EnsureDisplayName(m);
     TouchLastSeen(new_id);
-    (void)SaveMetaToNvs();
+    PersistMetaAsync();
     ApplyMetaToBox(box, new_id, DeepDogFaceRecognizeSource::Enrolled);
     NotifyRegistryChanged();
     if (update_session && feat_t && feat_len > 0) {
@@ -722,7 +742,7 @@ bool DeepDogFaceRecognizeInit() {
         }
     }
     if (n > 0) {
-        (void)SaveMetaToNvs();
+        (void)SaveMetaToNvsDirect();
     }
     s_ready = true;
     ESP_LOGI(TAG, "recognizer ready (feats=%d meta=%d next_id=%d thr=%.2f multi=%d)", n, s_meta_count, s_next_id,
@@ -747,7 +767,7 @@ bool DeepDogFaceRecognizeClearAll() {
         s_meta_count = 0;
         memset(s_meta, 0, sizeof(s_meta));
         s_next_id = 1;
-        (void)SaveMetaToNvs();
+        (void)PersistMetaSync();
         ESP_LOGW(TAG, "clear_db: recognizer not ready, meta reset only");
         return true;
     }
@@ -759,7 +779,7 @@ bool DeepDogFaceRecognizeClearAll() {
     s_meta_count = 0;
     memset(s_meta, 0, sizeof(s_meta));
     s_next_id = 1;
-    if (SaveMetaToNvs() != ESP_OK) {
+    if (!PersistMetaSync()) {
         ESP_LOGW(TAG, "clear_db: feats cleared but NVS meta save failed");
     }
     ESP_LOGI(TAG, "clear_db ok (feats=%d)", s_recog->get_num_feats());
@@ -798,7 +818,7 @@ bool DeepDogFaceRecognizeBindImmichAsset(int local_id, const char* asset_id) {
     m->immich_asset_id[sizeof(m->immich_asset_id) - 1] = '\0';
     m->name_pending = 1;
     m->updated_at = NowUnixSec();
-    const bool ok = SaveMetaToNvs() == ESP_OK;
+    const bool ok = PersistMetaSync();
     if (ok) {
         NotifyRegistryChanged();
     }
@@ -817,7 +837,7 @@ bool DeepDogFaceRecognizeRename(int local_id, const char* display_name) {
     strncpy(m->display_name, display_name, sizeof(m->display_name) - 1);
     m->display_name[sizeof(m->display_name) - 1] = '\0';
     m->updated_at = NowUnixSec();
-    const bool ok = SaveMetaToNvs() == ESP_OK;
+    const bool ok = PersistMetaSync();
     if (ok) {
         NotifyRegistryChanged();
     }
@@ -852,7 +872,7 @@ bool DeepDogFaceRecognizeDeleteOne(int local_id) {
     if (s_session_id == local_id) {
         ClearSession();
     }
-    const bool ok = SaveMetaToNvs() == ESP_OK;
+    const bool ok = PersistMetaSync();
     NotifyRegistryChanged();
     return ok;
 }
@@ -881,7 +901,7 @@ bool DeepDogFaceRecognizeMergeAlias(int source_local_id, int target_local_id) {
         strncpy(src->display_name, tgt->display_name, sizeof(src->display_name) - 1);
     }
     src->updated_at = NowUnixSec();
-    const bool ok = SaveMetaToNvs() == ESP_OK;
+    const bool ok = PersistMetaSync();
     if (ok) {
         NotifyRegistryChanged();
     }
@@ -1076,7 +1096,7 @@ bool DeepDogFaceRecognizeBindImmichName(int local_id, const char* display_name, 
     if (raw && raw->local_id != cid) {
         raw->name_pending = 0;
     }
-    const bool ok = SaveMetaToNvs() == ESP_OK;
+    const bool ok = PersistMetaSync();
     if (ok) {
         NotifyRegistryChanged();
     }

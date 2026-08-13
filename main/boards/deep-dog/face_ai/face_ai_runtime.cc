@@ -7,6 +7,8 @@
 #include "mqtt/memory_report.h"
 #include "face_recognize.h"
 #include "immich_client.h"
+#include "face_persist.h"
+#include "face_task_util.h"
 #include "image_to_jpeg.h"
 
 #include <algorithm>
@@ -328,16 +330,7 @@ static void StickyApplyPrevIds(std::vector<DeepDogFaceBox>* boxes, DeepDogFaceSn
 
 static void FaceAiTask(void* /*arg*/) {
     FaceFrameJob job{};
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-    int immich_retry_ticks = 0;
-#endif
     for (;;) {
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-        if (!DeepDogImmichIsWorkerReady() && ++immich_retry_ticks >= 120) {
-            immich_retry_ticks = 0;
-            (void)DeepDogImmichInit();
-        }
-#endif
         if (xQueueReceive(s_queue, &job, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -454,7 +447,9 @@ static void TeardownRuntimeAll() {
     DeepDogImmichDeinit();
 #endif
 #if DEEP_DOG_FACE_RECOG_ENABLE
+    (void)DeepDogFacePersistFlushSync();
     DeepDogFaceRecognizeDeinit();
+    DeepDogFacePersistShutdown();
 #endif
     DeepDogFaceDetectDeinit();
 }
@@ -475,10 +470,23 @@ bool DeepDogFaceAiRuntimeStart() {
         LogRuntimeStartFail("queue");
         return false;
     }
-    if (xTaskCreate(FaceAiTask, "dog_face_ai", DEEP_DOG_FACE_AI_TASK_STACK, nullptr, 2, &s_task) != pdPASS) {
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    DeepDogImmichPrepareConfig();
+#endif
+#if DEEP_DOG_FACE_RECOG_ENABLE
+    if (!DeepDogFacePersistInit()) {
+        LogRuntimeStartFail("face_persist");
+        TeardownRuntimeAll();
+        return false;
+    }
+#endif
+    if (!DeepDogFaceTaskCreate("dog_face_ai", FaceAiTask, DEEP_DOG_FACE_AI_TASK_STACK, nullptr, 2, &s_task)) {
         LogRuntimeStartFail("dog_face_ai task");
         vQueueDelete(s_queue);
         s_queue = nullptr;
+#if DEEP_DOG_FACE_RECOG_ENABLE
+        DeepDogFacePersistShutdown();
+#endif
         return false;
     }
     if (!DeepDogFaceDetectInit()) {
@@ -542,6 +550,7 @@ static void ImmichLateStartTask(void* /*arg*/) {
         vTaskDelete(nullptr);
         return;
     }
+    DeepDogImmichPrepareConfig();
     if (DeepDogImmichInit()) {
         ESP_LOGI(TAG, "immich worker started (post-boot)");
     } else {

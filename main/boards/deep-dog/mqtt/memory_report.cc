@@ -44,8 +44,9 @@ uint32_t VisionHubStackBytes() {
 
 const StackHint* LookupStackHint(const char* name) {
     static const StackHint hints[] = {
-        {"dog_face_ai", DEEP_DOG_FACE_AI_TASK_STACK, "internal"},
+        {"dog_face_ai", DEEP_DOG_FACE_AI_TASK_STACK, "psram"},
         {"dog_immich", DEEP_DOG_FACE_IMMICH_TASK_STACK, "internal"},
+        {"face_persist", DEEP_DOG_FACE_PERSIST_TASK_STACK, "internal"},
         {"face_boot", DEEP_DOG_FACE_BOOT_TASK_STACK, "internal"},
         {"immich_late", 4096, "internal"},
         {"face_ai_defer", 3072, "internal"},

@@ -140,7 +140,7 @@ bool ShouldGreet(int local_id, const char* name, uint32_t last_seen_before, bool
         return false;
     }
     if (!force && !DeviceIdleEnough()) {
-        ESP_LOGW(TAG, "greet skipped (device busy)");
+        ESP_LOGD(TAG, "greet skipped (device busy)");
         return false;
     }
     if (force) {

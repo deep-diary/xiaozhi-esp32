@@ -249,16 +249,21 @@
 #endif
 
 /**
- * FreeRTOS 任务栈（字节，internal DRAM，不可放 PSRAM）。
- * 评估方法：启用 CONFIG_FREERTOS_USE_TRACE_FACILITY 后读 uxTaskGetStackHighWaterMark
- * 或 MCP self.board.diagnostics → tasks[].stack_hwm；分配值 ≈ hwm × 1.5～2（留 HTTP/Flash 路径余量）。
- * 实测见 swrs/AUDIT_REPORT.md（face 启用后 dog_face_ai hwm≈4352，dog_immich hwm≈6580）。
+ * FreeRTOS 任务栈（字节）。
+ * dog_face_ai 优先 PSRAM 栈（7680）；6144 在 RTSP+识别长跑下 stack_hwm≈44 会溢出。
+ * NVS meta 由 face_persist（internal）承接。
+ * dog_immich 保持 internal 栈（HTTP/TLS + Immich NVS 会读 Flash）。
+ * 评估方法：CONFIG_FREERTOS_USE_TRACE_FACILITY → uxTaskGetStackHighWaterMark
+ * 或 MCP self.board.diagnostics → tasks[].stack_hwm。
  */
 #ifndef DEEP_DOG_FACE_AI_TASK_STACK
 #define DEEP_DOG_FACE_AI_TASK_STACK 7680
 #endif
 #ifndef DEEP_DOG_FACE_IMMICH_TASK_STACK
 #define DEEP_DOG_FACE_IMMICH_TASK_STACK 7168
+#endif
+#ifndef DEEP_DOG_FACE_PERSIST_TASK_STACK
+#define DEEP_DOG_FACE_PERSIST_TASK_STACK 3072
 #endif
 #ifndef DEEP_DOG_FACE_BOOT_TASK_STACK
 #define DEEP_DOG_FACE_BOOT_TASK_STACK 16384

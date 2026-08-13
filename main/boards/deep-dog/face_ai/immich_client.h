@@ -23,8 +23,14 @@ bool DeepDogImmichIsConfigured();
 bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset = -1,
                             const double* latitude = nullptr, const double* longitude = nullptr);
 
-/** NVS 无 Key 时应用编译期默认 URL/Key（若有）并写入 NVS。 */
+/** NVS 无 Key 时应用编译期默认 URL/Key（若有）并写入 NVS。必须在 internal 栈调用（会读/写 Flash）。 */
 void DeepDogImmichApplyDefaultsIfEmpty();
+
+/**
+ * 启动前在 internal 栈加载 Immich NVS 配置（RuntimeStart / immich_late / MQTT）。
+ * dog_face_ai（PSRAM 栈）与 dog_immich worker 均不得直接触发 NVS/Flash。
+ */
+void DeepDogImmichPrepareConfig();
 
 /** GET {url}/server/ping；更新内部 server_ok/ping_ms 并触发 status 回调。 */
 bool DeepDogImmichPingServer();

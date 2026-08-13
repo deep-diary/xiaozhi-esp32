@@ -41,6 +41,7 @@ struct ImmichJob {
 static QueueHandle_t s_queue = nullptr;
 static TaskHandle_t s_task = nullptr;
 static bool s_started = false;
+static bool s_config_ready = false;
 
 static char s_api_url[96] = DEEP_DOG_FACE_IMMICH_DEFAULT_URL;
 static char s_api_key[96] = {};
@@ -598,11 +599,22 @@ static void ImmichTask(void* /*arg*/) {
     }
 }
 
+void DeepDogImmichPrepareConfig() {
+    if (s_config_ready) {
+        return;
+    }
+    DeepDogImmichApplyDefaultsIfEmpty();
+    s_config_ready = true;
+}
+
 bool DeepDogImmichInit() {
     if (s_started) {
         return true;
     }
-    DeepDogImmichApplyDefaultsIfEmpty();
+    if (!s_config_ready) {
+        ESP_LOGW(TAG, "init skipped: PrepareConfig not done (internal stack required)");
+        return false;
+    }
     TrimTrailingSlash(s_api_url);
     s_queue = xQueueCreate(1, sizeof(ImmichJob));
     if (!s_queue) {
@@ -611,8 +623,7 @@ bool DeepDogImmichInit() {
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         return false;
     }
-    // 必须用内部 DRAM 栈：ProcessJob → BindImmichName → SaveMetaToNvs 会写 Flash。
-    // PSRAM 任务栈会触发 esp_task_stack_is_sane_cache_disabled 断言，连带搞挂摄像头。
+    // internal 栈：ProcessJob 含 esp_http_client（TLS 证书在 Flash）+ SetConfig 写 NVS。
     if (xTaskCreate(ImmichTask, "dog_immich", DEEP_DOG_FACE_IMMICH_TASK_STACK, nullptr, 2, &s_task) != pdPASS) {
         ESP_LOGW(TAG, "immich task create failed stack=%u (free_int=%u largest_int=%u)",
                  (unsigned)DEEP_DOG_FACE_IMMICH_TASK_STACK,
@@ -687,6 +698,7 @@ bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete
         s_gps_configured = true;
     }
     const bool ok = SaveConfigToNvs();
+    s_config_ready = true;
     ESP_LOGI(TAG, "config saved ok=%d url=%s key_len=%u delete_asset=%u gps=%d", (int)ok, s_api_url,
              (unsigned)strlen(s_api_key), (unsigned)s_delete_asset, s_gps_configured ? 1 : 0);
     if (ok) {
@@ -733,9 +745,6 @@ bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool
     auto free_jpeg = [&]() {
         heap_caps_free(jpeg);
     };
-    if (!s_started) {
-        (void)DeepDogImmichInit();
-    }
     if (!s_started || !s_queue || local_id <= 0 || jpeg_len == 0) {
         free_jpeg();
         return false;
@@ -830,6 +839,7 @@ bool DeepDogImmichSetConfig(const char*, const char*, int, const double*, const 
     return false;
 }
 void DeepDogImmichApplyDefaultsIfEmpty() {}
+void DeepDogImmichPrepareConfig() {}
 bool DeepDogImmichPingServer() {
     return false;
 }
