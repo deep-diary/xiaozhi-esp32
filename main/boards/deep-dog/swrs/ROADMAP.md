@@ -27,7 +27,7 @@
 | **V-S03** | 人脸框叠加 | [vision/server/S03](./vision/server/S03-http-face-overlay.md) | S02 | 一期 ✅ |
 | **V-S04** | 本地数字 ID | [vision/server/S04](./vision/server/S04-local-face-numeric-id.md) | S03 | ✅ |
 | **V-S05** | Immich 真名 | [vision/server/S05](./vision/server/S05-immich-real-name.md) | S04 | ✅ |
-| **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | ✅（真名待 Immich 队列空闲复验） |
+| **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | **§9 双分辨率评估 ✅**（640 采集 + 320 推流 · OV2640 · **待实现**）；当前联调 240² |
 | **V-S07** | 人脸 MCP + registry | [vision/server/S07](./vision/server/S07-face-control-mcp.md) | S05 · M01 | 本轮 |
 | **V-S08** | RTSP+人脸 WDT 缓解 | [vision/server/S08](./vision/server/S08-rtsp-face-wdt-mitigation.md) | C02 · S04 | 已落地间隔下限 |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 基建可达；完整推拉待稳定 LAN 复验 |
@@ -66,7 +66,7 @@ D9 (BMI270) ──────────────────────�
 | S03 | Streaming + 人脸开 → Canvas 有框 |
 | S04 | **不同人显示不同数字 ID**；同人稳定同一 ID；不调 Immich |
 | S05 | 本地 ID 可绑定 Immich 真名；失败仍显示数字 ID |
-| S06 | 预览/检测 **640×480**；Immich 裁剪短边 ≥320；拉流仍可遥控 |
+| S06 | 采集 **640×480**（face/Immich）；RTSP **320×240** 推流降级（§9）；Immich crop 短边 ≥320；见 [S06 §9](./vision/server/S06-higher-resolution.md) |
 | C02 | 设备推到 MediaMTX，外网/内网可拉；人脸逻辑复用 |
 
 ## 基础设施与 MQTT

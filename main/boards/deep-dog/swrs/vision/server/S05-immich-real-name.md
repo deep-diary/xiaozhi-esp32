@@ -107,7 +107,7 @@ Key：NVS（`fdog_im`）；禁止 git 明文。
 - [ ] 串口无 `job faceDetection` / `facialRecognition` 主动触发日志  
 - [ ] 仓库无 API Key 明文  
 
-> **已知局限（S06 应对）**：设备旧 **240×240** 预览/翻拍上传 Immich 时经常 `people=[]`；主机清晰 [`ge_weidong.png`](../fixtures/ge_weidong.png) 可识别。S06 实选 **640×480**，见 [S06](./S06-higher-resolution.md)。
+> **已知局限（S06 应对）**：设备 **240×240** 上传 Immich 时经常 `people=[]`；主机清晰 [`ge_weidong.png`](../fixtures/ge_weidong.png) 可识别。**下一增量**：S06 §9 — OV2640 **640×480 采集** + Immich crop≥320，RTSP **320×240** 推流降级（评估可行，待实现）。见 [S06 §9](./S06-higher-resolution.md)。
 
 ## 9. 不包含
 

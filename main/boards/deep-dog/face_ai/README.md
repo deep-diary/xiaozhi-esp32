@@ -48,7 +48,7 @@
 - `DEEP_DOG_FACE_IMMICH_DEFAULT_URL`、`BACKOFF_S`（联调 **15**）、`POLL_MAX`（**60**）/ `POLL_MS`（**2000**，合计 ~120s）
 - `DEEP_DOG_FACE_IMMICH_DELETE_ASSET`（默认 **0**=保留临时图）
 
-分辨率与传感器格式在 board [`config.json`](../config.json) 配置（OV2640 / OV3660 切换与 RGB565/YUV422 说明见 [`../CAMERA_SENSOR.md`](../CAMERA_SENSOR.md)；OV3660 高分辨率见 [S06 §8](../swrs/vision/server/S06-higher-resolution.md)）。
+分辨率与传感器格式在 board [`config.json`](../config.json) 配置（OV2640 / OV3660 切换与 RGB565/YUV422 说明见 [`../CAMERA_SENSOR.md`](../CAMERA_SENSOR.md)；**§9 双分辨率**见 [S06 §9](../swrs/vision/server/S06-higher-resolution.md#9-双分辨率剖面ov2640--640-采集--320-推流--待实现)）。
 
 ## 验收
 
