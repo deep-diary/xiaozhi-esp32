@@ -10,6 +10,7 @@
 #include "face_ai_types.h"
 #include "face_greet.h"
 #include "face_persist.h"
+#include "face_facedb.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <ctime>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,6 +45,7 @@ static HumanFaceRecognizer* s_recog = nullptr;
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static bool s_fs_mounted = false;
 static bool s_ready = false;
+static std::mutex s_recog_mu;
 
 /** meta_ver=4：+last_seen_at（LRU / 上次见面） */
 static constexpr uint8_t kFaceMetaVer = 4;
@@ -601,7 +604,10 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
         }
     }
 
-    auto hits = s_recog->recognize(img, one);
+    auto hits = [&]() {
+        std::lock_guard<std::mutex> lock(s_recog_mu);
+        return s_recog->recognize(img, one);
+    }();
     if (!hits.empty() && hits[0].similarity >= DEEP_DOG_FACE_RECOG_SIM_THR) {
         const int id = static_cast<int>(hits[0].id);
         if (!FindMeta(id)) {
@@ -631,7 +637,7 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
         return;
     }
 
-    if (s_recog->get_num_feats() >= DEEP_DOG_FACE_RECOG_MAX) {
+    if (DeepDogFaceRecognizeGetFeatCount() >= DEEP_DOG_FACE_RECOG_MAX) {
         if (!EvictOldestFeatSlot()) {
             ESP_LOGW(TAG, "gallery full (%d), evict failed", DEEP_DOG_FACE_RECOG_MAX);
             return;
@@ -641,12 +647,19 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
         ESP_LOGD(TAG, "enroll skipped low score=%.2f", box->score);
         return;
     }
-    if (s_recog->enroll(img, one) != ESP_OK) {
+    if (!feat_t) {
+        ESP_LOGW(TAG, "enroll skipped no feat tensor");
+        return;
+    }
+    if (DeepDogFaceFacedbEnrollFeatSync(feat_t) != ESP_OK) {
         ESP_LOGW(TAG, "enroll failed");
         return;
     }
     int new_id = s_next_id;
-    auto after = s_recog->recognize(img, one);
+    auto after = [&]() {
+        std::lock_guard<std::mutex> lock(s_recog_mu);
+        return s_recog->recognize(img, one);
+    }();
     if (!after.empty()) {
         new_id = static_cast<int>(after[0].id);
     }
@@ -668,7 +681,8 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
             s_session_us = now;
         }
     }
-    ESP_LOGI(TAG, "enrolled local_id=%d name=%s feats=%d", new_id, box->display_name, s_recog->get_num_feats());
+    ESP_LOGI(TAG, "enrolled local_id=%d name=%s feats=%d", new_id, box->display_name,
+             DeepDogFaceRecognizeGetFeatCount());
 }
 
 void DeepDogFaceRecognizeProcess(const dl::image::img_t& img, const std::list<dl::detect::result_t>& detect_raw,
@@ -771,7 +785,7 @@ bool DeepDogFaceRecognizeClearAll() {
         ESP_LOGW(TAG, "clear_db: recognizer not ready, meta reset only");
         return true;
     }
-    esp_err_t err = s_recog->clear_all_feats();
+    esp_err_t err = DeepDogFaceFacedbClearAllSync();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "clear_all_feats failed: %s", esp_err_to_name(err));
         return false;
@@ -782,7 +796,7 @@ bool DeepDogFaceRecognizeClearAll() {
     if (!PersistMetaSync()) {
         ESP_LOGW(TAG, "clear_db: feats cleared but NVS meta save failed");
     }
-    ESP_LOGI(TAG, "clear_db ok (feats=%d)", s_recog->get_num_feats());
+    ESP_LOGI(TAG, "clear_db ok (feats=%d)", DeepDogFaceRecognizeGetFeatCount());
     NotifyRegistryChanged();
     return true;
 }
@@ -849,7 +863,7 @@ bool DeepDogFaceRecognizeDeleteOne(int local_id) {
         return false;
     }
     if (s_recog) {
-        (void)s_recog->delete_feat(static_cast<uint16_t>(local_id));
+        (void)DeepDogFaceFacedbDeleteFeatSync(static_cast<uint16_t>(local_id));
     }
     int write = 0;
     for (int i = 0; i < s_meta_count; i++) {
@@ -1038,8 +1052,36 @@ void DeepDogFaceRecognizeSetRegistryChangedCallback(std::function<void()> cb) {
     s_registry_changed_cb = std::move(cb);
 }
 
+esp_err_t DeepDogFaceRecognizeFacedbEnrollFeat(dl::TensorBase* feat) {
+    if (!s_recog || !feat) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    std::lock_guard<std::mutex> lock(s_recog_mu);
+    return s_recog->enroll_feat(feat);
+}
+
+esp_err_t DeepDogFaceRecognizeFacedbDeleteFeat(uint16_t local_id) {
+    if (!s_recog || local_id == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    std::lock_guard<std::mutex> lock(s_recog_mu);
+    return s_recog->delete_feat(local_id);
+}
+
+esp_err_t DeepDogFaceRecognizeFacedbClearAllFeats() {
+    if (!s_recog) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    std::lock_guard<std::mutex> lock(s_recog_mu);
+    return s_recog->clear_all_feats();
+}
+
 int DeepDogFaceRecognizeGetFeatCount() {
-    return s_recog ? s_recog->get_num_feats() : 0;
+    if (!s_recog) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(s_recog_mu);
+    return s_recog->get_num_feats();
 }
 
 int DeepDogFaceRecognizeGetMaxFeats() {

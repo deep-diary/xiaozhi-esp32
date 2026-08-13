@@ -8,6 +8,7 @@
 #include "face_recognize.h"
 #include "immich_client.h"
 #include "face_persist.h"
+#include "face_facedb.h"
 #include "face_task_util.h"
 #include "image_to_jpeg.h"
 
@@ -449,6 +450,7 @@ static void TeardownRuntimeAll() {
 #if DEEP_DOG_FACE_RECOG_ENABLE
     (void)DeepDogFacePersistFlushSync();
     DeepDogFaceRecognizeDeinit();
+    DeepDogFaceFacedbShutdown();
     DeepDogFacePersistShutdown();
 #endif
     DeepDogFaceDetectDeinit();
@@ -479,12 +481,18 @@ bool DeepDogFaceAiRuntimeStart() {
         TeardownRuntimeAll();
         return false;
     }
+    if (!DeepDogFaceFacedbInit()) {
+        LogRuntimeStartFail("face_facedb");
+        TeardownRuntimeAll();
+        return false;
+    }
 #endif
     if (!DeepDogFaceTaskCreate("dog_face_ai", FaceAiTask, DEEP_DOG_FACE_AI_TASK_STACK, nullptr, 2, &s_task)) {
         LogRuntimeStartFail("dog_face_ai task");
         vQueueDelete(s_queue);
         s_queue = nullptr;
 #if DEEP_DOG_FACE_RECOG_ENABLE
+        DeepDogFaceFacedbShutdown();
         DeepDogFacePersistShutdown();
 #endif
         return false;

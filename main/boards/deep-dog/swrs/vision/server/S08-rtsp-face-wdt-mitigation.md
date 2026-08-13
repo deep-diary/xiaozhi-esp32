@@ -5,7 +5,7 @@
 | 路线图 ID | **V-S08** |
 | 依赖 | [C02](../client/C02-device-push-stream.md) · [S04](./S04-local-face-numeric-id.md) · [04-face MQTT](../../mqtt/modules/04-face.md) |
 | 代码落点 | `face_ai/face_ai_runtime.cc` · `face_ai_config.h` · `vision/vision_frame_hub.cc` · `vision/stream_audio_gate.*` · `mqtt/modules/stream_mqtt.cc` |
-| 状态 | **已落地（间隔下限 + 语音互斥 + 5min 自动停）**；帧零拷贝仍为后续 POC |
+| 状态 | **已落地（间隔下限 + 语音互斥 + 5min 自动停 + face_facedb）**；帧零拷贝仍为后续 POC |
 
 ## 1. 背景
 
@@ -34,11 +34,25 @@ RTSP 推流期间 **暂停 AFE**（`EnableWakeWordDetection(false)` + `EnableVoi
 
 用户仍可通过 MQTT `face/cmd.detect_interval_ms` 抬高间隔；低于下限时固件自动夹紧。推流期间识别最小间隔临时抬高至 **4000ms**（不写 NVS）。
 
+### 3.1 facedb Flash 与 PSRAM 栈（`face_facedb`）
+
+`dog_face_ai` **优先 PSRAM 栈**（模型推理省 internal）。esp-dl **facedb** 的 `enroll` / `delete` / `clear` 经 FAT 写 Flash，触发 `esp_task_stack_is_sane_cache_disabled()` — **禁止**在 PSRAM 栈任务内调用。
+
+| 任务 | 栈 | 职责 |
+|------|-----|------|
+| `dog_face_ai` | PSRAM | 检测、feat 推理、`query_feat`（纯内存） |
+| `face_facedb` | **internal** | `enroll_feat` / `delete_feat` / `clear_all_feats` |
+| `face_persist` | internal | NVS meta |
+| `dog_immich` | internal | HTTP + Immich NVS |
+
+lazy-start 顺序：`face_persist` → **`face_facedb`** → `dog_face_ai` → 模型加载。`RecognizeOneFace` 在 PSRAM 任务内算 feat，再 **同步**投递 `face_facedb` 写 facedb。
+
 ## 4. 验收
 
 - [ ] RTSP 推流期间无（或极少）`AFE: Ringbuffer ... full`
 - [ ] 推流 5 分钟后 `stream/status` → `idle`，`error=auto_stop_timeout`，唤醒恢复
 - [ ] `stream/status.voice_paused` 推流中为 `true`
+- [ ] facedb enroll / delete / clear_db 不触发 `esp_task_stack_is_sane_cache_disabled`（`face_facedb` internal 栈）
 - [ ] 推流时串口可见送帧间隔 ≥ `RTSP_MIN_INTERVAL_MS`（或用户更大值）
 - [ ] `device/status.mem.internal.min` 不低于健康阈值（见 01-device `low_internal_heap`）
 - [ ] `scripts/deep_dog/deep_dog_device_audit.py` 可输出 `tasks[]` 与 `face_summary`

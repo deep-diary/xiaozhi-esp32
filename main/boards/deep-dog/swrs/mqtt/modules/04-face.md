@@ -234,7 +234,7 @@
 - **`face/registry` retain 与 `face/status` 语义分离**：status 为实时框；registry 为 canonical 已注册库。
 - **boot 默认开 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1`）时，WiFi IP 就绪后自动 `DeepDogFaceAiRuntimeStart()`（检测+识别，`recognize_enabled` 默认 true）。串口会打印 `boot_baseline` / `face_ready` 内存报告。
 - **boot 默认关 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=0`）时，MQTT 首连可能先于 recognizer 就绪而 retain 空库；**recognizer 从 NVS/facedb 恢复后必须 republish registry**（覆盖陈旧 retain）。
-- **`face/cmd` lazy-start**：先创建 `face_persist`（internal 栈，专责 face meta NVS）与 `dog_face_ai`（**优先 PSRAM 栈**），`dog_immich` 仍为 **internal 栈**（HTTP/TLS + Immich NVS）；再加载检测/识别模型。
+- **`face/cmd` lazy-start**：先创建 `face_persist`（internal，NVS meta）、**`face_facedb`（internal，facedb enroll/delete/clear）** 与 `dog_face_ai`（**优先 PSRAM 栈**，仅检测/feat/内存 query），`dog_immich` 仍为 **internal 栈**；再加载检测/识别模型。见 [S08 §3.1](../../vision/server/S08-rtsp-face-wdt-mitigation.md)。
 - **`face/cmd` 变更检测/识别开关成功后**，须 republish registry（`esp_timer` 异步 publish）。
 
 ## 验收
@@ -244,5 +244,6 @@
 - [ ] `pipeline` / 间隔在 status 回显
 - [ ] 入口无独立 Person 卡；Track UI 在 Stream
 - [ ] 有 enrolled 库的设备：`face/registry` retain `count≥1`，entries 与 `face/status` 识别 id/名称一致
+- [ ] enroll 新人脸不触发 `esp_task_stack_is_sane_cache_disabled`（facedb 经 `face_facedb` internal 栈）
 - [ ] 冷启动 Face AI off→MQTT cmd `enabled:true` 后 registry 从 0 变为完整库
 - [ ] 晚订阅 Stream/Face 页：≤30s 内收到 `face/status` 控制态，或 `refresh_status` 立即回一帧
