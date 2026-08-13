@@ -17,7 +17,17 @@
 
 /** 开机运行时总开关（检测+识别）；0=关，运行中由 MQTT face/cmd / HTTP 再开 */
 #ifndef DEEP_DOG_FACE_AI_DEFAULT_ENABLED
-#define DEEP_DOG_FACE_AI_DEFAULT_ENABLED 0
+#define DEEP_DOG_FACE_AI_DEFAULT_ENABLED 1
+#endif
+
+/** 主动招呼默认间隔（秒）；NVS 无记录时使用；见 P02 */
+#ifndef DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC
+#define DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC 1800
+#endif
+
+/** 1=DeepDogFaceGreetInit 时用 GREET_DEFAULT_GAP_SEC 写 NVS（覆盖旧联调 10s） */
+#ifndef DEEP_DOG_FACE_GREET_BOOT_APPLY
+#define DEEP_DOG_FACE_GREET_BOOT_APPLY 1
 #endif
 
 /**

@@ -1,6 +1,6 @@
 #include "board_diagnostics_mcp.h"
 
-#include "mqtt/device_diagnostics.h"
+#include "mqtt/memory_report.h"
 
 #include "mcp_server.h"
 
@@ -23,17 +23,7 @@ void RegisterBoardDiagnosticsMcpTools(McpServer& mcp_server) {
             cJSON_AddNumberToObject(root, "free_heap", static_cast<double>(esp_get_free_heap_size()));
             cJSON_AddNumberToObject(root, "min_free_heap", static_cast<double>(esp_get_minimum_free_heap_size()));
 
-            auto add_mem = [](cJSON* parent, const char* key, uint32_t caps) {
-                cJSON* o = cJSON_AddObjectToObject(parent, key);
-                cJSON_AddNumberToObject(o, "free", static_cast<double>(heap_caps_get_free_size(caps)));
-                cJSON_AddNumberToObject(o, "min", static_cast<double>(heap_caps_get_minimum_free_size(caps)));
-                cJSON_AddNumberToObject(o, "total", static_cast<double>(heap_caps_get_total_size(caps)));
-            };
-            cJSON* mem = cJSON_AddObjectToObject(root, "mem");
-            add_mem(mem, "internal", MALLOC_CAP_INTERNAL);
-            add_mem(mem, "psram", MALLOC_CAP_SPIRAM);
-
-            DeepDogDeviceDiagnosticsAppendTasks(root);
+            DeepDogMemoryReportAppend(root);
 
             char* printed = cJSON_PrintUnformatted(root);
             cJSON_Delete(root);

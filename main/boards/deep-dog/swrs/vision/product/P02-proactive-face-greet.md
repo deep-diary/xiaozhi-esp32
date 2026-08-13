@@ -19,7 +19,7 @@
 |--------|------|------|
 | `simulate_greet` | `name` 或 `display_name`，`local_id?` | E2E 测试 |
 | `clear_speaker` | — | 清空 current_speaker |
-| `set_greet_config` | `greet_enabled`, `greet_gap_sec` (10–86400) | NVS 持久 |
+| `set_greet_config` | `greet_enabled`, `greet_gap_sec` (10–86400) | NVS 持久；联调默认 **1800**（30min，`DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC`） |
 
 也可在 payload 顶层发 `greet_enabled` / `greet_gap_sec`（与 enabled 同级）。
 

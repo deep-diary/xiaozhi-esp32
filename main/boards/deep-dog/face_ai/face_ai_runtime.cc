@@ -4,6 +4,7 @@
 #include "face_ai_bridge.h"
 #include "face_ai_config.h"
 #include "face_ai_types.h"
+#include "mqtt/memory_report.h"
 #include "face_recognize.h"
 #include "immich_client.h"
 #include "image_to_jpeg.h"
@@ -494,6 +495,7 @@ bool DeepDogFaceAiRuntimeStart() {
     ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms, recog_min=%d ms, during_rtsp=%d, recog=%d immich=%d)",
              DEEP_DOG_FACE_AI_MIN_INTERVAL_MS, DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS, DEEP_DOG_FACE_AI_DURING_RTSP,
              DEEP_DOG_FACE_RECOG_ENABLE, DEEP_DOG_FACE_IMMICH_ENABLE);
+    DeepDogMemoryReportLog("face_ready");
     return true;
 }
 

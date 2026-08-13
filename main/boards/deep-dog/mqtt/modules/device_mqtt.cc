@@ -1,6 +1,6 @@
 #include "mqtt/modules/device_mqtt.h"
 
-#include "mqtt/device_diagnostics.h"
+#include "mqtt/memory_report.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "config.h"
@@ -76,13 +76,6 @@ const char* ResetReasonString() {
         default:
             return "unknown";
     }
-}
-
-void AddMemBucket(cJSON* parent, const char* key, uint32_t caps) {
-    cJSON* obj = cJSON_AddObjectToObject(parent, key);
-    cJSON_AddNumberToObject(obj, "free", static_cast<double>(heap_caps_get_free_size(caps)));
-    cJSON_AddNumberToObject(obj, "min", static_cast<double>(heap_caps_get_minimum_free_size(caps)));
-    cJSON_AddNumberToObject(obj, "total", static_cast<double>(heap_caps_get_total_size(caps)));
 }
 
 }  // namespace
@@ -216,9 +209,7 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     cJSON_AddNumberToObject(root, "free_heap", static_cast<double>(esp_get_free_heap_size()));
     cJSON_AddNumberToObject(root, "min_free_heap", static_cast<double>(esp_get_minimum_free_heap_size()));
 
-    cJSON* mem = cJSON_AddObjectToObject(root, "mem");
-    AddMemBucket(mem, "internal", MALLOC_CAP_INTERNAL);
-    AddMemBucket(mem, "psram", MALLOC_CAP_SPIRAM);
+    DeepDogMemoryReportAppend(root);
 
     wifi_ap_record_t ap{};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
@@ -243,8 +234,6 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     }
     cJSON_AddBoolToObject(health, "ok", cJSON_GetArraySize(warn) == 0);
     cJSON_AddItemToObject(health, "warn", warn);
-
-    DeepDogDeviceDiagnosticsAppendTasks(root);
 
 #if DEEP_DOG_FACE_AI_ENABLE
     const DeepDogFaceSpeaker sp = DeepDogFaceGreetGetSpeaker();

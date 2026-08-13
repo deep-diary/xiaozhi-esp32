@@ -129,7 +129,9 @@
 #endif
 #if DEEP_DOG_FACE_AI_ENABLE
 #include "face_ai_bridge.h"
+#include "face_greet.h"
 #endif
+#include "mqtt/memory_report.h"
 #include "mqtt/mqtt_config.h"
 #if DEEP_DOG_MQTT_ENABLE
 #include "mqtt/deep_dog_mqtt.h"
@@ -854,6 +856,10 @@ public:
         }
 #if DEEP_DOG_IMU_ENABLE
         InitializeImu();
+#endif
+#if DEEP_DOG_FACE_AI_ENABLE
+        DeepDogFaceGreetInit();
+        DeepDogMemoryReportLog("boot_baseline");
 #endif
 #if DEEP_DOG_FACE_AI_ENABLE
 #if DEEP_DOG_FACE_AI_DEFAULT_ENABLED

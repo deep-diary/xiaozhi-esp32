@@ -245,12 +245,16 @@ topics:
               free: { type: int }
               min: { type: int }
               total: { type: int }
+              largest_free: { type: int, optional: true }
+              used: { type: int, optional: true, note: "total - free" }
           psram:
             type: object
             fields:
               free: { type: int }
               min: { type: int }
               total: { type: int, note: "0 if no PSRAM" }
+              largest_free: { type: int, optional: true }
+              used: { type: int, optional: true }
       rssi: { type: int, optional: true }
       wifi_ssid: { type: string, optional: true, note: "status only; may change on roam" }
       wifi_channel: { type: int, optional: true }
@@ -276,7 +280,9 @@ topics:
           fields:
             name: { type: string }
             prio: { type: int }
-            stack_hwm: { type: int, note: "FreeRTOS high water mark bytes" }
+            stack_hwm: { type: int, note: "FreeRTOS high water mark bytes (unused stack)" }
+            stack_domain: { type: string, optional: true, enum: [internal, psram, unknown] }
+            stack_used_est: { type: int, optional: true, note: "known alloc - stack_hwm" }
             state: { type: int, note: "eTaskState enum value" }
       ts: { type: int }
       ts_iso: { type: string, optional: true }
@@ -378,7 +384,7 @@ topics:
     retain: false
     http: "POST /api/face_enable (+ clear_db / pipeline / interval via MQTT)"
     payload:
-      enabled: { type: bool, optional: true, note: "master switch; default false at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED); lazy-loads runtime on first true" }
+      enabled: { type: bool, optional: true, note: "master switch; default true at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1); lazy-loads runtime on first true if not boot-started" }
       action:
         type: enum
         values: [clear_db, rename, delete_one, merge, refresh_immich, set_immich_config, ping_immich, refresh_status]

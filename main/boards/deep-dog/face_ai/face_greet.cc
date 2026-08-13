@@ -24,7 +24,7 @@ constexpr const char* kWakeKindPrefix = "face_greet";
 constexpr const char* kNvsNs = "fdog_greet";
 constexpr const char* kKeyEnabled = "g_en";
 constexpr const char* kKeyGap = "g_gap";
-constexpr int kDefaultGapSec = 10;
+constexpr int kDefaultGapSec = DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC;
 constexpr int kMinGapSec = 10;
 constexpr int kMaxGapSec = 86400;
 constexpr int kAbsentResetFrames = 8;
@@ -164,6 +164,9 @@ void DeepDogFaceGreetInit() {
         return;
     }
     LoadNvs();
+#if DEEP_DOG_FACE_GREET_BOOT_APPLY
+    (void)DeepDogFaceGreetSetConfig(s_greet_enabled, DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC);
+#endif
     s_inited = true;
     ESP_LOGI(TAG, "init enabled=%d gap=%ds", s_greet_enabled ? 1 : 0, s_greet_gap_sec);
 }

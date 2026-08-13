@@ -88,3 +88,55 @@
 **栈调整**：VGA 下 `largest_int≈7936` 不足以 `xTaskCreate(...,8192)` → `DEEP_DOG_FACE_AI_TASK_STACK=7680`。
 
 采集方式：MCP `self.board.diagnostics` / MQTT `device/status`；RTSP：`ffmpeg -i rtsp://...`。
+
+## 8. 开机人脸 + 内存可观测（2026-08-13）
+
+**固件配置**
+
+| 宏 | 值 | 说明 |
+|----|-----|------|
+| `DEEP_DOG_FACE_AI_DEFAULT_ENABLED` | **1** | WiFi IP 就绪后自动 `DeepDogFaceAiRuntimeStart()`（检测+识别） |
+| `DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC` | **1800** | 主动招呼 30min |
+| `DEEP_DOG_FACE_GREET_BOOT_APPLY` | **1** | 开机写 NVS，覆盖旧 10s 间隔 |
+
+**串口日志（验收）**
+
+- `dog_face_greet: init enabled=1 gap=1800s`
+- `dog_mem_rpt: memory report [boot_baseline]`（Face 启动前）
+- `dog_face_ai: runtime started ...`
+- `dog_mem_rpt: memory report [face_ready]`（含 Top 任务 stack_hwm）
+
+**MQTT `device/status` 新字段**
+
+- `mem.*.{largest_free,used}`
+- `tasks[]` 增 `stack_domain` / `stack_used_est`；按 `stack_hwm` 升序
+
+**预期 internal 基线（face-on，240² 瘦剖面，无 RTSP）**
+
+| 阶段 | internal.free | internal.min | 判定 |
+|------|---------------|--------------|------|
+| boot_baseline | ~40–50 KB | ~35–40 KB | 正常 |
+| face_ready | ~15–25 KB | **≥7 KB** 可接受 | face+immich task 占 ~15KB 栈 |
+| face+RTSP 并发 | ~18–23 KB | **2.5–7 KB** | 紧张但可运行；min&lt;4KB 需关注 |
+
+**全局变量与 SRAM**
+
+- `.data`/`.bss` 静态全局在链接时占 internal DRAM，**不计入** `heap_caps total`。
+- `total≈458KB` 为 **heap 池**；芯片 internal ≈512KB，差值≈静态段+RTOS+WiFi 保留。
+- 运行时审计靠 `tasks[]` + heap free/min；静态符号需 `idf.py size-components`。
+
+**刷机**：`idf.py build` + `flash` ✅（2026-08-13）；串口验收通过。
+
+**实机采样（2026-08-13 刷机后 cold boot）**
+
+| 阶段 | internal.free | internal.min | internal.largest | psram.free |
+|------|---------------|--------------|------------------|------------|
+| boot_baseline | **79,454** | 79,230 | 57,344 | 7,927,388 |
+| face_ready | **59,270** | **44,870** | 47,104 | 5,335,600 |
+
+- `dog_face_greet: init enabled=1 gap=1800s` ✅
+- `dog_face_ai: runtime started ... recog=1 immich=1` ✅
+- 无 WDT/panic ✅
+- face_ready 后 internal.min≈45KB，**显著优于**旧剖面（~7KB / ~4KB），因未并发 RTSP 且 cold boot
+
+**需求出处**：[04-face](./mqtt/modules/04-face.md)、[P02](./vision/product/P02-proactive-face-greet.md)、[01-device](./mqtt/modules/01-device.md)

@@ -45,7 +45,7 @@ Motor 卡：单电机调试（`capabilities.motor && !dog` 或独立电机页）
 
 - **Step 1** 使用 `device_id` 连接 EMQX（MQTT over WebSocket）。
 - **Step 2** 订阅 `…/device/info`（retain）与可选 `…/device/status`。
-- **Step 3** 渲染 Device Basic：`device_id` / `firmware` / `ip` / `http_port` / `ext_pins.mode`；有 status 时附加 `rssi`、内存摘要、`health.ok`。电量仅当 `power.supported===true`。可链 [01-device](../modules/01-device.md)。
+- **Step 3** 渲染 Device Basic：`device_id` / `firmware` / `ip` / `http_port` / `ext_pins.mode`；有 status 时附加 `rssi`、**内存进度条**（`mem.internal|psram` 的 free/total）、`health.ok` / `health.warn`（含 `low_internal_heap` 标红）。可展开 **任务栈表**（`tasks[]` 按 `stack_hwm` 升序，余量最小在上）。电量仅当 `power.supported===true`。可链 [01-device](../modules/01-device.md)。
 - **Step 4** 读 `capabilities` + `ext_pins`，过滤模块列表（**忽略独立 person 卡**），渲染入口卡。
 - **Step 5** 点击 → `navigate(/device/:deviceId/modules/:moduleId)`。
 - **Step 6** 离页退订；不在此页管理业务 Topic。
