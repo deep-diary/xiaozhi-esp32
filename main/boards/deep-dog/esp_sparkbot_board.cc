@@ -1,4 +1,5 @@
 #include "wifi_board.h"
+#include "board.h"
 #include "codecs/es8311_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
@@ -218,6 +219,10 @@ public:
         }
         if (enable) {
             Es8311AudioCodec::EnableOutput(enable);
+            // GPIO46：背光 PWM 与 PA 复用（SparkBot 硬件）；gpio_set_level 后恢复 LEDC 背光
+            if (Backlight* bl = Board::GetInstance().GetBacklight()) {
+                bl->RestoreBrightness();
+            }
         } else {
            // Nothing todo because the display io and PA io conflict
         }
@@ -701,6 +706,69 @@ private:
 #endif
     }
 
+    /** WiFi IP 就绪后启动 Face/MQTT/HTTP 等（或延后至 OnActivationComplete）。 */
+    void StartPostActivationServices() {
+        ESP_LOGI(TAG, "post-activation: start heavy services");
+        DeepDogMemoryReportLog("post_activation");
+#if DEEP_DOG_MQTT_ENABLE
+        if (board_mqtt_ && !board_mqtt_->IsRunning()) {
+            if (!board_mqtt_->Start()) {
+                ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
+            }
+        }
+#endif
+#if DEEP_DOG_HTTP_SERVER_ENABLE
+        if (http_server_ && !http_server_->IsRunning()) {
+            if (!http_server_->Start()) {
+                ESP_LOGW(TAG, "HTTP 控制/MJPEG 服务启动失败（可检查端口占用）");
+            }
+        }
+#endif
+#if DEEP_DOG_WS_MCP_ENABLE
+        {
+            static DeepDogWsMcpServer ws_mcp;
+            if (ws_mcp.Start()) {
+                ESP_LOGI(TAG, "WS MCP on port %u path %s", (unsigned)ws_mcp.Port(), ws_mcp.Path());
+                DeepDogWsMcpServer* ws_ptr = &ws_mcp;
+                Application::GetInstance().RegisterMcpBroadcastCallback([ws_ptr](const std::string& payload) {
+                    ws_ptr->BroadcastMessage(payload);
+                });
+#if DEEP_DOG_MQTT_ENABLE
+                if (board_mqtt_) {
+                    board_mqtt_->SetWsMcpEndpoint(ws_mcp.Port(), ws_mcp.Path());
+                }
+#endif
+            } else {
+                ESP_LOGW(TAG, "WS MCP 启动失败");
+            }
+        }
+#endif
+#if DEEP_DOG_FACE_AI_ENABLE
+#if DEEP_DOG_FACE_AI_DEFAULT_ENABLED
+        if (DeepDogMemoryWaitInternalReady("face_ai", DEEP_DOG_BOOT_MIN_INTERNAL_FREE,
+                                            DEEP_DOG_BOOT_MIN_INTERNAL_LARGEST,
+                                            DEEP_DOG_BOOT_MEMORY_WAIT_MS)) {
+            if (!DeepDogFaceAiRuntimeStart()) {
+                ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");
+            } else {
+                DeepDogMemoryReportLog("face_ready");
+            }
+        } else {
+            ESP_LOGW(TAG, "Face AI skipped: internal heap not ready after activation");
+        }
+#else
+        ESP_LOGI(TAG, "Face AI off at boot (face/cmd enabled=true to start)");
+#endif
+#endif
+#if DEEP_DOG_VISION_HUB_ENABLE
+        if (vision_hub_ && !vision_hub_->IsRunning()) {
+            if (!vision_hub_->Start()) {
+                ESP_LOGW(TAG, "VisionFrameHub 启动失败");
+            }
+        }
+#endif
+    }
+
     void InitializeImu() {
 #if DEEP_DOG_IMU_ENABLE
         if (!shared_i2c_bus_handle_) {
@@ -859,42 +927,15 @@ public:
 #endif
 #if DEEP_DOG_FACE_AI_ENABLE
         DeepDogFaceGreetInit();
+#if !DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION
         DeepDogMemoryReportLog("boot_baseline");
 #endif
-#if DEEP_DOG_FACE_AI_ENABLE
-#if DEEP_DOG_FACE_AI_DEFAULT_ENABLED
-#if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
-        // BT 已占 INTERNAL；Face AI 12KB 栈延后到 idle+AFE 之后再试
-        ESP_LOGW(TAG, "Face AI deferred ~90s (BT on: protect wake / TLS heap)");
-        xTaskCreate(
-            [](void*) {
-                vTaskDelay(pdMS_TO_TICKS(90000));
-                const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-                ESP_LOGI(TAG, "deferred Face AI try: largest_int=%u", (unsigned)largest);
-                if (largest < 14000) {
-                    ESP_LOGW(TAG, "deferred Face AI skipped (need ~12KB contiguous internal)");
-                    vTaskDelete(nullptr);
-                    return;
-                }
-                if (!DeepDogFaceAiRuntimeStart()) {
-                    ESP_LOGW(TAG, "deferred Face AI still failed");
-                }
-                vTaskDelete(nullptr);
-            },
-            "face_ai_defer", 3072, nullptr, 1, nullptr);
-#else
-        if (!DeepDogFaceAiRuntimeStart()) {
-            ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");
-        }
 #endif
-#else
-        ESP_LOGI(TAG, "Face AI off at boot (face/cmd enabled=true to start)");
-#endif
-#endif
-#if DEEP_DOG_VISION_HUB_ENABLE
-        if (vision_hub_ && !vision_hub_->IsRunning()) {
-            if (!vision_hub_->Start()) {
-                ESP_LOGW(TAG, "VisionFrameHub 启动失败");
+#if DEEP_DOG_FACE_AI_ENABLE && !DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION
+#if DEEP_DOG_MQTT_ENABLE
+        if (board_mqtt_ && !board_mqtt_->IsRunning()) {
+            if (!board_mqtt_->Start()) {
+                ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
             }
         }
 #endif
@@ -905,30 +946,57 @@ public:
             }
         }
 #endif
-#if DEEP_DOG_MQTT_ENABLE
-        if (board_mqtt_ && !board_mqtt_->IsRunning()) {
-            if (!board_mqtt_->Start()) {
-                ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
-            }
-        }
-#endif
 #if DEEP_DOG_WS_MCP_ENABLE
         {
-            static DeepDogWsMcpServer ws_mcp;
-            if (ws_mcp.Start()) {
-                ESP_LOGI(TAG, "WS MCP on port %u path %s", (unsigned)ws_mcp.Port(), ws_mcp.Path());
-                Application::GetInstance().RegisterMcpBroadcastCallback([&ws_mcp](const std::string& payload) {
-                    ws_mcp.BroadcastMessage(payload);
+            static DeepDogWsMcpServer ws_mcp_boot;
+            if (ws_mcp_boot.Start()) {
+                ESP_LOGI(TAG, "WS MCP on port %u path %s", (unsigned)ws_mcp_boot.Port(), ws_mcp_boot.Path());
+                DeepDogWsMcpServer* ws_ptr = &ws_mcp_boot;
+                Application::GetInstance().RegisterMcpBroadcastCallback([ws_ptr](const std::string& payload) {
+                    ws_ptr->BroadcastMessage(payload);
                 });
 #if DEEP_DOG_MQTT_ENABLE
                 if (board_mqtt_) {
-                    board_mqtt_->SetWsMcpEndpoint(ws_mcp.Port(), ws_mcp.Path());
+                    board_mqtt_->SetWsMcpEndpoint(ws_mcp_boot.Port(), ws_mcp_boot.Path());
                 }
 #endif
             } else {
                 ESP_LOGW(TAG, "WS MCP 启动失败");
             }
         }
+#endif
+#if DEEP_DOG_FACE_AI_DEFAULT_ENABLED
+        if (!DeepDogFaceAiRuntimeStart()) {
+            ESP_LOGW(TAG, "人脸 runtime 未启动（静默识别不可用）");
+        }
+#else
+        ESP_LOGI(TAG, "Face AI off at boot (face/cmd enabled:true to start)");
+#endif
+#endif
+#if DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION
+        ESP_LOGI(TAG, "Face/hub/MQTT/HTTP deferred until xiaozhi activation done");
+#else
+#if DEEP_DOG_VISION_HUB_ENABLE
+        if (vision_hub_ && !vision_hub_->IsRunning()) {
+            if (!vision_hub_->Start()) {
+                ESP_LOGW(TAG, "VisionFrameHub 启动失败");
+            }
+        }
+#endif
+#endif
+    }
+
+    void OnActivationComplete() override {
+#if DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION
+        xTaskCreate(
+            [](void* arg) {
+                vTaskDelay(pdMS_TO_TICKS(300));
+                static_cast<DeepDog*>(arg)->StartPostActivationServices();
+                vTaskDelete(nullptr);
+            },
+            "dog_post_act", 4096, this, 1, nullptr);
+#else
+        StartPostActivationServices();
 #endif
     }
 };

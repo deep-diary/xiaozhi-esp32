@@ -28,7 +28,7 @@ void DeepDogImmichApplyDefaultsIfEmpty();
 
 /**
  * 启动前在 internal 栈加载 Immich NVS 配置（RuntimeStart / immich_late / MQTT）。
- * dog_face_ai（PSRAM 栈）与 dog_immich worker 均不得直接触发 NVS/Flash。
+ * dog_face_ai / dog_immich（PSRAM 栈）meta NVS 须经 face_persist；facedb 须经 face_facedb。
  */
 void DeepDogImmichPrepareConfig();
 

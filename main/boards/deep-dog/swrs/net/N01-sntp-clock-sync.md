@@ -21,7 +21,7 @@ WiFi 联网后自动 SNTP 同步 UTC，使 `time()` 为可信 Unix 秒（≥ `1e
 | 来源 | 行为 |
 |------|------|
 | **SNTP（本需求）** | WiFi 获 IP 后 `esp_netif_sntp_init`；主/备 NTP 见 `net_config.h` |
-| **OTA `server_time`** | 保留；若 OTA 先设钟，SNTP 仍运行以维持漂移 |
+| **OTA `server_time`** | 保留；`timestamp` 为 **UTC 毫秒**，**禁止**叠加 `timezone_offset` 写入 `settimeofday`（否则 CST 设备快 8h）；SNTP 仍运行以纠偏 |
 | **未同步** | `TouchLastSeen` 跳过写入；`last_seen_at` 保持 0 或历史有效值 |
 
 ## 配置（`net/net_config.h`）

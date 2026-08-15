@@ -135,7 +135,8 @@
 
 /** 本地库最大 feat 条数（含 alias embedding；canonical 人数通常更少） */
 #ifndef DEEP_DOG_FACE_RECOG_MAX
-#define DEEP_DOG_FACE_RECOG_MAX 128
+/** 库容上限；FaceMeta s_meta[] 为 static BSS（约 140B/人，32 人≈4.5KiB internal） */
+#define DEEP_DOG_FACE_RECOG_MAX 32
 #endif
 
 /** 自动 enroll 最低检测 score（质量门控） */
@@ -148,7 +149,7 @@
 #define DEEP_DOG_FACE_REGISTRY_MAX_ALIASES 8
 #endif
 
-/** MQTT retain face/registry JSON 缓冲（128 槽 + Immich 字段；4096 不足会截断致前端解析失败） */
+/** MQTT retain face/registry JSON 缓冲（32 槽 + Immich 字段；32768 足够） */
 #ifndef DEEP_DOG_FACE_REGISTRY_JSON_BUF
 #define DEEP_DOG_FACE_REGISTRY_JSON_BUF 32768
 #endif
@@ -252,7 +253,7 @@
  * FreeRTOS 任务栈（字节）。
  * dog_face_ai 优先 PSRAM 栈（7680）；6144 在 RTSP+识别长跑下 stack_hwm≈44 会溢出。
  * NVS meta 由 face_persist（internal）承接；facedb enroll/delete 由 face_facedb（internal）承接。
- * dog_immich 保持 internal 栈（HTTP/TLS + Immich NVS 会读 Flash）。
+ * dog_immich 优先 PSRAM 栈（HTTP/TLS；meta/asset NVS 经 face_persist internal worker）。
  * 评估方法：CONFIG_FREERTOS_USE_TRACE_FACILITY → uxTaskGetStackHighWaterMark
  * 或 MCP self.board.diagnostics → tasks[].stack_hwm。
  */
@@ -271,6 +272,23 @@
 #endif
 #ifndef DEEP_DOG_FACE_BOOT_TASK_STACK
 #define DEEP_DOG_FACE_BOOT_TASK_STACK 16384
+#endif
+
+/**
+ * 1=Face AI / VisionHub / 板级 MQTT·HTTP 延后到小智激活完成（OTA HTTPS 释放后再启），
+ * 避免与 esp-aes / mqtt_task 抢 internal SRAM。
+ */
+#ifndef DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION
+#define DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION 1
+#endif
+#ifndef DEEP_DOG_BOOT_MIN_INTERNAL_FREE
+#define DEEP_DOG_BOOT_MIN_INTERNAL_FREE (24 * 1024)
+#endif
+#ifndef DEEP_DOG_BOOT_MIN_INTERNAL_LARGEST
+#define DEEP_DOG_BOOT_MIN_INTERNAL_LARGEST (12 * 1024)
+#endif
+#ifndef DEEP_DOG_BOOT_MEMORY_WAIT_MS
+#define DEEP_DOG_BOOT_MEMORY_WAIT_MS 15000
 #endif
 
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

@@ -75,6 +75,8 @@ public:
     virtual Camera* GetCamera();
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
+    /** 小智云端激活/OTA 完成后调用；deep-dog 在此启动 Face AI 等重模块，避免与 HTTPS 抢 internal。 */
+    virtual void OnActivationComplete() {}
     virtual void SetNetworkEventCallback(NetworkEventCallback callback) { (void)callback; }
     virtual const char* GetNetworkStateIcon() = 0;
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);

@@ -5,8 +5,11 @@
 #include "mcp_server.h"
 
 #include <cJSON.h>
+#include <esp_heap_caps.h>
 #include <esp_http_server.h>
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <cstring>
 #include <cstdlib>
@@ -92,8 +95,22 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
         .is_websocket = true,
     };
 
-    if (httpd_start(&server_handle_, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "httpd_start failed on port %u", static_cast<unsigned>(port_));
+    esp_err_t start_err = ESP_FAIL;
+    for (int attempt = 1; attempt <= 3; ++attempt) {
+        const size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        const size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        start_err = httpd_start(&server_handle_, &config);
+        if (start_err == ESP_OK) {
+            break;
+        }
+        ESP_LOGW(TAG, "httpd_start attempt %d/3 failed port=%u err=%s free_int=%u largest_int=%u",
+                 attempt, static_cast<unsigned>(port_), esp_err_to_name(start_err), (unsigned)free_int,
+                 (unsigned)largest_int);
+        server_handle_ = nullptr;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    if (start_err != ESP_OK) {
+        ESP_LOGE(TAG, "httpd_start failed on port %u err=%s", static_cast<unsigned>(port_), esp_err_to_name(start_err));
         server_handle_ = nullptr;
         return false;
     }

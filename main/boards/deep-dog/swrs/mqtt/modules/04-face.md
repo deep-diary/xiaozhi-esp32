@@ -184,9 +184,11 @@
 ```json
 {
   "version": 1,
+  "clock_synced": true,
+  "ts_iso": "2026-08-14T13:41:54Z",
   "count": 1,
   "feat_count": 20,
-  "max_count": 128,
+  "max_count": 32,
   "entries": [
     {
       "local_id": 2,
@@ -195,15 +197,17 @@
       "immich_asset_id": "asset-uuid",
       "aliases": [3],
       "updated_at": 1710000000,
-      "last_seen_at": 1710001200
+      "last_seen_at": 1710001200,
+      "last_seen_iso": "2024-03-09T17:40:00Z"
     }
   ],
   "ts": 1710000000
 }
 ```
 
-- **`feat_count` / `max_count`**：embedding 槽用量（UI 显示 `20/128`）；`count` 为 canonical 人数。
-- **`last_seen_at`**：上次成功识别或 **enroll 成功**（Unix 秒）；与 `updated_at`（meta 写入，同为 Unix 秒）分离。init 补 orphan 槽不写此字段。
+- **`feat_count` / `max_count`**：embedding 槽用量（UI 显示 `20/32`）；`count` 为 canonical 人数。
+- **`clock_synced` / `ts_iso`**：与 [N01 SNTP](../../net/N01-sntp-clock-sync.md)、`device/status` 一致；前端应用 **`last_seen_iso`**（UTC `Z` 后缀）展示「上次见面」，勿把 `last_seen_at` 当本地墙钟秒解析（否则会误判设备时钟超前 8h）。
+- **`last_seen_at`**：上次成功识别或 **enroll 成功**（Unix 秒，UTC）；与 `updated_at`（meta 写入，同为 Unix 秒）分离。init 补 orphan 槽不写此字段。
 - **`updated_at`**：元数据变更时刻（Unix 秒，`time()` / SNTP）；**禁止**使用 `esp_timer`  boot 毫秒。时钟前提见 [N01 SNTP](../../net/N01-sntp-clock-sync.md)。
 - **满库 LRU**：`feat_count >= max_count` 时新人 enroll 淘汰 `last_seen_at` 最久槽位（tie：优先 placeholder / 无 Immich）。
 
@@ -229,10 +233,11 @@
 
 ## 固件要点
 
-- `DURING_RTSP=1`；`clear_db` 清 facedb+NVS+session。
+- `DURING_RTSP=1`；`clear_db` 清 facedb+NVS+session（recognizer 未就绪时亦 wipe `/facedb/db` 文件，避免 Init 恢复旧库）。
 - `live` / `identity` 分频；`detect_interval_ms` 运行时夹紧 200–5000。
 - **`face/registry` retain 与 `face/status` 语义分离**：status 为实时框；registry 为 canonical 已注册库。
-- **boot 默认开 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1`）时，WiFi IP 就绪后自动 `DeepDogFaceAiRuntimeStart()`（检测+识别，`recognize_enabled` 默认 true）。串口会打印 `boot_baseline` / `face_ready` 内存报告。
+- **boot 默认开 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1`）且 **`DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION=1`（默认）** 时：WiFi IP 后**不**立即启 Face；等小智 **OTA/激活完成**（`Application::OnActivationComplete` → `post_activation` 内存报告）且 internal 达标后再 `DeepDogFaceAiRuntimeStart()`，避免与 HTTPS OTA / 云端 MQTT 抢 internal。串口：`post_activation` → `face_ready`。
+- **关闭延后**（`DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION=0`）：恢复 WiFi IP 后立即启 Face/hub/MQTT（联调旧行为）。
 - **boot 默认关 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=0`）时，MQTT 首连可能先于 recognizer 就绪而 retain 空库；**recognizer 从 NVS/facedb 恢复后必须 republish registry**（覆盖陈旧 retain）。
 - **`face/cmd` lazy-start**：先创建 `face_persist`（internal，NVS meta）、**`face_facedb`（internal，facedb enroll/delete/clear）** 与 `dog_face_ai`（**优先 PSRAM 栈**，仅检测/feat/内存 query），`dog_immich` 仍为 **internal 栈**；再加载检测/识别模型。见 [S08 §3.1](../../vision/server/S08-rtsp-face-wdt-mitigation.md)。
 - **`face/cmd` 变更检测/识别开关成功后**，须 republish registry（`esp_timer` 异步 publish）。

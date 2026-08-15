@@ -44,6 +44,10 @@ AND 未处于失败退避窗口
 
 因此：设备上已有 `#1`、`#2` 但无真名时，再次对着 `#1` **也会**调 Immich（不只「新 enrolled」）。
 
+**无 `immich_asset_id` 的重试**：依赖实时帧裁剪 JPEG，**无** deferred 后台 upload。除完整识别帧外，**识别降频 sticky 帧**（IoU 沿用上一帧 `local_id`）在满足 §3 门控时同样尝试上传，避免人一直在镜头前却因 `RECOG_MIN_INTERVAL` 长期无 asset。
+
+**有 `immich_asset_id` 无真名**：Immich worker 每 `DEFERRED_POLL_S` 对已存 asset 轮询 `people[]`（与出镜无关）。
+
 会话/NVS 已有真名且未点刷新 → **不调** Immich。
 
 显式刷新：`POST /api/face_refresh_name`（可带 `local_id=`，默认当前 primary）。
@@ -81,7 +85,7 @@ Key：NVS（`fdog_im`）；禁止 git 明文。
 
 | ID | 需求 |
 |----|------|
-| NAM-01 | 按 §3 门控调用 Immich（含已有无真名的 local_id） |
+| NAM-01 | 按 §3 门控调用 Immich（含已有无真名的 local_id；含 sticky 降频帧） |
 | NAM-02 | 异步不阻塞检测/MJPEG/狗控 |
 | NAM-03 | 成功绑定 local_id ↔ 真名 |
 | NAM-04 | 失败降级为数字 ID |

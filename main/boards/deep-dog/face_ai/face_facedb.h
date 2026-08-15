@@ -17,6 +17,11 @@ esp_err_t DeepDogFaceFacedbEnrollFeatSync(dl::TensorBase* feat);
 esp_err_t DeepDogFaceFacedbDeleteFeatSync(uint16_t local_id);
 esp_err_t DeepDogFaceFacedbClearAllSync();
 
+/** clear_db：阻塞新 enroll/delete，并等待 worker 队列排空。 */
+void DeepDogFaceFacedbQuiesceBegin();
+void DeepDogFaceFacedbQuiesceEnd();
+bool DeepDogFaceFacedbWaitIdle(int timeout_ms);
+
 /** 仅 face_facedb worker 调用（face_recognize.cc） */
 esp_err_t DeepDogFaceRecognizeFacedbEnrollFeat(dl::TensorBase* feat);
 esp_err_t DeepDogFaceRecognizeFacedbDeleteFeat(uint16_t local_id);

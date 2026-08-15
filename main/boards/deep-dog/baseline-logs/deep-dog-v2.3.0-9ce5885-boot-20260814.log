@@ -1,0 +1,342 @@
+# deep-dog baseline boot log
+# captured_at: 2026-08-14T21:58:10
+# board: deep-dog
+# firmware: xiaozhi v2.3.0 (git 9ce5885 on feat/face)
+# target: esp32s3, OV2640 RGB565 240x240@25fps
+# port: /dev/cu.usbmodem1101 @ 115200
+# duration_seconds: 120
+# ---
+sed as console UART I/O pins
+I (99) cpu_start: Pro cpu start user code
+I (99) cpu_start: cpu freq: 240000000 Hz
+I (101) app_init: Application information:
+I (105) app_init: Project naESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40048836
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x548
+load:0x403c8700,len:0xc3c
+load:0x403cb700,len:0x2e70
+entry 0x403c8908
+I (36) octal_psram: vendor id    : 0x0d (AP)
+I (37) octal_psram: dev id       : 0x02 (generation 3)
+I (37) octal_psram: density      : 0x03 (64 Mbit)
+I (38) octal_psram: good-die     : 0x01 (Pass)
+I (43) octal_psram: Latency      : 0x01 (Fixed)
+I (47) octal_psram: VCC          : 0x01 (3V)
+I (51) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (56) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (61) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (65) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (70) octal_psram: DriveStrength: 0x00 (1/1)
+I (74) MSPI Timing: Enter psram timing tuning
+I (79) esp_psram: Found 8MB PSRAM device
+I (82) esp_psram: Speed: 80MHz
+I (85) cpu_start: Multicore app
+I (99) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (99) cpu_start: Pro cpu start user code
+I (99) cpu_start: cpu freq: 240000000 Hz
+I (101) app_init: Application information:
+I (105) app_init: Project name:     xiaozhi
+I (109) app_init: App version:      2.3.0
+I (112) app_init: Compile time:     Aug 13 2026 21:08:26
+I (117) app_init: ELF file SHA256:  8e4308792...
+I (122) app_init: ESP-IDF:          v5.5.2
+I (126) efuse_init: Min chip rev:     v0.0
+I (129) efuse_init: Max chip rev:     v0.99 
+I (133) efuse_init: Chip rev:         v0.2
+I (137) heap_init: Initializing. RAM available for dynamic allocation:
+I (144) heap_init: At 3FCB5A10 len 00033D00 (207 KiB): RAM
+I (149) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (154) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (159) heap_init: At 600FE000 len 00001FD8 (7 KiB): RTCRAM
+I (164) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (171) spi_flash: detected chip: boya
+I (174) spi_flash: flash io: qio
+W (177) legacy_touch_driver: legacy touch driver is deprecated, please migrate to use driver/touch_sens.h
+I (187) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (193) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (200) main_task: Started on CPU0
+I (210) esp_psram: Reserving pool of 128K of internal memory for DMA/internal allocations
+I (210) main_task: Calling app_main()
+I (230) Board: UUID=e0fb614d-f365-44d1-b215-9ca8af9d51fb SKU=deep-dog
+I (230) button: IoT Button Version: 4.2.0
+I (230) i2c_bus: I2C Bus V2 uses the externally initialized bus handle
+I (350) Display: Power management not supported
+I (400) LcdDisplay: Turning display on
+I (400) LcdDisplay: Initialize LVGL library
+I (400) LcdDisplay: Use 1MB of PSRAM for image cache
+I (400) LcdDisplay: Initialize LVGL port
+I (400) LcdDisplay: Adding LCD display
+I (400) LVGL: Starting LVGL task
+I (410) Backlight: Set brightness to 75
+I (410) touch_disp: touch combo recognizer attached (consume=0)
+I (420) touch_disp: registered touch app: log
+I (420) touch_disp: registered touch app: dog
+I (1220) deep_dog_touch: Touch button 1 baseline=22003
+I (1820) deep_dog_touch: Touch button 2 baseline=17962
+I (2420) deep_dog_touch: Touch button 3 baseline=22786
+I (2420) deep_dog: Touch thresholds: factory defaults (no NVS)
+I (2620) deep_dog: Camera init attempt 1/2
+I (2630) ov2640: Detected Camera sensor PID=0x26
+I (2860) EspVideo: Camera init success
+I (2860) deep_dog: Camera ready on attempt 1
+I (2860) deep_dog: Camera orient h_mirror=0 v_flip=1
+I (2860) dog_mqtt_cfg: broker 192.168.31.25:1883 bound=1 device_id=1051db847e88 client_id=deep-dog-1051db847e88-847e88
+I (2870) vision_hub: RTSP push url=rtsp://192.168.31.25:8554/deep-dog/1051db847e88
+I (2870) dog_face_greet: config enabled=1 gap=1800
+I (2880) dog_face_greet: init enabled=1 gap=1800s
+I (2880) deep_dog: ext_pins mode=led A=38 B=48 can=0 motor=0 dog=0 arm=0 servo=0 gimbal=0 led=1
+W (2890) CircularStrip: Unknown led strip event: 0
+I (2900) dog_led: WS2812 init gpio=38 count=24
+I (2900) led_app_dog: dog LED app registered (active when mode=5)
+I (2910) led_app_dog: system bind: idle green breathe
+W (2910) CircularStrip: Unknown led strip event: 0
+I (2920) MCP: Add tool: self.led_strip.get_brightness
+I (2920) MCP: Add tool: self.led_strip.set_brightness
+I (2920) MCP: Add tool: self.led_strip.set_single_color
+I (2930) MCP: Add tool: self.led_strip.set_all_color
+I (2930) MCP: Add tool: self.led_strip.blink
+I (2940) MCP: Add tool: self.led_strip.scroll
+I (2940) MCP: Add tool: self.led_strip.breathe
+I (2950) MCP: Add tool: self.led_strip.show_device_state
+I (2950) dog_led_mcp: registered self.led_strip.* MCP tools
+I (2960) MCP: Add tool: self.device.start_pairing
+I (2960) MCP: Add tool: self.device.unbind
+I (2970) dog_pair_mcp: MCP pairing tools registered
+I (2970) MCP: Add tool: self.face.set_mode
+I (2970) MCP: Add tool: self.face.manage
+I (2980) MCP: Add tool: self.face.list
+I (2980) MCP: Add tool: self.face.get_identity
+I (2980) MCP: Add tool: self.face.simulate_greet
+I (2990) MCP: Add tool: self.face.clear_speaker
+I (2990) MCP: Add tool: self.face.set_greet_config
+I (3000) dog_face_mcp: registered face MCP tools
+I (3000) MCP: Add tool: self.board.diagnostics
+I (3010) dog_board_mcp: registered self.board.diagnostics
+I (3010) StateMachine: State: unknown -> starting
+I (3060) Es8311AudioCodec: Duplex channels created
+I (3070) ES8311: Work in Slave mode
+I (3070) Es8311AudioCodec: Es8311AudioCodec initialized
+I (3070) AudioCodec: Audio codec started
+I (3080) MCP: Add tool: self.get_device_status
+I (3080) MCP: Add tool: self.audio_speaker.set_volume
+I (3080) MCP: Add tool: self.screen.set_brightness
+I (3090) MCP: Add tool: self.screen.set_theme
+I (3090) MCP: Add tool: self.camera.take_photo
+I (3090) MCP: Add tool: self.get_system_info [user]
+I (3100) MCP: Add tool: self.reboot [user]
+I (3100) MCP: Add tool: self.upgrade_firmware [user]
+I (3110) MCP: Add tool: self.screen.get_info [user]
+I (3110) MCP: Add tool: self.screen.snapshot [user]
+I (3120) MCP: Add tool: self.screen.preview_image [user]
+I (3120) MCP: Add tool: self.assets.set_download_url [user]
+I (3130) WifiManager: Initializing...
+I (3130) pp: pp rom version: e7ae62f
+I (3130) net80211: net80211 rom version: e7ae62f
+I (3150) wifi:wifi driver task: 3fcc8d8c, prio:23, stack:6144, core=0
+I (3150) wifi:wifi firmware version: ee91c8c
+I (3150) wifi:wifi certification version: v7.0
+I (3150) wifi:config NVS flash: disabled
+I (3150) wifi:config nano formatting: enabled
+I (3160) wifi:Init data frame dynamic rx buffer num: 6
+I (3160) wifi:Init dynamic rx mgmt buffer num: 5
+I (3170) wifi:Init management short buffer num: 32
+I (3170) wifi:Init static tx buffer num: 16
+I (3180) wifi:Init tx cache buffer num: 32
+I (3180) wifi:Init static tx FG buffer num: 2
+I (3180) wifi:Init static rx buffer size: 1600
+I (3190) wifi:Init static rx buffer num: 3
+I (3190) wifi:Init dynamic rx buffer num: 6
+I (3200) wifi_init: rx ba win: 3
+I (3200) wifi_init: accept mbox: 6
+I (3200) wifi_init: tcpip mbox: 16
+I (3210) wifi_init: udp mbox: 6
+I (3210) wifi_init: tcp mbox: 6
+I (3210) wifi_init: tcp tx win: 5760
+I (3210) wifi_init: tcp rx win: 5760
+I (3220) wifi_init: tcp mss: 1440
+I (3220) wifi_init: WiFi/LWIP prefer SPIRAM
+I (3230) WifiManager: Initialized
+I (3230) WifiBoard: Starting WiFi connection attempt
+I (3230) WifiManager: Starting station
+I (3240) WifiStation: Station DHCP hostname: Xiaozhi-7E88
+I (3240) phy_init: phy_version 711,97bcf0a2,Aug 25 2025,19:04:10
+I (3290) wifi:mode : sta (10:51:db:84:7e:88)
+I (3290) wifi:enable tsf
+I (3290) WifiBoard: WiFi scanning
+I (3290) dog_sntp: clock already synced (OTA/manual), starting SNTP for drift
+I (3290) dog_sntp: SNTP init server=pool.ntp.org (backup=ntp.aliyun.com if CONFIG_LWIP_SNTP_MAX_SERVERS>1)
+W (3300) wifi:Haven't to connect to a suitable AP now!
+I (5690) WifiStation: Found AP: Blue, BSSID: 8c:53:c3:14:3e:4b, RSSI: -48, Channel: 4, Authmode: 4
+I (5690) WifiStation: Found AP: Blue, BSSID: 8c:53:c3:14:3e:44, RSSI: -70, Channel: 4, Authmode: 4
+I (5700) WifiBoard: WiFi connecting to Blue
+W (5710) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (8180) wifi:new:<4,0>, old:<1,0>, ap:<255,255>, sta:<4,0>, prof:1, snd_ch_cfg:0x0
+I (8190) wifi:state: init -> auth (0xb0)
+I (8230) wifi:state: auth -> assoc (0x0)
+I (8290) wifi:state: assoc -> run (0x10)
+I (8350) wifi:connected with Blue, aid = 4, channel 4, BW20, bssid = 8c:53:c3:14:3e:4b
+I (8350) wifi:security: WPA2-PSK, phy: bgn, rssi: -48
+I (8360) wifi:pm start, type: 1
+
+I (8360) wifi:dp: 1, bi: 102400, li: 10, scale listen interval from 1024000 us to 1024000 us
+I (8370) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
+I (8380) deep_dog: WiFi 已切静态 IP: 192.168.31.211 mask 255.255.255.0 gw 192.168.31.1
+I (8380) esp_netif_handlers: sta ip: 192.168.31.211, mask: 255.255.255.0, gw: 192.168.31.1
+I (8390) WifiStation: Got IP: 192.168.31.211
+I (8390) WifiBoard: Connected to WiFi: Blue
+I (8400) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (8810) deep_dog: WiFi IP=192.168.31.211，启动 face/hub/http/mqtt/imu
+I (8810) BMI2_ESP32: Creating I2C device with address 0x68
+I (8810) BMI2_ESP32: I2C device created successfully
+I (9010) BMI2_ESP32: Detected FreeRTOS tick rate: 100 Hz
+I (9590) bmi270_api: BMI270 sensor created successfully
+I (9590) dog_imu: BMI270 initialized
+I (9590) deep_dog: BMI270 ready
+I (9590) dog_imu_sw: started (rot=75deg/400ms trans=6.5m/s2/200ms suppress_after_rot=300ms)
+I (9600) deep_dog: Face/hub/MQTT/HTTP deferred until xiaozhi activation done
+I (9610) Application: Network connected
+I (9610) StateMachine: State: starting -> activating
+I (9610) Assets: The storage free size is 19392 KB
+I (9620) Assets: The partition size is 2176 KB
+I (9630) dog_imu_sw: trans_y_neg mag=9.5
+I (9710) Assets: The checksum calculation time is 85 ms
+I (9710) MODEL_LOADER: Successfully load srmodels
+I (9710) Assets: Refreshing display theme...
+W (9720) EmojiCollection: Emoji not found: microchip_ai
+I (9720) Ota: Current version: 2.3.0
+I (10150) esp-x509-crt-bundle: Certificate validated
+I (10850) HttpClient: Established new connection to api.tenclass.net:443 protocol=https cost=1130
+I (12100) HttpClient: HTTP connection closed
+I (12110) Ota: Current is the latest version
+I (12110) Ota: Running partition: ota_0
+I (12110) MQTT: Connecting to endpoint mqtt.xiaozhi.me
+I (13360) esp-x509-crt-bundle: Certificate validated
+I (14810) MQTT: Connected to endpoint
+I (14810) Application: Activation done
+I (14810) SystemInfo: sram(internal): free=69347 min=56031 total=406523 (17.1% free)  psram: free=7918732 min=7903988 total=8388608 (94.4% free)
+I (14820) StateMachine: State: activating -> idle
+I (14830) WifiStation: Setting WiFi power save level: LOW_POWER (MAX_MODEM)
+I (14830) wifi:Set ps type: 2, coexist: 0
+
+I (14830) AfeAudioEngine: Model 0: wn9_nihaoxiaozhi_tts
+I (14840) WakeWordCache: Allocated 64000 bytes in PSRAM
+I (14840) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
+MC Quantized wakenet9: wakenet9l_tts1h8_你好小智_3_0.631_0.635, tigger:v4, mode:0, p:0, (May 25 2026 15:51:00)
+I (14900) AFE: AFE Version: (1MIC_V251128)
+I (14900) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (14910) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> |WakeNet(wn9_nihaoxiaozhi_tts,)| -> [output]
+I (14920) AFE: AFE Version: (1MIC_V251128)
+I (14920) AFE: Input PCM Config: total 1 channels(1 microphone, 0 playback), sample rate:16000
+I (14930) AFE: AFE Pipeline: [input] -> |VAD(WebRTC)| -> [output]
+I (14940) AfeAudioEngine: Initialized FD AFE, detector: WakeNet, NS: off, feed: 512, fetch: 512
+I (14940) AudioCodec: Set output enable to true
+I (14950) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
+I (14960) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
+I (14960) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
+I (14970) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
+I (15000) Adev_Codec: Open codec device OK
+I (15010) AudioCodec: Set input enable to true
+I (15130) deep_dog: post-activation: start heavy services
+I (15130) dog_mem_rpt: memory report [post_activation]
+I (15130) dog_mem_rpt:   internal: free=46719 min=32971 total=406523 largest=23552 (11.5% free)
+I (15130) dog_mem_rpt:   psram: free=7436856 min=7418504 total=8388608 largest=7340032 (88.7% free)
+I (15150) dog_mem_rpt:   task ipc1             hwm=544 domain=unknown
+I (15150) dog_mem_rpt:   task ipc0             hwm=552 domain=unknown
+I (15150) dog_mem_rpt:   task IDLE0            hwm=720 domain=unknown
+I (15160) dog_mem_rpt:   task IDLE1            hwm=728 domain=unknown
+I (15170) dog_mem_rpt:   task tiT              hwm=1320 domain=unknown
+I (15170) dog_mem_rpt:   task sys_evt          hwm=1388 domain=unknown
+I (15180) dog_mem_rpt:   task Tmr Svc          hwm=1392 domain=unknown
+I (15190) dog_mem_rpt:   task mqtt_task        hwm=1540 domain=internal alloc=6144
+I (15190) dog_mqtt_cfg: broker 192.168.31.25:1883 bound=1 device_id=1051db847e88 client_id=deep-dog-1051db847e88-847e88
+I (15200) dog_mqtt: start prefix=deepdiary/deep-dog/1051db847e88/
+I (15260) dog_mqtt: connected to 192.168.31.25:1883
+I (15260) dog_mqtt_dev: device/info retain ok=1
+I (15280) dog_mqtt: sub deepdiary/deep-dog/1051db847e88/pairing/cmd qos=1
+I (15290) dog_mqtt: sub deepdiary/deep-dog/1051db847e88/stream/cmd qos=1
+I (15290) dog_mqtt_stream: stream/status retain state=idle mode=off ok=1
+I (15290) dog_mqtt_imu: switches rot=[0,0,0,0,0,0] trans=[0,0,0,1,0,0]
+I (15300) dog_mqtt_imu: imu/status ok=1 accel_g=9.84 pub=1
+I (15300) dog_mqtt: sub deepdiary/deep-dog/1051db847e88/face/cmd qos=1
+I (15310) dog_mqtt: sub deepdiary/deep-dog/1051db847e88/track/cmd qos=1
+I (15320) dog_mqtt_track: track/status enabled=0 following=0 err= pub=1
+I (15320) dog_mqtt: sub deepdiary/deep-dog/1051db847e88/touch/cmd qos=1
+I (15340) dog_mqtt: sub deepdiary/deep-dog/1051db847e88/led/cmd qos=1
+I (15350) dog_mqtt: board MQTT started (connected=1) stream=1 face=1 track=1 imu=1 led=1 servo=0 gimbal=0 handle=0 can=0 motor=0
+I (15350) dog_ws_mcp: WS MCP bridge ws://<ip>:8080/ws (generic McpServer::ParseMessage)
+I (15360) dog_mqtt_dev: device/info retain ok=1
+I (15360) dog_mqtt: clock synced: republished device/* + face/registry
+I (15370) deep_dog: WS MCP on port 8080 path /ws
+I (15380) dog_mqtt_dev: device/info retain ok=1
+I (15380) dog_mem_rpt: face_ai internal ready: free=32203 largest=13312
+I (15380) face_persist: persist worker ready (stack=3072 internal)
+I (15390) face_facedb: facedb worker ready (stack=6144 internal)
+I (15400) dog_mqtt_imu: imu/status ok=1 accel_g=9.85 pub=1
+W (15480) dl::Model: Minimize() will delete variables not used in model inference, which will make it impossible to test or debug the model.
+W (15530) dl::Model: Minimize() will delete variables not used in model inference, which will make it impossible to test or debug the model.
+I (15530) dog_face_det: HumanFaceDetect ready (model=0 msr>=0.50 mnp>=0.50 min_box=20 rgb565_swap=0 input_rgb888=0)
+I (15600) dog_face_det: black 240x240 self-test: 0 boxes (threshold pipeline ok for black)
+I (15610) dog_face_rec: facedb mounted at /facedb
+I (15610) FbsLoader: The storage free size is 17216 KB
+I (15610) FbsLoader: The partition size is 2048 KB
+W (15610) FbsLoader: There is only one model in the flatbuffers, ignore the input model name!
+W (15930) dl::Model: Minimize() will delete variables not used in model inference, which will make it impossible to test or debug the model.
+I (15950) dog_face_rec: recognizer ready (feats=6 meta=6 next_id=13 thr=0.50 multi=4)
+I (15950) dog_face_ai: runtime started (queue=1, interval>=500 ms, recog_min=2000 ms, during_rtsp=1, recog=1 immich=1)
+I (15960) dog_mem_rpt: memory report [face_ready]
+I (15960) dog_mem_rpt:   internal: free=13187 min=231 total=406523 largest=3584 (3.2% free)
+I (15970) dog_mem_rpt:   psram: free=4826724 min=4792056 total=8388608 largest=4718592 (57.5% free)
+W (15980) dog_mem_rpt:   health: low_internal_heap (free=13223 < 32768)
+I (15990) dog_mem_rpt:   task dog_post_act     hwm=544 domain=unknown
+I (15990) dog_mem_rpt:   task ipc1             hwm=544 domain=unknown
+I (16000) dog_mem_rpt:   task ipc0             hwm=552 domain=unknown
+I (16010) dog_mem_rpt:   task IDLE0            hwm=720 domain=unknown
+I (16010) dog_mem_rpt:   task IDLE1            hwm=728 domain=unknown
+I (16020) dog_mem_rpt:   task tiT              hwm=1320 domain=unknown
+I (16020) dog_mem_rpt:   task sys_evt          hwm=1388 domain=unknown
+I (16030) dog_mem_rpt:   task Tmr Svc          hwm=1392 domain=unknown
+W (16040) dog_face_ai: immich_late task create failed
+I (16040) dog_mem_rpt: memory report [face_ready]
+I (16050) dog_mem_rpt:   internal: free=13179 min=231 total=406523 largest=3584 (3.2% free)
+I (16050) dog_mem_rpt:   psram: free=4828676 min=4792056 total=8388608 largest=4718592 (57.6% free)
+W (16060) dog_mem_rpt:   health: low_internal_heap (free=13179 < 32768)
+I (16070) dog_mem_rpt:   task ipc1             hwm=544 domain=unknown
+I (16070) dog_mem_rpt:   task dog_post_act     hwm=544 domain=unknown
+I (16080) dog_mem_rpt:   task ipc0             hwm=552 domain=unknown
+I (16090) dog_mem_rpt:   task IDLE0            hwm=720 domain=unknown
+I (16090) dog_mem_rpt:   task IDLE1            hwm=728 domain=unknown
+I (16100) dog_mem_rpt:   task tiT              hwm=1320 domain=unknown
+I (16110) dog_mem_rpt:   task sys_evt          hwm=1388 domain=unknown
+I (16110) dog_mem_rpt:   task Tmr Svc          hwm=1392 domain=unknown
+I (16130) vision_hub: capture path=native RGB565 (no YUV convert)
+I (16140) vision_hub: VisionFrameHub started (face always-on when enabled)
+I (16140) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (16650) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (17160) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (17670) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (18180) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (18690) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (19210) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (19720) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (20230) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (20740) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (21260) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (21770) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (22280) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (22790) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (23300) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (23810) dog_face_ai: timing detect_ms=0 recog_ms=-1 boxes=0 sticky=0
+I (35340) dog_mqtt_imu: imu/status ok=1 accel_g=9.87 pub=1
+I (35770) dog_sntp: SNTP synced unix=1786715926
+I (44080) SystemInfo: sram(internal): free=17683 min=231 total=406523 (4.3% free)  psram: free=4547992 min=4427916 total=8388608 (54.2% free)
+I (55310) dog_mqtt_imu: imu/status ok=1 accel_g=9.87 pub=1
+I (74080) SystemInfo: sram(internal): free=17691 min=231 total=406523 (4.4% free)  psram: free=4549560 min=4427364 total=8388608 (54.2% free)
+I (75300) dog_mqtt_imu: imu/status ok=1 accel_g=9.88 pub=1
+I (75960) dog_immich: ping url=http://im.deep-diary.com/api/server/ping http=200 ok=1 ms=644
+I (95870) dog_mqtt_imu: imu/status ok=1 accel_g=9.84 pub=1
+I (104080) SystemInfo: sram(internal): free=17491 min=231 total=406523 (4.3% free)  psram: free=4549336 min=4427364 total=8388608 (54.2% free)
+I (115870) dog_mqtt_imu: imu/status ok=1 accel_g=9.86 pub=1

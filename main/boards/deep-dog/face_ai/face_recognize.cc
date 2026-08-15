@@ -29,6 +29,8 @@
 #include <esp_timer.h>
 #include <nvs.h>
 #include <nvs_flash.h>
+#include <errno.h>
+#include <unistd.h>
 
 #if DEEP_DOG_FACE_AI_ENABLE && DEEP_DOG_FACE_RECOG_ENABLE && defined(CONFIG_IDF_TARGET_ESP32S3)
 
@@ -433,7 +435,7 @@ static bool MountFacedb() {
     }
     const esp_vfs_fat_mount_config_t conf = {
         .format_if_mount_failed = true,
-        .max_files = 4,
+        .max_files = 8,
         .allocation_unit_size = 4096,
         .disk_status_check_enable = false,
     };
@@ -651,8 +653,13 @@ static void RecognizeOneFace(const dl::image::img_t& img, const std::list<dl::de
         ESP_LOGW(TAG, "enroll skipped no feat tensor");
         return;
     }
-    if (DeepDogFaceFacedbEnrollFeatSync(feat_t) != ESP_OK) {
-        ESP_LOGW(TAG, "enroll failed");
+    const esp_err_t enroll_err = DeepDogFaceFacedbEnrollFeatSync(feat_t);
+    if (enroll_err != ESP_OK) {
+        const int nfeat = DeepDogFaceRecognizeGetFeatCount();
+        HumanFaceFeat* fm = s_recog ? s_recog->get_feat_model() : nullptr;
+        const int expect_len = fm ? fm->get_feat_len() : 0;
+        ESP_LOGW(TAG, "enroll failed: %s score=%.2f feats=%d feat_len=%d tensor=%d",
+                 esp_err_to_name(enroll_err), box->score, nfeat, expect_len, feat_len);
         return;
     }
     int new_id = s_next_id;
@@ -775,6 +782,66 @@ void DeepDogFaceRecognizeDeinit() {
     s_ready = false;
 }
 
+static void FormatIsoUtc(uint32_t unix_s, char* buf, size_t buf_size) {
+    if (!buf || buf_size < 21) {
+        if (buf && buf_size > 0) {
+            buf[0] = '\0';
+        }
+        return;
+    }
+    time_t t = static_cast<time_t>(unix_s);
+    struct tm tm_utc {};
+    gmtime_r(&t, &tm_utc);
+    char tmp[40];
+    snprintf(tmp, sizeof(tmp), "%04d-%02d-%02dT%02d:%02d:%02dZ", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1,
+             tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
+    strncpy(buf, tmp, buf_size - 1);
+    buf[buf_size - 1] = '\0';
+}
+
+/** clear_all_feats 失败时卸载 FAT 并重建空 recognizer（db 文件被占用时的兜底）。 */
+static bool RecreateEmptyRecognizer() {
+    {
+        std::lock_guard<std::mutex> lock(s_recog_mu);
+        delete s_recog;
+        s_recog = nullptr;
+    }
+    UnmountFacedb();
+    const int rm = remove(DEEP_DOG_FACE_RECOG_DB_PATH);
+    if (rm != 0 && errno != ENOENT) {
+        ESP_LOGW(TAG, "remove %s errno=%d", DEEP_DOG_FACE_RECOG_DB_PATH, errno);
+    }
+    if (!MountFacedb()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(s_recog_mu);
+    s_recog = new HumanFaceRecognizer(DEEP_DOG_FACE_RECOG_DB_PATH, HumanFaceFeat::MFN_S8_V1, false);
+    if (!s_recog) {
+        ESP_LOGE(TAG, "HumanFaceRecognizer recreate failed");
+        UnmountFacedb();
+        return false;
+    }
+    ESP_LOGI(TAG, "facedb recreated empty (feats=%d)", s_recog->get_num_feats());
+    return true;
+}
+
+/** 无 HumanFaceRecognizer 时直接删 facedb 文件（MQTT clear_db 可能早于 Init）。 */
+static bool WipeFacedbStorage() {
+    const bool was_mounted = s_fs_mounted;
+    if (!was_mounted && !MountFacedb()) {
+        ESP_LOGW(TAG, "wipe facedb: mount failed");
+        return false;
+    }
+    const int rm = remove(DEEP_DOG_FACE_RECOG_DB_PATH);
+    if (rm != 0 && errno != ENOENT) {
+        ESP_LOGW(TAG, "wipe facedb remove errno=%d", errno);
+    }
+    if (!was_mounted) {
+        UnmountFacedb();
+    }
+    return true;
+}
+
 bool DeepDogFaceRecognizeClearAll() {
     ClearSession();
     if (!s_recog) {
@@ -782,12 +849,13 @@ bool DeepDogFaceRecognizeClearAll() {
         memset(s_meta, 0, sizeof(s_meta));
         s_next_id = 1;
         (void)PersistMetaSync();
-        ESP_LOGW(TAG, "clear_db: recognizer not ready, meta reset only");
+        (void)WipeFacedbStorage();
+        ESP_LOGI(TAG, "clear_db ok (pre-init meta+facedb wiped)");
+        NotifyRegistryChanged();
         return true;
     }
-    esp_err_t err = DeepDogFaceFacedbClearAllSync();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "clear_all_feats failed: %s", esp_err_to_name(err));
+    if (!RecreateEmptyRecognizer()) {
+        ESP_LOGE(TAG, "clear_db: facedb remount failed");
         return false;
     }
     s_meta_count = 0;
@@ -968,9 +1036,19 @@ size_t DeepDogFaceRecognizeFormatRegistryJson(char* buf, size_t buf_size) {
     std::vector<DeepDogFaceEnrolledEntry> entries;
     (void)DeepDogFaceRecognizeListCanonical(&entries);
     const int feat_count = s_recog ? s_recog->get_num_feats() : 0;
+    const bool clock_synced = DeepDogClockIsSynced();
+    const time_t now = time(nullptr);
+    const int64_t ts =
+        clock_synced ? static_cast<int64_t>(now) : static_cast<int64_t>(esp_timer_get_time() / 1000000LL);
+    char ts_iso[32] = {};
+    if (clock_synced && IsPlausibleUnixSec(static_cast<uint32_t>(ts))) {
+        FormatIsoUtc(static_cast<uint32_t>(ts), ts_iso, sizeof(ts_iso));
+    }
     int n = snprintf(buf, buf_size,
-                     "{\"version\":1,\"count\":%d,\"feat_count\":%d,\"max_count\":%d,\"entries\":[",
-                     static_cast<int>(entries.size()), feat_count, DEEP_DOG_FACE_RECOG_MAX);
+                     "{\"version\":1,\"clock_synced\":%s,\"ts_iso\":\"%s\",\"count\":%d,\"feat_count\":%d,"
+                     "\"max_count\":%d,\"entries\":[",
+                     clock_synced ? "true" : "false", ts_iso, static_cast<int>(entries.size()), feat_count,
+                     DEEP_DOG_FACE_RECOG_MAX);
     if (n < 0 || static_cast<size_t>(n) >= buf_size) {
         return 0;
     }
@@ -994,14 +1072,18 @@ size_t DeepDogFaceRecognizeFormatRegistryJson(char* buf, size_t buf_size) {
                 snprintf(aliases + ap, sizeof(aliases) - static_cast<size_t>(ap), "]");
             }
         }
+        char seen_iso[32] = {};
+        if (e.last_seen_at > 0 && IsPlausibleUnixSec(e.last_seen_at)) {
+            FormatIsoUtc(e.last_seen_at, seen_iso, sizeof(seen_iso));
+        }
         const int w = e.last_seen_at > 0
                           ? snprintf(buf + off, buf_size - off,
                                      "%s{\"local_id\":%d,\"display_name\":\"%s\",\"immich_person_id\":\"%s\","
                                      "\"immich_asset_id\":\"%s\",\"name_pending\":%s,\"updated_at\":%u,"
-                                     "\"last_seen_at\":%u%s}",
+                                     "\"last_seen_at\":%u,\"last_seen_iso\":\"%s\"%s}",
                                      i ? "," : "", e.local_id, esc, esc_pid, esc_aid,
                                      e.name_pending ? "true" : "false", (unsigned)e.updated_at,
-                                     (unsigned)e.last_seen_at, e.alias_count > 0 ? aliases : "")
+                                     (unsigned)e.last_seen_at, seen_iso, e.alias_count > 0 ? aliases : "")
                           : snprintf(buf + off, buf_size - off,
                                      "%s{\"local_id\":%d,\"display_name\":\"%s\",\"immich_person_id\":\"%s\","
                                      "\"immich_asset_id\":\"%s\",\"name_pending\":%s,\"updated_at\":%u%s}",
@@ -1018,8 +1100,6 @@ size_t DeepDogFaceRecognizeFormatRegistryJson(char* buf, size_t buf_size) {
                  (unsigned)(off + 32));
         return 0;
     }
-    const time_t now = time(nullptr);
-    const int64_t ts = (now > 1000000000) ? static_cast<int64_t>(now) : static_cast<int64_t>(esp_timer_get_time() / 1000000LL);
     const int t = snprintf(buf + off, buf_size - off, "],\"ts\":%ld}", static_cast<long>(ts));
     if (t < 0) {
         return off;
@@ -1057,7 +1137,11 @@ esp_err_t DeepDogFaceRecognizeFacedbEnrollFeat(dl::TensorBase* feat) {
         return ESP_ERR_INVALID_ARG;
     }
     std::lock_guard<std::mutex> lock(s_recog_mu);
-    return s_recog->enroll_feat(feat);
+    const esp_err_t err = s_recog->enroll_feat(feat);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "enroll_feat failed: %s feats=%d", esp_err_to_name(err), s_recog->get_num_feats());
+    }
+    return err;
 }
 
 esp_err_t DeepDogFaceRecognizeFacedbDeleteFeat(uint16_t local_id) {
@@ -1073,7 +1157,11 @@ esp_err_t DeepDogFaceRecognizeFacedbClearAllFeats() {
         return ESP_ERR_INVALID_STATE;
     }
     std::lock_guard<std::mutex> lock(s_recog_mu);
-    return s_recog->clear_all_feats();
+    const esp_err_t err = s_recog->clear_all_feats();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "clear_all_feats in worker: %s feats=%d", esp_err_to_name(err), s_recog->get_num_feats());
+    }
+    return err;
 }
 
 int DeepDogFaceRecognizeGetFeatCount() {

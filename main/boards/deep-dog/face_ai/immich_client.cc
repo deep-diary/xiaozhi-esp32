@@ -7,6 +7,7 @@
 #include "immich_client.h"
 #include "face_recognize.h"
 #include "face_ai_bridge.h"
+#include "face_task_util.h"
 
 #include <atomic>
 #include <cstdio>
@@ -623,12 +624,13 @@ bool DeepDogImmichInit() {
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         return false;
     }
-    // internal 栈：ProcessJob 含 esp_http_client（TLS 证书在 Flash）+ SetConfig 写 NVS。
-    if (xTaskCreate(ImmichTask, "dog_immich", DEEP_DOG_FACE_IMMICH_TASK_STACK, nullptr, 2, &s_task) != pdPASS) {
-        ESP_LOGW(TAG, "immich task create failed stack=%u (free_int=%u largest_int=%u)",
+    // PSRAM 栈优先：NVS 写经 face_persist（internal）；face_ready 后 internal largest 常 <7KB 无法 xTaskCreate。
+    if (!DeepDogFaceTaskCreate("dog_immich", ImmichTask, DEEP_DOG_FACE_IMMICH_TASK_STACK, nullptr, 2, &s_task)) {
+        ESP_LOGW(TAG, "immich task create failed stack=%u (free_int=%u largest_int=%u psram=%u)",
                  (unsigned)DEEP_DOG_FACE_IMMICH_TASK_STACK,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         vQueueDelete(s_queue);
         s_queue = nullptr;
         return false;
@@ -703,6 +705,9 @@ bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete
              (unsigned)strlen(s_api_key), (unsigned)s_delete_asset, s_gps_configured ? 1 : 0);
     if (ok) {
         (void)DeepDogImmichPingServer();
+        if (!DeepDogImmichIsWorkerReady()) {
+            (void)DeepDogImmichInit();
+        }
     } else {
         NotifyStatusChanged();
     }
@@ -746,6 +751,10 @@ bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool
         heap_caps_free(jpeg);
     };
     if (!s_started || !s_queue || local_id <= 0 || jpeg_len == 0) {
+        if (!s_started) {
+            ESP_LOGW(TAG, "request_name dropped: immich worker not started local_id=%d len=%u", local_id,
+                     (unsigned)jpeg_len);
+        }
         free_jpeg();
         return false;
     }

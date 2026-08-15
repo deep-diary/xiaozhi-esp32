@@ -312,6 +312,7 @@ void Application::HandleActivationDoneEvent() {
     // Release OTA object after activation is complete
     ota_.reset();
     auto& board = Board::GetInstance();
+    board.OnActivationComplete();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
     Schedule([this]() {

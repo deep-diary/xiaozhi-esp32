@@ -45,7 +45,7 @@ uint32_t VisionHubStackBytes() {
 const StackHint* LookupStackHint(const char* name) {
     static const StackHint hints[] = {
         {"dog_face_ai", DEEP_DOG_FACE_AI_TASK_STACK, "psram"},
-        {"dog_immich", DEEP_DOG_FACE_IMMICH_TASK_STACK, "internal"},
+        {"dog_immich", DEEP_DOG_FACE_IMMICH_TASK_STACK, "psram"},
         {"face_persist", DEEP_DOG_FACE_PERSIST_TASK_STACK, "internal"},
         {"face_facedb", DEEP_DOG_FACE_FACEDB_TASK_STACK, "internal"},
         {"face_boot", DEEP_DOG_FACE_BOOT_TASK_STACK, "internal"},
@@ -218,4 +218,23 @@ void DeepDogMemoryReportLog(const char* phase) {
 #else
     ESP_LOGW(TAG, "  tasks: unavailable (CONFIG_FREERTOS_USE_TRACE_FACILITY=n)");
 #endif
+}
+
+bool DeepDogMemoryWaitInternalReady(const char* tag, size_t min_free_bytes, size_t min_largest_bytes,
+                                    int timeout_ms) {
+    const int step_ms = 500;
+    for (int elapsed = 0; elapsed <= timeout_ms; elapsed += step_ms) {
+        const size_t free_b = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        if (free_b >= min_free_bytes && largest >= min_largest_bytes) {
+            ESP_LOGI(TAG, "%s internal ready: free=%u largest=%u", tag ? tag : "?", (unsigned)free_b,
+                     (unsigned)largest);
+            return true;
+        }
+        ESP_LOGW(TAG, "%s wait internal: free=%u largest=%u (need>=%u / %u)", tag ? tag : "?",
+                 (unsigned)free_b, (unsigned)largest, (unsigned)min_free_bytes,
+                 (unsigned)min_largest_bytes);
+        vTaskDelay(pdMS_TO_TICKS(step_ms));
+    }
+    return false;
 }

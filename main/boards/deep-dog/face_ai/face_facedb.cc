@@ -4,6 +4,8 @@
 
 #include "dl_tensor_base.hpp"
 
+#include <atomic>
+
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -29,6 +31,8 @@ struct Job {
 QueueHandle_t s_queue = nullptr;
 TaskHandle_t s_task = nullptr;
 bool s_ready = false;
+std::atomic<bool> s_worker_busy{false};
+std::atomic<bool> s_quiesce{false};
 
 void RunJob(Job* job) {
     switch (job->op) {
@@ -68,7 +72,9 @@ void FacedbTask(void* /*arg*/) {
         if (xQueueReceive(s_queue, &job, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+        s_worker_busy.store(true, std::memory_order_release);
         RunJob(&job);
+        s_worker_busy.store(false, std::memory_order_release);
         if (job.done) {
             xSemaphoreGive(job.done);
         }
@@ -76,6 +82,9 @@ void FacedbTask(void* /*arg*/) {
 }
 
 esp_err_t RunSyncOp(Op op, dl::TensorBase* feat, uint16_t delete_id) {
+    if (s_quiesce.load(std::memory_order_acquire) && op != Op::ClearAll) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!s_ready || !s_queue) {
         switch (op) {
             case Op::EnrollFeat:
@@ -132,10 +141,34 @@ void DeepDogFaceFacedbShutdown() {
         s_queue = nullptr;
     }
     s_ready = false;
+    s_worker_busy.store(false, std::memory_order_release);
+    s_quiesce.store(false, std::memory_order_release);
 }
 
 bool DeepDogFaceFacedbIsReady() {
     return s_ready;
+}
+
+void DeepDogFaceFacedbQuiesceBegin() {
+    s_quiesce.store(true, std::memory_order_release);
+}
+
+void DeepDogFaceFacedbQuiesceEnd() {
+    s_quiesce.store(false, std::memory_order_release);
+}
+
+bool DeepDogFaceFacedbWaitIdle(int timeout_ms) {
+    for (int elapsed = 0; elapsed <= timeout_ms; elapsed += 50) {
+        const bool queue_empty = !s_queue || uxQueueMessagesWaiting(s_queue) == 0;
+        if (queue_empty && !s_worker_busy.load(std::memory_order_acquire)) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    ESP_LOGW(TAG, "facedb wait idle timeout queue=%u busy=%d",
+             s_queue ? (unsigned)uxQueueMessagesWaiting(s_queue) : 0u,
+             s_worker_busy.load(std::memory_order_acquire) ? 1 : 0);
+    return false;
 }
 
 esp_err_t DeepDogFaceFacedbEnrollFeatSync(dl::TensorBase* feat) {
@@ -158,6 +191,11 @@ bool DeepDogFaceFacedbInit() {
 void DeepDogFaceFacedbShutdown() {}
 bool DeepDogFaceFacedbIsReady() {
     return false;
+}
+void DeepDogFaceFacedbQuiesceBegin() {}
+void DeepDogFaceFacedbQuiesceEnd() {}
+bool DeepDogFaceFacedbWaitIdle(int) {
+    return true;
 }
 esp_err_t DeepDogFaceFacedbEnrollFeatSync(dl::TensorBase*) {
     return ESP_ERR_NOT_SUPPORTED;

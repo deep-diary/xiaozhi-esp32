@@ -459,7 +459,7 @@ topics:
       version: { type: int }
       count: { type: int, note: "canonical entries count" }
       feat_count: { type: int, note: "embedding slots in use (may differ from count when aliases exist)" }
-      max_count: { type: int, note: "DEEP_DOG_FACE_RECOG_MAX (128)" }
+      max_count: { type: int, note: "DEEP_DOG_FACE_RECOG_MAX (32)" }
       entries:
         type: array
         item:

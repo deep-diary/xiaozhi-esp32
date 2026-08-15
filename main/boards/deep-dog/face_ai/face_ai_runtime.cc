@@ -48,6 +48,9 @@ static std::atomic<bool> s_runtime_start_inflight{false};
 static std::atomic<int> s_detect_interval_ms{DEEP_DOG_FACE_AI_MIN_INTERVAL_MS};
 static std::atomic<uint8_t> s_pipeline{static_cast<uint8_t>(DeepDogFacePipeline::Live)};
 static std::atomic<bool> s_vision_rtsp_active{false};
+/** clear_db 等 facedb 操作时暂停送帧/识别，避免 /facedb/db 被 fopen 占用导致 remove 失败。 */
+static std::atomic<bool> s_pipeline_paused{false};
+static std::atomic<bool> s_face_task_busy{false};
 static int64_t s_last_submit_us = 0;
 static int64_t s_last_recog_us = 0;
 static std::mutex s_snap_mu;
@@ -246,6 +249,27 @@ static void MaybeRequestImmichName(const uint8_t* rgb565, uint16_t w, uint16_t h
 #endif
 }
 
+/** 对当前帧检测框尝试 Immich 命名（完整识别帧与 sticky 降频帧共用）。 */
+static void MaybeRequestImmichForBoxes(const uint8_t* rgb565, uint16_t w, uint16_t h,
+                                       const std::vector<DeepDogFaceBox>& boxes, bool recog_on) {
+#if DEEP_DOG_FACE_IMMICH_ENABLE && DEEP_DOG_FACE_RECOG_ENABLE
+    if (!recog_on || boxes.empty()) {
+        return;
+    }
+    for (const auto& b : boxes) {
+        if (b.local_id > 0) {
+            MaybeRequestImmichName(rgb565, w, h, b);
+        }
+    }
+#else
+    (void)rgb565;
+    (void)w;
+    (void)h;
+    (void)boxes;
+    (void)recog_on;
+#endif
+}
+
 /** 检测框 IoU（像素坐标），用于 live 跳过识别时沿用上次 ID/人名。 */
 static float BoxIou(const DeepDogFaceBox& a, const DeepDogFaceBox& b) {
     const float ix0 = std::max(a.x0, b.x0);
@@ -329,6 +353,30 @@ static void StickyApplyPrevIds(std::vector<DeepDogFaceBox>* boxes, DeepDogFaceSn
     }
 }
 
+static void DrainFaceQueue() {
+    if (!s_queue) {
+        return;
+    }
+    FaceFrameJob j{};
+    while (xQueueReceive(s_queue, &j, 0) == pdTRUE) {
+        if (j.data) {
+            heap_caps_free(j.data);
+        }
+    }
+}
+
+static void WaitFacePipelineIdle(int timeout_ms) {
+    for (int elapsed = 0; elapsed <= timeout_ms; elapsed += 50) {
+        if (!s_face_task_busy.load(std::memory_order_acquire)) {
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (s_face_task_busy.load(std::memory_order_acquire)) {
+        ESP_LOGW(TAG, "clear_db: face pipeline still busy after %dms", timeout_ms);
+    }
+}
+
 static void FaceAiTask(void* /*arg*/) {
     FaceFrameJob job{};
     for (;;) {
@@ -338,6 +386,11 @@ static void FaceAiTask(void* /*arg*/) {
         if (job.data == nullptr || job.len == 0) {
             continue;
         }
+        if (s_pipeline_paused.load(std::memory_order_acquire)) {
+            heap_caps_free(job.data);
+            continue;
+        }
+        s_face_task_busy.store(true, std::memory_order_release);
         // 给 IDLE 喘息：识别卷积会长时间占满 CPU0，曾导致 TWDT → InstrFetchProhibited → 软重启后摄像头挂死
         vTaskDelay(pdMS_TO_TICKS(5));
 
@@ -386,14 +439,11 @@ static void FaceAiTask(void* /*arg*/) {
                             heap_caps_free(owned);
                         }
                         vTaskDelay(pdMS_TO_TICKS(5));
-                        for (const auto& b : boxes) {
-                            if (b.local_id > 0 && recog_on) {
-                                MaybeRequestImmichName(job.data, job.w, job.h, b);
-                            }
-                        }
+                        MaybeRequestImmichForBoxes(job.data, job.w, job.h, boxes, recog_on);
                     }
                 } else if (!boxes.empty()) {
                     StickyApplyPrevIds(&boxes, &snap);
+                    MaybeRequestImmichForBoxes(job.data, job.w, job.h, boxes, recog_on);
                 }
                 static int s_timing_logs = 0;
                 if (s_timing_logs < 16) {
@@ -408,6 +458,7 @@ static void FaceAiTask(void* /*arg*/) {
 #endif
         }
         heap_caps_free(job.data);
+        s_face_task_busy.store(false, std::memory_order_release);
 
         snap.count = static_cast<int>(boxes.size());
         if (snap.count > 8) {
@@ -462,6 +513,10 @@ static void LogRuntimeStartFail(const char* step) {
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 }
 
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+static void ScheduleImmichWorkerAfterBoot();
+#endif
+
 bool DeepDogFaceAiRuntimeStart() {
     if (s_runtime_started.load(std::memory_order_acquire)) {
         return true;
@@ -512,6 +567,9 @@ bool DeepDogFaceAiRuntimeStart() {
              DEEP_DOG_FACE_AI_MIN_INTERVAL_MS, DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS, DEEP_DOG_FACE_AI_DURING_RTSP,
              DEEP_DOG_FACE_RECOG_ENABLE, DEEP_DOG_FACE_IMMICH_ENABLE);
     DeepDogMemoryReportLog("face_ready");
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    ScheduleImmichWorkerAfterBoot();
+#endif
     return true;
 }
 
@@ -522,10 +580,6 @@ void DeepDogFaceAiRuntimeStop() {
     TeardownRuntimeAll();
     s_runtime_started.store(false, std::memory_order_release);
 }
-
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-static void ScheduleImmichWorkerAfterBoot();
-#endif
 
 static void FaceRuntimeStartWorker(void*) {
     if (!s_user_enabled.load(std::memory_order_acquire)) {
@@ -551,27 +605,40 @@ static void FaceRuntimeStartWorker(void*) {
 }
 
 #if DEEP_DOG_FACE_IMMICH_ENABLE
-/** face_boot 退出释放 16KB internal 后再建 dog_immich（避免模型加载期 largest_int<8K 误报失败）。 */
+/** face_ready 后再建 dog_immich（PSRAM 栈；与 vision_hub 错峰并重试）。 */
 static void ImmichLateStartTask(void* /*arg*/) {
-    vTaskDelay(pdMS_TO_TICKS(150));
-    if (DeepDogImmichIsWorkerReady()) {
-        vTaskDelete(nullptr);
-        return;
-    }
     DeepDogImmichPrepareConfig();
-    if (DeepDogImmichInit()) {
-        ESP_LOGI(TAG, "immich worker started (post-boot)");
-    } else {
-        ESP_LOGW(TAG, "immich post-boot init failed (free_int=%u largest_int=%u)",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    constexpr int kMaxAttempts = 12;
+    for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+        if (DeepDogImmichIsWorkerReady()) {
+            vTaskDelete(nullptr);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(attempt == 0 ? 800 : 2000));
+        if (DeepDogImmichInit()) {
+            ESP_LOGI(TAG, "immich worker started (post-boot attempt=%d)", attempt + 1);
+            vTaskDelete(nullptr);
+            return;
+        }
+        ESP_LOGW(TAG, "immich post-boot retry %d/%d (free_int=%u largest_int=%u psram=%u)", attempt + 1,
+                 kMaxAttempts, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     }
+    ESP_LOGE(TAG, "immich worker failed to start after %d attempts", kMaxAttempts);
     vTaskDelete(nullptr);
 }
 
 static void ScheduleImmichWorkerAfterBoot() {
-    if (xTaskCreate(ImmichLateStartTask, "immich_late", 4096, nullptr, 2, nullptr) != pdPASS) {
-        ESP_LOGW(TAG, "immich_late task create failed");
+    static TaskHandle_t s_immich_late = nullptr;
+    if (s_immich_late != nullptr) {
+        return;
+    }
+    constexpr uint32_t kImmichLateStack = 4096;
+    if (!DeepDogFaceTaskCreate("immich_late", ImmichLateStartTask, kImmichLateStack, nullptr, 2, &s_immich_late)) {
+        ESP_LOGW(TAG, "immich_late task create failed (free_int=%u largest_int=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     }
 }
 #endif
@@ -652,11 +719,21 @@ bool DeepDogFaceAiIsVisionRtspActive() {
 }
 
 bool DeepDogFaceAiClearDb() {
+    s_pipeline_paused.store(true, std::memory_order_release);
+    DrainFaceQueue();
+    WaitFacePipelineIdle(2000);
 #if DEEP_DOG_FACE_RECOG_ENABLE
+    for (int i = 0; i < 60 && !DeepDogFaceRecognizeReady(); ++i) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    DeepDogFaceFacedbQuiesceBegin();
+    (void)DeepDogFaceFacedbWaitIdle(3000);
     const bool ok = DeepDogFaceRecognizeClearAll();
+    DeepDogFaceFacedbQuiesceEnd();
 #else
     const bool ok = true;
 #endif
+    s_pipeline_paused.store(false, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lock(s_snap_mu);
         s_snapshot.count = 0;
@@ -676,6 +753,9 @@ void DeepDogFaceAiSubmitFrameIfDue(const uint8_t* rgb565, size_t len, uint16_t w
         return;
     }
     if (!s_user_enabled.load(std::memory_order_relaxed)) {
+        return;
+    }
+    if (s_pipeline_paused.load(std::memory_order_acquire)) {
         return;
     }
     const int64_t now = esp_timer_get_time();

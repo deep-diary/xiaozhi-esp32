@@ -44,7 +44,7 @@
 | `canonical_id` | 0=canonical；非 0=alias 指向 |
 | `name_pending` | 1=待 Immich 命名 |
 
-`DEEP_DOG_FACE_RECOG_MAX` = **128**；满库按 embedding 槽 `last_seen_at` LRU 淘汰。
+`DEEP_DOG_FACE_RECOG_MAX` = **32**（`FaceMeta` 静态 BSS ~4.5KiB；满库按 embedding 槽 `last_seen_at` LRU 淘汰）。
 
 `face/registry` 增 `feat_count`、`max_count`；entries 增 `last_seen_at`（上次识别见面，Unix 秒）。
 
