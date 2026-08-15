@@ -17,9 +17,13 @@ Credentials (do not commit):
 Examples:
   python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan
   python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --layout xbox
+  python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id 1051db847e88
   python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe-output
   python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe-xbox-rumble
   python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --wait-pad
+
+默认 --device-id auto：扫 broker 上 retain 的 device/info（+ status），
+锁定在线且 capabilities.handle 的设备；多台时用上次成功 id 或要求显式指定。
 
 抽象极性（I01）：lx/rx 右为正；ly/ry 下为正（前推 ly<0）。
 Touchpad（I06）/ Motion（I07）/ Output（I09）：DS4=HID；Xbox 震=pygame rumble。
@@ -36,6 +40,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from typing import Any
 from urllib.parse import urlparse
 
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -71,6 +76,11 @@ LAN_PORT_DEFAULT = 1883
 
 LAYOUT_CHOICES = ("auto", "ds4_sdl", "ds4_linux", "ds4", "xbox", "xbox_sdl", "xbox_xinput")
 
+TOPIC_ROOT = "deepdiary/deep-dog"
+DISCOVER_INFO_TOPIC = f"{TOPIC_ROOT}/+/device/info"
+DISCOVER_STATUS_TOPIC = f"{TOPIC_ROOT}/+/device/status"
+DEVICE_ID_CACHE_PATH = os.path.expanduser("~/.cache/deep-dog/handle_bridge_device_id")
+
 
 def ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
@@ -85,6 +95,192 @@ def make_client(client_id: str, transport: str):
         )
     except Exception:
         return mqtt.Client(client_id=client_id, transport=transport)
+
+
+def device_id_from_topic(topic: str) -> str | None:
+    """Parse id from deepdiary/deep-dog/{device_id}/…"""
+    parts = topic.split("/")
+    if len(parts) >= 4 and parts[0] == "deepdiary" and parts[1] == "deep-dog":
+        did = parts[2].strip().lower()
+        return did or None
+    return None
+
+
+def load_cached_device_id() -> str | None:
+    try:
+        with open(DEVICE_ID_CACHE_PATH, encoding="utf-8") as f:
+            did = f.read().strip().lower()
+            return did or None
+    except OSError:
+        return None
+
+
+def save_cached_device_id(device_id: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(DEVICE_ID_CACHE_PATH), exist_ok=True)
+        with open(DEVICE_ID_CACHE_PATH, "w", encoding="utf-8") as f:
+            f.write(device_id.strip().lower() + "\n")
+    except OSError as e:
+        print(f"[{ts()}] warn: could not cache device_id: {e}", file=sys.stderr)
+
+
+def format_device_row(d: dict[str, Any]) -> str:
+    parts = [d["device_id"]]
+    if d.get("online") is True:
+        parts.append("online")
+    elif d.get("online") is False:
+        parts.append("offline")
+    else:
+        parts.append("online=?")
+    if d.get("handle") is True:
+        parts.append("handle")
+    elif d.get("handle") is False:
+        parts.append("no-handle")
+    if d.get("ip"):
+        parts.append(f"ip={d['ip']}")
+    if d.get("mac"):
+        parts.append(f"mac={d['mac']}")
+    if d.get("board"):
+        parts.append(d["board"])
+    return "  ".join(parts)
+
+
+def discover_devices(client: mqtt.Client, timeout_s: float) -> dict[str, dict[str, Any]]:
+    """Collect retain device/info (+ status) via wildcard; returns device_id → meta."""
+    lock = threading.Lock()
+    devices: dict[str, dict[str, Any]] = {}
+    prev_on_message = client.on_message
+
+    def on_message(_client, _userdata, msg):
+        did = device_id_from_topic(msg.topic)
+        if not did:
+            return
+        try:
+            payload = msg.payload.decode("utf-8", errors="replace")
+            o = json.loads(payload)
+        except Exception:
+            return
+        if not isinstance(o, dict):
+            return
+        with lock:
+            d = devices.setdefault(did, {"device_id": did})
+            if msg.topic.endswith("/device/info"):
+                caps = o.get("capabilities") if isinstance(o.get("capabilities"), dict) else {}
+                if "handle" in caps:
+                    d["handle"] = bool(caps.get("handle"))
+                if o.get("mac"):
+                    d["mac"] = o.get("mac")
+                if o.get("ip"):
+                    d["ip"] = o.get("ip")
+                if o.get("board"):
+                    d["board"] = o.get("board")
+                d["seen_info"] = True
+            elif msg.topic.endswith("/device/status"):
+                if "online" in o:
+                    d["online"] = bool(o.get("online"))
+                d["seen_status"] = True
+
+    client.on_message = on_message
+    client.subscribe(DISCOVER_INFO_TOPIC, qos=0)
+    client.subscribe(DISCOVER_STATUS_TOPIC, qos=0)
+    deadline = time.time() + max(timeout_s, 0.5)
+    while time.time() < deadline:
+        time.sleep(0.05)
+    try:
+        client.unsubscribe(DISCOVER_INFO_TOPIC)
+        client.unsubscribe(DISCOVER_STATUS_TOPIC)
+    except Exception:
+        pass
+    client.on_message = prev_on_message
+    with lock:
+        return dict(devices)
+
+
+def pick_discovered_device_id(
+    devices: dict[str, dict[str, Any]],
+    *,
+    prefer_cached: bool = True,
+) -> str:
+    """Pick one device_id or raise SystemExit with a clear message."""
+    if not devices:
+        print(
+            f"[{ts()}] auto device_id: no device/info on broker "
+            f"(check device online / --via / credentials). "
+            f"Or pass --device-id <id>.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    rows = sorted(devices.values(), key=lambda d: d["device_id"])
+    print(f"[{ts()}] auto device_id: saw {len(rows)} device(s):")
+    for d in rows:
+        print(f"  - {format_device_row(d)}")
+
+    def filter_pool(pool: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        online = [d for d in pool if d.get("online") is True]
+        if online:
+            pool = online
+        else:
+            # Drop explicit offline; keep retain-only (no status yet)
+            pool = [d for d in pool if d.get("online") is not False]
+        handle_ok = [d for d in pool if d.get("handle") is True]
+        if handle_ok:
+            return handle_ok
+        unknown = [d for d in pool if "handle" not in d]
+        if unknown:
+            print(
+                f"[{ts()}] auto device_id: no capabilities.handle in retain; "
+                f"falling back to {len(unknown)} device(s) without handle flag"
+            )
+            return unknown
+        return []
+
+    candidates = filter_pool(rows)
+    if not candidates:
+        print(
+            f"[{ts()}] auto device_id: no suitable online/handle device. "
+            f"Pass --device-id explicitly.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if len(candidates) == 1:
+        return candidates[0]["device_id"]
+
+    if prefer_cached:
+        cached = load_cached_device_id()
+        if cached:
+            for d in candidates:
+                if d["device_id"] == cached:
+                    print(f"[{ts()}] auto device_id: using cached {cached}")
+                    return cached
+
+    ids = ", ".join(d["device_id"] for d in candidates)
+    print(
+        f"[{ts()}] auto device_id: {len(candidates)} candidates — "
+        f"pass --device-id one of: {ids}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+def resolve_device_id(
+    client: mqtt.Client,
+    requested: str,
+    *,
+    discover_timeout_s: float,
+) -> str:
+    raw = (requested or "auto").strip()
+    if raw.lower() != "auto":
+        return raw.lower()
+    print(
+        f"[{ts()}] auto device_id: scanning {DISCOVER_INFO_TOPIC} "
+        f"({discover_timeout_s:.1f}s)…"
+    )
+    devices = discover_devices(client, discover_timeout_s)
+    did = pick_discovered_device_id(devices)
+    save_cached_device_id(did)
+    print(f"[{ts()}] auto device_id → {did}")
+    return did
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -454,13 +650,24 @@ def joystick_alive(joy) -> bool:
         return False
 
 
-def publish_snap(client, topic: str, snap: dict) -> None:
+def publish_snap(client, topic: str, snap: dict, *, log: bool = False) -> None:
+    body = public_snapshot(snap)
     client.publish(
         topic,
-        json.dumps(public_snapshot(snap), separators=(",", ":")),
+        json.dumps(body, separators=(",", ":")),
         qos=0,
         retain=False,
     )
+    if log:
+        ax = body.get("axes") or {}
+        bt = body.get("buttons") or {}
+        print(
+            f"[{ts()}] INPUT conn={1 if body.get('connected') else 0} "
+            f"lx={float(ax.get('lx', 0)):.2f} ly={float(ax.get('ly', 0)):.2f} "
+            f"rx={float(ax.get('rx', 0)):.2f} ry={float(ax.get('ry', 0)):.2f} "
+            f"a={1 if bt.get('a') else 0} b={1 if bt.get('b') else 0} "
+            f"x={1 if bt.get('x') else 0} y={1 if bt.get('y') else 0}"
+        )
 
 
 def try_import_hid():
@@ -902,7 +1109,18 @@ def main() -> int:
     ap.add_argument("--wss", default=WEB_WSS_DEFAULT)
     ap.add_argument("--broker", default=LAN_HOST_DEFAULT)
     ap.add_argument("--port", type=int, default=LAN_PORT_DEFAULT)
-    ap.add_argument("--device-id", default="dev")
+    ap.add_argument(
+        "--device-id",
+        default=os.environ.get("DEEP_DOG_DEVICE_ID", "auto"),
+        help="MQTT id under deepdiary/deep-dog/{id}/; default auto "
+        "(scan device/info) or DEEP_DOG_DEVICE_ID",
+    )
+    ap.add_argument(
+        "--discover-timeout",
+        type=float,
+        default=3.0,
+        help="seconds to wait for retain device/info when --device-id auto",
+    )
     ap.add_argument("--username", default=os.environ.get("DEEP_DOG_MQTT_USER", ""))
     ap.add_argument("--password", default=os.environ.get("DEEP_DOG_MQTT_PASS", ""))
     ap.add_argument("--joystick", type=int, default=0, help="pygame joystick index")
@@ -1019,11 +1237,6 @@ def main() -> int:
                 return 1
             print(f"[{ts()}] no joystick yet; waiting (--wait-pad)…")
 
-    prefix = f"deepdiary/deep-dog/{args.device_id}"
-    input_topic = f"{prefix}/handle/input"
-    status_topic = f"{prefix}/handle/status"
-    cmd_topic = f"{prefix}/handle/cmd"
-
     use_ws = args.via == "web"
     transport = "websockets" if use_ws else "tcp"
     client_id = f"deep-dog-handle-bridge-{int(time.time())}"
@@ -1035,26 +1248,22 @@ def main() -> int:
         if joy is not None:
             output_ctl.set_joy(joy)
 
+    # Filled after device_id resolve (auto needs MQTT first).
+    topics: dict[str, str] = {"input": "", "status": "", "cmd": ""}
+
     def on_connect(client, userdata, flags, reason_code, properties=None):
         rc = reason_code if isinstance(reason_code, int) else getattr(reason_code, "value", reason_code)
         if rc != 0:
             print(f"[{ts()}] CONNECT failed rc={rc}", file=sys.stderr)
             return
         connected["ok"] = True
-        client.subscribe(status_topic, qos=0)
-        if output_ctl is not None:
-            client.subscribe(cmd_topic, qos=1)
-            print(
-                f"[{ts()}] CONNECTED; PUB {input_topic}; "
-                f"SUB {status_topic} + {cmd_topic} (output backend={output_ctl.backend})"
-            )
-        else:
-            print(f"[{ts()}] CONNECTED; PUB {input_topic}; SUB {status_topic}")
 
     def on_message(client, userdata, msg):
         payload = msg.payload.decode("utf-8", errors="replace")
         topic = msg.topic
-        if output_ctl is not None and topic == cmd_topic:
+        cmd_topic = topics["cmd"]
+        status_topic = topics["status"]
+        if output_ctl is not None and cmd_topic and topic == cmd_topic:
             try:
                 o = json.loads(payload)
             except Exception:
@@ -1078,6 +1287,8 @@ def main() -> int:
                 f"[{ts()}] CMD output ok={1 if ok else 0} backend={backend} bus={bus} "
                 f"led={led} rumble={rum} duration_ms={o.get('duration_ms')}"
             )
+            return
+        if status_topic and topic != status_topic:
             return
         summary = ""
         try:
@@ -1144,6 +1355,39 @@ def main() -> int:
         print("MQTT connect timeout", file=sys.stderr)
         client.loop_stop()
         return 1
+
+    try:
+        device_id = resolve_device_id(
+            client,
+            args.device_id,
+            discover_timeout_s=args.discover_timeout,
+        )
+    except SystemExit as e:
+        client.loop_stop()
+        client.disconnect()
+        return int(e.code) if isinstance(e.code, int) else 1
+
+    # Explicit --device-id also refreshes cache for next --device-id auto
+    if (args.device_id or "").strip().lower() != "auto":
+        save_cached_device_id(device_id)
+
+    prefix = f"{TOPIC_ROOT}/{device_id}"
+    input_topic = f"{prefix}/handle/input"
+    status_topic = f"{prefix}/handle/status"
+    cmd_topic = f"{prefix}/handle/cmd"
+    topics["input"] = input_topic
+    topics["status"] = status_topic
+    topics["cmd"] = cmd_topic
+
+    client.subscribe(status_topic, qos=0)
+    if output_ctl is not None:
+        client.subscribe(cmd_topic, qos=1)
+        print(
+            f"[{ts()}] CONNECTED; PUB {input_topic}; "
+            f"SUB {status_topic} + {cmd_topic} (output backend={output_ctl.backend})"
+        )
+    else:
+        print(f"[{ts()}] CONNECTED; PUB {input_topic}; SUB {status_topic}")
 
     if args.touchpad_xy:
         print(
@@ -1278,7 +1522,7 @@ def main() -> int:
             due_heartbeat = (now - last_pub) >= heartbeat_s
             if due_change or due_heartbeat:
                 snap = {**snap, "ts": int(now)}
-                publish_snap(client, input_topic, snap)
+                publish_snap(client, input_topic, snap, log=due_change)
                 last_pub = now
                 last_snap = snap
             time.sleep(0.01)

@@ -77,7 +77,7 @@
 #define DEEP_DOG_HTTP_SERVER_ENABLE 0
 #endif
 #ifndef DEEP_DOG_HANDLE_ENABLE
-#define DEEP_DOG_HANDLE_ENABLE 0
+#define DEEP_DOG_HANDLE_ENABLE 1
 #endif
 
 /* -------- 依赖钳位（*_AVAILABLE 必须已由 config.h 定义；未定义时不钳位） -------- */

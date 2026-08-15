@@ -182,19 +182,19 @@ void DeepDogHandleMqtt::OnSnapshot(const HandleSnapshot& snap) {
         return;
     }
     (void)snap;
+    // 勿在 MQTT_EVENT_DATA 回调栈里同步 Publish（esp-mqtt 易失败/卡死）。
+    // PC 桥 40Hz input → HandleInput → Push → 本函数；一律丢到 status_flush 定时器。
     const int64_t now = esp_timer_get_time();
     const int64_t min_us = static_cast<int64_t>(DEEP_DOG_HANDLE_STATUS_MIN_INTERVAL_MS) * 1000LL;
+    int64_t delay_us = 1000;  // ≥1ms，离开 mqtt 任务
     if (last_publish_us_ != 0 && (now - last_publish_us_) < min_us) {
-        // 节流窗口内不丢最终态：到期后再发一次 Hub 最新快照
-        status_pending_ = true;
-        ArmStatusFlush(min_us - (now - last_publish_us_));
-        return;
+        delay_us = min_us - (now - last_publish_us_);
+        if (delay_us < 1000) {
+            delay_us = 1000;
+        }
     }
-    status_pending_ = false;
-    if (status_flush_timer_) {
-        esp_timer_stop(status_flush_timer_);
-    }
-    PublishStatus();
+    status_pending_ = true;
+    ArmStatusFlush(delay_us);
 }
 
 bool DeepDogHandleMqtt::ParseSnapshotJson(const std::string& payload, HandleSnapshot* out) {

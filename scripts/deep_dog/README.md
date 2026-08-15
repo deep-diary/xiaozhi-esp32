@@ -24,15 +24,21 @@ python3 scripts/deep_dog/deep_dog_device_audit.py --device-ip 192.168.31.211 --v
 | `deep_dog_fetch_bluepad32.sh` | 拉取 Bluepad32 + BTstack（瘦剖面再开板载 BT） |
 
 ```bash
-# DS4（灯+震+触控+motion）
+# DS4（灯+震+触控+motion）；默认 --device-id auto
 python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan
 
 # Xbox（pygame；macOS 优先蓝牙）
 python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --layout xbox
 
+# 显式 device_id / 环境变量
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id 1051db847e88
+# export DEEP_DOG_DEVICE_ID=1051db847e88
+
 # 真源对照（RAW 轴/键）
 python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe
 ```
+
+`auto`：扫 broker retain 的 `device/info`（及 `device/status`），优先在线且 `capabilities.handle`；多台时用 `~/.cache/deep-dog/handle_bridge_device_id`。
 
 ### Xbox：HID 还能读到什么？（对照 pygame）
 

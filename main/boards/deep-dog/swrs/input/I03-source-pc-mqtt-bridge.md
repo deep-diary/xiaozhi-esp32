@@ -115,6 +115,7 @@ Mac 蓝牙下 `hidapi` 可枚举并读 **17B** 输入 report；**无陀螺仪/�
 | 读入 | pygame（当前） |
 | 映射 | 上表；`--layout auto\|ds4\|xbox\|xbox_sdl\|xbox_xinput` |
 | 发布 | `deepdiary/deep-dog/{device_id}/handle/input` |
+| `device_id` | 默认 **`auto`**：订 `…/+/device/info`（+ `device/status`），优先在线且 `capabilities.handle`；恰好一台则锁定；多台用 `~/.cache/deep-dog/handle_bridge_device_id` 或要求 `--device-id`；环境变量 `DEEP_DOG_DEVICE_ID` 同显式 |
 | 节流 | on_change 或 ≤20～30 Hz |
 | 断线 | 桥发心跳；手柄休眠/拔出发 `connected:false`；**唤醒后自动 rescan 重连，无需重启脚本**；停发后设备超时 500ms 清零 |
 | 触控 XY | **默认 HID 全量读**（触控双点 + motion + 灯震）；`--no-touchpad-xy` 回退 pygame（Xbox/通用输入 + **output 震动**）；探测见 `scripts/deep_dog/deep_dog_ds4_touchpad_probe.py`；[I06](./I06-touchpad-xy.md) · [I09](./I09-ds4-output-feedback.md) |
@@ -140,8 +141,10 @@ Mac 蓝牙下 `hidapi` 可枚举并读 **17B** 输入 report；**无陀螺仪/�
 
 ```bash
 pip3 install paho-mqtt hidapi pygame
-# 默认：DS4 HID 全量（触控/motion）+ 订 handle/cmd 灯震
-python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id dev
+# 默认：DS4 HID + --device-id auto（扫 device/info）
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan
+# 显式 id（绑后 MAC 或未绑 dev）
+python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id 1051db847e88
 # Xbox：pygame 输入 + output 震动（macOS 优先蓝牙连手柄）
 python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --layout xbox
 # 看 RAW 轴/键 + 各 layout 静置解释（排查映射必跑）
