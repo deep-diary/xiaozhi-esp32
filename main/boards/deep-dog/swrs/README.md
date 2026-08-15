@@ -40,6 +40,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 |----|------|------|
 | D1～D9, D11～D13 | 运动域 | [dog/DEVELOPMENT_PLAN](./dog/DEVELOPMENT_PLAN.md) |
 | V-S01～S06 | HTTP 视觉 Server | 主体 ✅ |
+| V-S08～S09 | RTSP 并发 / **internal SRAM 优化** | S08 已落地 · [S09 评估](./vision/server/S09-internal-sram-optimization.md) 待逐项落地 |
 | V-C01～C02 | MediaMTX + 设备推流 | C02 固件已实现 |
 | **M01** + modules | MQTT 契约与前端规格 | **文档 ✅** |
 | **I-HANDLE** | 手柄双源（Xbox BT / PC→MQTT） | [input/](./input/) **文档 ✅**；wifi/keymap 已落地 |

@@ -43,7 +43,7 @@ RTSP 推流期间 **暂停 AFE**（`EnableWakeWordDetection(false)` + `EnableVoi
 | `dog_face_ai` | PSRAM | 检测、feat 推理、`query_feat`（纯内存） |
 | `face_facedb` | **internal** | `enroll_feat` / `delete_feat` / `clear_all_feats` |
 | `face_persist` | internal | NVS meta |
-| `dog_immich` | internal | HTTP + Immich NVS |
+| `dog_immich` | **PSRAM**（优先） | HTTP；NVS 经 `face_persist` |
 
 lazy-start 顺序：`face_persist` → **`face_facedb`** → `dog_face_ai` → 模型加载。`RecognizeOneFace` 在 PSRAM 任务内算 feat，再 **同步**投递 `face_facedb` 写 facedb。
 
@@ -68,3 +68,4 @@ lazy-start 顺序：`face_persist` → **`face_facedb`** → `dog_face_ai` → �
 1. 推流页联调：`detect_interval_ms` ≥ 1000 或 `recognize_enabled=false`
 2. 避免 BT + Face AI + TLS OTA 同开（internal 不足）
 3. 用 audit 脚本对比 `mem.internal` 与 `tasks[].stack_hwm`
+4. internal 系统性优化见 **[S09 internal SRAM](./S09-internal-sram-optimization.md)**（启动错峰、栈 trim、RESERVE 等）
