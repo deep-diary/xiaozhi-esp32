@@ -42,6 +42,8 @@ public:
 
     bool Start();
     void Stop();
+    /** SNTP/OTA 设钟后重发 device 信息与 face/registry */
+    void NotifyClockSynced();
     /** 绑定/解绑后重载 device_id、MQTT 前缀与 RTSP path */
     void ReloadDeviceIdentity();
     bool IsRunning() const;

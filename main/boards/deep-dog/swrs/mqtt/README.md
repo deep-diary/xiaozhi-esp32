@@ -8,6 +8,7 @@
 2. [frontend/01-add-device-pairing.md](./frontend/01-add-device-pairing.md) — 之家：按配对码添加 / 解绑设备
 3. [modules/](./modules/) — 各模块**独立详情页**（订阅/控制 Steps）
 4. [M01](./M01-board-mqtt-protocol.md) — 总览、裁剪、Broker
+5. [M02](./M02-mcp-call-control-plane.md) — MQTT `mcp_call` 统一控制面（motor 已落地）
 
 | 顺序 | 模块文档 |
 |------|----------|

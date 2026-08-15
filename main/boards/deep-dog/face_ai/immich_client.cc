@@ -7,10 +7,12 @@
 #include "immich_client.h"
 #include "face_recognize.h"
 #include "face_ai_bridge.h"
+#include "face_task_util.h"
 
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 #include <cJSON.h>
 #include <esp_heap_caps.h>
@@ -24,6 +26,7 @@
 #include <freertos/task.h>
 #include <nvs.h>
 #include <nvs_flash.h>
+#include <ctime>
 
 #if DEEP_DOG_FACE_AI_ENABLE && DEEP_DOG_FACE_IMMICH_ENABLE && defined(CONFIG_IDF_TARGET_ESP32S3)
 
@@ -39,20 +42,47 @@ struct ImmichJob {
 static QueueHandle_t s_queue = nullptr;
 static TaskHandle_t s_task = nullptr;
 static bool s_started = false;
+static bool s_config_ready = false;
 
 static char s_api_url[96] = DEEP_DOG_FACE_IMMICH_DEFAULT_URL;
 static char s_api_key[96] = {};
 static uint8_t s_delete_asset = DEEP_DOG_FACE_IMMICH_DELETE_ASSET ? 1 : 0;
+static double s_latitude = 0.0;
+static double s_longitude = 0.0;
+static bool s_gps_configured = false;
 static std::atomic<int> s_force_refresh_id{0};
 static std::atomic<int> s_inflight_id{0};
 static int64_t s_backoff_until_us[DEEP_DOG_FACE_RECOG_MAX + 1]{};
 static char s_last_result[64] = "idle";
 static int s_last_local_id = 0;
+static bool s_server_ok = false;
+static int s_server_http = 0;
+static int s_ping_ms = -1;
+static DeepDogImmichStatusChangedFn s_status_changed_cb = nullptr;
+
+static void NotifyStatusChanged() {
+    if (s_status_changed_cb) {
+        s_status_changed_cb();
+    }
+}
 
 static void SetLastResult(const char* r, int local_id) {
     snprintf(s_last_result, sizeof(s_last_result), "%s", r ? r : "");
     s_last_local_id = local_id;
+    NotifyStatusChanged();
 }
+
+static void TrimTrailingSlash(char* url);
+static bool SaveConfigToNvs();
+
+struct HttpBuf {
+    char* data = nullptr;
+    size_t len = 0;
+    size_t cap = 0;
+};
+
+static int HttpDo(esp_http_client_method_t method, const char* url, const char* content_type,
+                  const uint8_t* body, size_t body_len, HttpBuf* out);
 
 static void LoadConfigFromNvs() {
     nvs_handle_t h;
@@ -71,7 +101,72 @@ static void LoadConfigFromNvs() {
     } else {
         s_delete_asset = DEEP_DOG_FACE_IMMICH_DELETE_ASSET ? 1 : 0;
     }
+    uint8_t gps_cfg = 0;
+    if (nvs_get_u8(h, "gps_cfg", &gps_cfg) == ESP_OK && gps_cfg) {
+        double lat = 0.0;
+        double lon = 0.0;
+        size_t blob_sz = sizeof(lat);
+        if (nvs_get_blob(h, "gps_lat", &lat, &blob_sz) == ESP_OK && blob_sz == sizeof(lat)) {
+            blob_sz = sizeof(lon);
+            if (nvs_get_blob(h, "gps_lon", &lon, &blob_sz) == ESP_OK && blob_sz == sizeof(lon)) {
+                s_latitude = lat;
+                s_longitude = lon;
+                s_gps_configured = true;
+            }
+        }
+    } else {
+        s_gps_configured = false;
+    }
     nvs_close(h);
+}
+
+static void ApplyCompileDefaultsToRam() {
+    if (s_api_url[0] == '\0') {
+        strncpy(s_api_url, DEEP_DOG_FACE_IMMICH_DEFAULT_URL, sizeof(s_api_url) - 1);
+    }
+    if (s_api_key[0] == '\0' && DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY[0] != '\0') {
+        strncpy(s_api_key, DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY, sizeof(s_api_key) - 1);
+        s_api_key[sizeof(s_api_key) - 1] = '\0';
+    }
+    TrimTrailingSlash(s_api_url);
+}
+
+void DeepDogImmichApplyDefaultsIfEmpty() {
+    LoadConfigFromNvs();
+    const bool had_key = s_api_key[0] != '\0';
+    ApplyCompileDefaultsToRam();
+    if (!had_key && s_api_key[0] != '\0') {
+        (void)SaveConfigToNvs();
+        ESP_LOGI(TAG, "applied default immich config url=%s key_len=%u", s_api_url,
+                 (unsigned)strlen(s_api_key));
+        NotifyStatusChanged();
+    }
+}
+
+void DeepDogImmichSetStatusChangedCallback(DeepDogImmichStatusChangedFn cb) {
+    s_status_changed_cb = cb;
+}
+
+bool DeepDogImmichPingServer() {
+    if (!DeepDogImmichIsConfigured()) {
+        s_server_ok = false;
+        s_server_http = 0;
+        s_ping_ms = -1;
+        NotifyStatusChanged();
+        return false;
+    }
+    char url[128];
+    snprintf(url, sizeof(url), "%s/server/ping", s_api_url);
+    const int64_t t0 = esp_timer_get_time();
+    HttpBuf resp{};
+    const int status = HttpDo(HTTP_METHOD_GET, url, nullptr, nullptr, 0, &resp);
+    s_ping_ms = static_cast<int>((esp_timer_get_time() - t0) / 1000);
+    s_server_http = status;
+    s_server_ok = (status == 200);
+    heap_caps_free(resp.data);
+    ESP_LOGI(TAG, "ping url=%s http=%d ok=%d ms=%d", url, status, s_server_ok ? 1 : 0, s_ping_ms);
+    NotifyStatusChanged();
+    return s_server_ok;
 }
 
 static bool SaveConfigToNvs() {
@@ -87,6 +182,15 @@ static bool SaveConfigToNvs() {
         err = nvs_set_u8(h, "del_asset", s_delete_asset ? 1 : 0);
     }
     if (err == ESP_OK) {
+        err = nvs_set_u8(h, "gps_cfg", s_gps_configured ? 1 : 0);
+    }
+    if (err == ESP_OK && s_gps_configured) {
+        err = nvs_set_blob(h, "gps_lat", &s_latitude, sizeof(s_latitude));
+    }
+    if (err == ESP_OK && s_gps_configured) {
+        err = nvs_set_blob(h, "gps_lon", &s_longitude, sizeof(s_longitude));
+    }
+    if (err == ESP_OK) {
         err = nvs_commit(h);
     }
     nvs_close(h);
@@ -100,11 +204,47 @@ static void TrimTrailingSlash(char* url) {
     }
 }
 
-struct HttpBuf {
-    char* data = nullptr;
-    size_t len = 0;
-    size_t cap = 0;
-};
+static void FormatUtcIso8601Ms(char* buf, size_t sz) {
+    if (!buf || sz < 25) {
+        if (buf && sz) {
+            buf[0] = '\0';
+        }
+        return;
+    }
+    const time_t now = time(nullptr);
+    if (now <= 1000000000) {
+        strncpy(buf, "1970-01-01T00:00:00.000Z", sz - 1);
+        buf[sz - 1] = '\0';
+        return;
+    }
+    struct tm tm_utc {};
+    gmtime_r(&now, &tm_utc);
+    if (strftime(buf, sz, "%Y-%m-%dT%H:%M:%S.000Z", &tm_utc) == 0) {
+        strncpy(buf, "1970-01-01T00:00:00.000Z", sz - 1);
+        buf[sz - 1] = '\0';
+    }
+}
+
+static bool PutAssetGps(const char* asset_id) {
+    if (!asset_id || !asset_id[0] || !s_gps_configured) {
+        return false;
+    }
+    char url[160];
+    snprintf(url, sizeof(url), "%s/assets/%s", s_api_url, asset_id);
+    char body[96];
+    const int body_len =
+        snprintf(body, sizeof(body), "{\"latitude\":%.7f,\"longitude\":%.7f}", s_latitude, s_longitude);
+    if (body_len <= 0 || (size_t)body_len >= sizeof(body)) {
+        return false;
+    }
+    HttpBuf resp{};
+    const int status = HttpDo(HTTP_METHOD_PUT, url, "application/json", (const uint8_t*)body,
+                              (size_t)body_len, &resp);
+    heap_caps_free(resp.data);
+    const bool ok = (status == 200);
+    ESP_LOGI(TAG, "asset gps put id=%s http=%d ok=%d", asset_id, status, ok ? 1 : 0);
+    return ok;
+}
 
 static esp_err_t HttpEvent(esp_http_client_event_t* evt) {
     if (evt->event_id != HTTP_EVENT_ON_DATA || !evt->user_data || !evt->data || evt->data_len <= 0) {
@@ -201,6 +341,36 @@ static bool ParsePeopleName(const char* json, char* name_out, size_t name_sz, ch
     return ok;
 }
 
+static void LogPollTimeoutDiag(const char* asset_id, int attempts, int last_http, const char* json) {
+    int people_n = 0;
+    int unnamed_n = 0;
+    if (json) {
+        cJSON* root = cJSON_Parse(json);
+        if (root) {
+            cJSON* people = cJSON_GetObjectItem(root, "people");
+            if (cJSON_IsArray(people)) {
+                people_n = cJSON_GetArraySize(people);
+                for (int i = 0; i < people_n; i++) {
+                    cJSON* p = cJSON_GetArrayItem(people, i);
+                    cJSON* name = cJSON_GetObjectItem(p, "name");
+                    if (!cJSON_IsString(name) || !name->valuestring || !name->valuestring[0] ||
+                        strcmp(name->valuestring, "未命名") == 0) {
+                        unnamed_n++;
+                    }
+                }
+            }
+            cJSON_Delete(root);
+        }
+    }
+    const int approx_s =
+        (attempts > 1) ? ((attempts - 1) * DEEP_DOG_FACE_IMMICH_POLL_MS) / 1000 : 0;
+    ESP_LOGW(TAG,
+             "poll timeout asset=%s attempts=%d (~%ds) http=%d people=%d unnamed=%d "
+             "(Immich ML pending, not LAN timeout; deferred retry in %ds)",
+             asset_id, attempts, approx_s, last_http, people_n, unnamed_n,
+             (int)DEEP_DOG_FACE_IMMICH_DEFERRED_POLL_S);
+}
+
 static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out, size_t asset_id_sz) {
     if (!jpeg || jpeg_len == 0 || !asset_id_out || asset_id_sz == 0) {
         return false;
@@ -215,15 +385,17 @@ static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out
              (unsigned)(esp_timer_get_time() & 0xffffffffu));
 
     char meta[512];
+    char iso_ts[40];
+    FormatUtcIso8601Ms(iso_ts, sizeof(iso_ts));
     int meta_len = snprintf(
         meta, sizeof(meta),
         "--%s\r\nContent-Disposition: form-data; name=\"deviceAssetId\"\r\n\r\n%s\r\n"
         "--%s\r\nContent-Disposition: form-data; name=\"deviceId\"\r\n\r\ndeep-dog\r\n"
-        "--%s\r\nContent-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n2026-01-01T00:00:00.000Z\r\n"
-        "--%s\r\nContent-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n2026-01-01T00:00:00.000Z\r\n"
+        "--%s\r\nContent-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n%s\r\n"
+        "--%s\r\nContent-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n%s\r\n"
         "--%s\r\nContent-Disposition: form-data; name=\"assetData\"; filename=\"face.jpg\"\r\n"
         "Content-Type: image/jpeg\r\n\r\n",
-        boundary, device_asset_id, boundary, boundary, boundary, boundary);
+        boundary, device_asset_id, boundary, boundary, iso_ts, boundary, iso_ts, boundary);
     if (meta_len <= 0 || (size_t)meta_len >= sizeof(meta)) {
         return false;
     }
@@ -279,20 +451,26 @@ static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out
 static bool PollPerson(const char* asset_id, char* name_out, size_t name_sz, char* pid_out, size_t pid_sz) {
     char url[160];
     snprintf(url, sizeof(url), "%s/assets/%s", s_api_url, asset_id);
+    int last_http = 0;
+    char* last_json = nullptr;
     for (int i = 0; i < DEEP_DOG_FACE_IMMICH_POLL_MAX; i++) {
         HttpBuf resp{};
         const int status = HttpDo(HTTP_METHOD_GET, url, nullptr, nullptr, 0, &resp);
+        last_http = status;
         if (status == 200 && resp.data && ParsePeopleName(resp.data, name_out, name_sz, pid_out, pid_sz)) {
             heap_caps_free(resp.data);
+            heap_caps_free(last_json);
             ESP_LOGI(TAG, "poll#%d matched name=%s", i, name_out);
             return true;
         }
-        heap_caps_free(resp.data);
+        heap_caps_free(last_json);
+        last_json = resp.data;
         if (i + 1 < DEEP_DOG_FACE_IMMICH_POLL_MAX) {
             vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_FACE_IMMICH_POLL_MS));
         }
     }
-    ESP_LOGW(TAG, "poll timeout asset=%s", asset_id);
+    LogPollTimeoutDiag(asset_id, DEEP_DOG_FACE_IMMICH_POLL_MAX, last_http, last_json);
+    heap_caps_free(last_json);
     return false;
 }
 
@@ -317,6 +495,45 @@ static bool InBackoff(int local_id) {
     return esp_timer_get_time() < s_backoff_until_us[local_id];
 }
 
+static int64_t s_last_deferred_us = 0;
+
+static bool PollAssetForName(int local_id, const char* asset_id) {
+    if (!asset_id || !asset_id[0] || local_id <= 0) {
+        return false;
+    }
+    char name[32] = {};
+    char person_id[40] = {};
+    const bool matched = PollPerson(asset_id, name, sizeof(name), person_id, sizeof(person_id));
+    if (matched && name[0]) {
+        if (DeepDogFaceRecognizeBindImmichName(local_id, name, person_id)) {
+            DeepDogFaceAiOnImmichName(local_id, name);
+            SetLastResult("matched", local_id);
+            ESP_LOGI(TAG, "poll bound local_id=%d -> %s", local_id, name);
+            return true;
+        }
+        SetLastResult("bind_fail", local_id);
+    }
+    return false;
+}
+
+static bool DeferredVisitFn(int local_id, const char* asset_id, void* /*ctx*/) {
+    if (s_inflight_id.load(std::memory_order_relaxed) != 0) {
+        return false;
+    }
+    return PollAssetForName(local_id, asset_id);
+}
+
+static void RunDeferredPollIfDue() {
+    const int64_t now = esp_timer_get_time();
+    if (now - s_last_deferred_us < (int64_t)DEEP_DOG_FACE_IMMICH_DEFERRED_POLL_S * 1000000LL) {
+        return;
+    }
+    s_last_deferred_us = now;
+    const int n = DeepDogFaceRecognizeVisitPendingImmich(DeferredVisitFn, nullptr);
+    if (n > 0) {
+        ESP_LOGI(TAG, "deferred poll matched %d entries", n);
+    }
+}
 static void SetBackoff(int local_id) {
     if (local_id <= 0 || local_id > DEEP_DOG_FACE_RECOG_MAX) {
         return;
@@ -346,26 +563,23 @@ static void ProcessJob(ImmichJob job) {
             goto done;
         }
 
-        char name[32] = {};
-        char person_id[40] = {};
-        const bool matched = PollPerson(asset_id, name, sizeof(name), person_id, sizeof(person_id));
-        if (s_delete_asset) {
-            DeleteAsset(asset_id);
-        } else {
-            ESP_LOGI(TAG, "keep asset=%s (delete_asset=0)", asset_id);
-        }
+        (void)DeepDogFaceRecognizeBindImmichAsset(job.local_id, asset_id);
+        SetLastResult("upload_ok", job.local_id);
+        (void)PutAssetGps(asset_id);
 
-        if (matched && name[0]) {
-            if (DeepDogFaceRecognizeBindImmichName(job.local_id, name, person_id)) {
-                DeepDogFaceAiOnImmichName(job.local_id, name);
-                SetLastResult("matched", job.local_id);
-                ESP_LOGI(TAG, "bound local_id=%d -> %s", job.local_id, name);
+        if (PollAssetForName(job.local_id, asset_id)) {
+            if (s_delete_asset) {
+                DeleteAsset(asset_id);
             } else {
-                SetLastResult("bind_fail", job.local_id);
+                ESP_LOGI(TAG, "keep asset=%s (delete_asset=0)", asset_id);
             }
         } else {
+            if (s_delete_asset) {
+                DeleteAsset(asset_id);
+            } else {
+                ESP_LOGI(TAG, "keep asset=%s pending name", asset_id);
+            }
             SetLastResult("unknown", job.local_id);
-            SetBackoff(job.local_id);
         }
     }
 
@@ -379,26 +593,44 @@ done:
 static void ImmichTask(void* /*arg*/) {
     ImmichJob job{};
     for (;;) {
-        if (xQueueReceive(s_queue, &job, portMAX_DELAY) != pdTRUE) {
-            continue;
+        if (xQueueReceive(s_queue, &job, pdMS_TO_TICKS(5000)) == pdTRUE) {
+            ProcessJob(job);
         }
-        ProcessJob(job);
+        RunDeferredPollIfDue();
     }
+}
+
+void DeepDogImmichPrepareConfig() {
+    if (s_config_ready) {
+        return;
+    }
+    DeepDogImmichApplyDefaultsIfEmpty();
+    s_config_ready = true;
 }
 
 bool DeepDogImmichInit() {
     if (s_started) {
         return true;
     }
-    LoadConfigFromNvs();
+    if (!s_config_ready) {
+        ESP_LOGW(TAG, "init skipped: PrepareConfig not done (internal stack required)");
+        return false;
+    }
     TrimTrailingSlash(s_api_url);
     s_queue = xQueueCreate(1, sizeof(ImmichJob));
     if (!s_queue) {
+        ESP_LOGW(TAG, "immich queue create failed (free_int=%u largest_int=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         return false;
     }
-    // 必须用内部 DRAM 栈：ProcessJob → BindImmichName → SaveMetaToNvs 会写 Flash。
-    // PSRAM 任务栈会触发 esp_task_stack_is_sane_cache_disabled 断言，连带搞挂摄像头。
-    if (xTaskCreate(ImmichTask, "dog_immich", 12288, nullptr, 2, &s_task) != pdPASS) {
+    // PSRAM 栈优先：NVS 写经 face_persist（internal）；face_ready 后 internal largest 常 <7KB 无法 xTaskCreate。
+    if (!DeepDogFaceTaskCreate("dog_immich", ImmichTask, DEEP_DOG_FACE_IMMICH_TASK_STACK, nullptr, 2, &s_task)) {
+        ESP_LOGW(TAG, "immich task create failed stack=%u (free_int=%u largest_int=%u psram=%u)",
+                 (unsigned)DEEP_DOG_FACE_IMMICH_TASK_STACK,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         vQueueDelete(s_queue);
         s_queue = nullptr;
         return false;
@@ -407,6 +639,10 @@ bool DeepDogImmichInit() {
     ESP_LOGI(TAG, "immich worker ready configured=%d url=%s delete_asset=%u",
              (int)DeepDogImmichIsConfigured(), s_api_url, (unsigned)s_delete_asset);
     return true;
+}
+
+bool DeepDogImmichIsWorkerReady() {
+    return s_started;
 }
 
 void DeepDogImmichDeinit() {
@@ -434,7 +670,8 @@ bool DeepDogImmichIsConfigured() {
     return s_api_key[0] != '\0';
 }
 
-bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset) {
+bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset,
+                            const double* latitude, const double* longitude) {
     const bool has_key = api_key && api_key[0];
     if (!has_key && !DeepDogImmichIsConfigured()) {
         return false;
@@ -457,9 +694,23 @@ bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete
     if (delete_asset == 0 || delete_asset == 1) {
         s_delete_asset = (uint8_t)delete_asset;
     }
+    if (latitude && longitude) {
+        s_latitude = *latitude;
+        s_longitude = *longitude;
+        s_gps_configured = true;
+    }
     const bool ok = SaveConfigToNvs();
-    ESP_LOGI(TAG, "config saved ok=%d url=%s key_len=%u delete_asset=%u", (int)ok, s_api_url,
-             (unsigned)strlen(s_api_key), (unsigned)s_delete_asset);
+    s_config_ready = true;
+    ESP_LOGI(TAG, "config saved ok=%d url=%s key_len=%u delete_asset=%u gps=%d", (int)ok, s_api_url,
+             (unsigned)strlen(s_api_key), (unsigned)s_delete_asset, s_gps_configured ? 1 : 0);
+    if (ok) {
+        (void)DeepDogImmichPingServer();
+        if (!DeepDogImmichIsWorkerReady()) {
+            (void)DeepDogImmichInit();
+        }
+    } else {
+        NotifyStatusChanged();
+    }
     return ok;
 }
 
@@ -467,12 +718,29 @@ size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size) {
     if (!buf || buf_size < 32) {
         return 0;
     }
+    if (s_gps_configured) {
+        return (size_t)snprintf(
+            buf, buf_size,
+            "{\"configured\":%s,\"url\":\"%s\",\"key_len\":%u,\"delete_asset\":%u,\"latitude\":%.7f,"
+            "\"longitude\":%.7f,\"server_ok\":%s,"
+            "\"server_http\":%d,\"ping_ms\":%d,\"inflight\":%d,\"last\":\"%s\",\"last_local_id\":%d,"
+            "\"ts\":%ld}",
+            DeepDogImmichIsConfigured() ? "true" : "false", s_api_url, (unsigned)strlen(s_api_key),
+            (unsigned)s_delete_asset, s_latitude, s_longitude, s_server_ok ? "true" : "false",
+            s_server_http, s_ping_ms, s_inflight_id.load(std::memory_order_relaxed), s_last_result,
+            s_last_local_id,
+            static_cast<long>(time(nullptr) > 1000000000 ? time(nullptr)
+                                                         : esp_timer_get_time() / 1000000LL));
+    }
     return (size_t)snprintf(
         buf, buf_size,
-        "{\"configured\":%s,\"url\":\"%s\",\"key_len\":%u,\"delete_asset\":%u,\"inflight\":%d,\"last\":\"%s\","
-        "\"last_local_id\":%d}",
+        "{\"configured\":%s,\"url\":\"%s\",\"key_len\":%u,\"delete_asset\":%u,\"server_ok\":%s,"
+        "\"server_http\":%d,\"ping_ms\":%d,\"inflight\":%d,\"last\":\"%s\",\"last_local_id\":%d,\"ts\":%ld}",
         DeepDogImmichIsConfigured() ? "true" : "false", s_api_url, (unsigned)strlen(s_api_key),
-        (unsigned)s_delete_asset, s_inflight_id.load(std::memory_order_relaxed), s_last_result, s_last_local_id);
+        (unsigned)s_delete_asset, s_server_ok ? "true" : "false", s_server_http, s_ping_ms,
+        s_inflight_id.load(std::memory_order_relaxed), s_last_result, s_last_local_id,
+        static_cast<long>(time(nullptr) > 1000000000 ? time(nullptr)
+                                                     : esp_timer_get_time() / 1000000LL));
 }
 
 bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool force) {
@@ -483,6 +751,10 @@ bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool
         heap_caps_free(jpeg);
     };
     if (!s_started || !s_queue || local_id <= 0 || jpeg_len == 0) {
+        if (!s_started) {
+            ESP_LOGW(TAG, "request_name dropped: immich worker not started local_id=%d len=%u", local_id,
+                     (unsigned)jpeg_len);
+        }
         free_jpeg();
         return false;
     }
@@ -533,18 +805,54 @@ bool DeepDogImmichConsumeForceRefresh(int local_id) {
     return false;
 }
 
+struct PollStoredCtx {
+    int want_id = 0;
+    bool ok = false;
+};
+
+static bool PollStoredVisitFn(int local_id, const char* asset_id, void* ctx) {
+    auto* c = static_cast<PollStoredCtx*>(ctx);
+    if (c->want_id > 0 && local_id != c->want_id) {
+        return false;
+    }
+    if (s_inflight_id.load(std::memory_order_relaxed) != 0) {
+        return false;
+    }
+    c->ok = PollAssetForName(local_id, asset_id);
+    return c->ok;
+}
+
+bool DeepDogImmichPollStoredAsset(int local_id) {
+    if (!DeepDogImmichIsConfigured()) {
+        return false;
+    }
+    PollStoredCtx ctx{};
+    ctx.want_id = local_id;
+    (void)DeepDogFaceRecognizeVisitPendingImmich(PollStoredVisitFn, &ctx);
+    return ctx.ok;
+}
+
 #else  // stub
 
 bool DeepDogImmichInit() {
-    return true;
+    return false;
+}
+bool DeepDogImmichIsWorkerReady() {
+    return false;
 }
 void DeepDogImmichDeinit() {}
 bool DeepDogImmichIsConfigured() {
     return false;
 }
-bool DeepDogImmichSetConfig(const char*, const char*, int) {
+bool DeepDogImmichSetConfig(const char*, const char*, int, const double*, const double*) {
     return false;
 }
+void DeepDogImmichApplyDefaultsIfEmpty() {}
+void DeepDogImmichPrepareConfig() {}
+bool DeepDogImmichPingServer() {
+    return false;
+}
+void DeepDogImmichSetStatusChangedCallback(DeepDogImmichStatusChangedFn) {}
 size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size) {
     if (!buf || buf_size == 0) {
         return 0;
@@ -565,6 +873,9 @@ bool DeepDogImmichRequestName(int, uint8_t* jpeg, size_t, bool) {
 }
 void DeepDogImmichRequestRefresh(int) {}
 bool DeepDogImmichConsumeForceRefresh(int) {
+    return false;
+}
+bool DeepDogImmichPollStoredAsset(int) {
     return false;
 }
 

@@ -7,7 +7,7 @@
 | 文件 | 职责 |
 |------|------|
 | [`config.h`](./config.h) | 硬件 GPIO + **自由引出脚成对模式** `DEEP_DOG_EXT_PIN_MODE` |
-| [`board_features.h`](./board_features.h) | 分层 ENABLE（总线→驱动→产品）与非引脚总开关 |
+| [`board_features.h`](./board_features.h) | 分层 ENABLE：**引出脚外设**（CAN/UART/IO/LED…）→ 产品链 → **与脚位无关** |
 
 **只改一个宏开/关云台**：`board_features.h` 里的 `DEEP_DOG_GIMBAL_ENABLE`（需 `EXT_PIN=PWM`）。不要单独改底层 `Servo.c` 开关；驱动随 `GIMBAL|SERVO` 自动编入。模块侧请 `#include "config.h"`，**禁止**直接 include `board_features.h`（否则 `*_AVAILABLE` 未定义会被当成 0，误关云台）。
 
@@ -24,8 +24,24 @@
 | `UART` | `UART_AVAILABLE` | A=TXD B=RXD |
 | `RS485` | `RS485_AVAILABLE` | 占位 |
 | `PWM` | `PWM_AVAILABLE` | 舵机/云台 pan/tilt |
-| `IO` / `AD` | 对应 | 占位 |
-| `LED` | `LED_AVAILABLE` | WS2812；A=DIN，B 空闲保留 |
+| `IO` | `IO_AVAILABLE` | **纯 GPIO** 输入/输出（A/B 两路；与 LED 互斥） |
+| `AD` | `AD_AVAILABLE` | 占位 |
+| `LED` | `LED_AVAILABLE` | **WS2812 灯带**；A=DIN，B 空闲；用 `LED_ENABLE`，**不要**开 `IO_ENABLE` |
+
+同一 `EXT_PIN_MODE` 下 **IO 与 LED 不会同时 AVAILABLE**；灯带不是「IO 的一种用法」，而是独立模式。
+
+## 引出脚外设 ENABLE（`board_features.h`，须 `EXT_PIN_MODE` 匹配）
+
+| 宏 | 须 EXT_PIN | 说明 |
+|----|------------|------|
+| `CAN_ENABLE` / `MOTOR_ENABLE` | `CAN` | TWAI + DeepMotor |
+| `UART_ENABLE` | `UART` | 串口 echo |
+| `RS485_ENABLE` | `RS485` | 占位 |
+| `IO_ENABLE` | `IO` | 普通 GPIO 栈（`io_ext/`） |
+| `AD_ENABLE` | `AD` | 占位 |
+| `LED_ENABLE` | `LED` | WS2812 + MQTT/MCP（`led/`）；DIN 默认 38，可在 `config.h` 覆盖 `DEEP_DOG_LED_STRIP_GPIO` |
+
+**灯带不在 38/48 上时**：保持 `EXT_PIN=LED`（MQTT `ext_pins.mode=led`），在 `config.h` 里 `#define DEEP_DOG_LED_STRIP_GPIO GPIO_NUM_xx` 即可；仍用 `LED_ENABLE=1`，**不要**改用 `IO_ENABLE`。
 
 ## 分层 ENABLE（CAN 栈）
 
@@ -51,7 +67,8 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 | 舵机调试 | `PWM` | 0 | 0 | 0 | 0 | **1/0** | 2 路裸舵机 MQTT/MCP（与云台互斥） |
 | 灯带联调 | `LED` | 0 | 0 | 0 | 0 | 0 | `LED_ENABLE=1`；DIN=`gpio_a`(38) |
 | 前端壳 | `NONE` | 0 | 0 | 0 | 0 | 0 | MQTT 设备页联调 |
-| **单电机（当前默认）** | `CAN` | 1 | 1 | 0 | 0 | 0 | TWAI + DeepMotor + can/motor MQTT + handle motor/轴 |
+| **瘦剖面（当前默认）** | `LED` | 0 | 0 | 0 | 0 | 0 | **240²** 采集/人脸/RTSP；§9 640 代码保留 |
+| 单电机 | `CAN` | 1 | 1 | 0 | 0 | 0 | TWAI + DeepMotor + can/motor MQTT + handle motor/轴 |
 | 四足狗 | `CAN` | 1 | 1 | 1 | 0 | 0 | 完整运控 |
 | 机械臂 | `CAN` | 1 | 1 | 0 | 1 | 0 | 占位，实现后启用 |
 | UART | `UART` | 0 | 0 | 0 | 0 | 0 | `UART_ENABLE=1` |
@@ -59,13 +76,11 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 非引脚开关（默认可按联调需要改 `board_features.h`）：
 
 - `DEEP_DOG_MQTT_ENABLE`（默认 1）
-- `DEEP_DOG_VISION_HUB_ENABLE` / `FACE_AI`（开机默认关检测，MQTT `face/cmd` 可开）/ `IMU` / `TRACK_MQTT`
+- `DEEP_DOG_VISION_HUB_ENABLE` / `FACE_AI` / `IMU` / `TRACK_MQTT`
 - `DEEP_DOG_HTTP_SERVER_ENABLE`（默认 0）
-- `DEEP_DOG_HANDLE_ENABLE`（默认 1；蓝牙手柄 / PC 桥输入）
+- `DEEP_DOG_HANDLE_ENABLE`（**S06 §9 瘦剖面默认 0**；单电机剖面改 1）
 
-引出脚产品（需对应 `EXT_PIN_MODE`）：
-
-- `DEEP_DOG_LED_ENABLE`（默认 0；仅 `EXT_PIN_MODE=LED` 时有效；默认 DIN=38、count=24）
+引出脚外设 ENABLE 见上表（`CAN`/`UART`/`IO`/`LED` 等）；**灯带只用 `LED_ENABLE`，不用 `IO_ENABLE`**。
 
 ## MQTT 上报
 
@@ -76,7 +91,7 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 "capabilities": { "can", "motor", "dog", "arm", "uart", "servo", "gimbal", "led", ... }
 ```
 
-前端：`ext_pins.mode` 选总线类页面；`capabilities.motor` vs `dog` 区分电机调试与四足。当前默认剖面为 **单电机（can）**。
+前端：`ext_pins.mode` 选总线类页面；`capabilities.motor` vs `dog` 区分电机调试与四足。当前默认 `config.h` 为 **`EXT_PIN=LED`** + S06 §9 瘦剖面。
 
 ## 目录与依赖
 
@@ -86,9 +101,9 @@ config.h / board_features.h
     ├─ motor/        ← MOTOR_ENABLE（整文件 #if）
     ├─ dog/ leg/ trajectory/  ← DOG_ENABLE（整文件 #if）
     ├─ arm/          ← ARM_ENABLE（占位）
-    ├─ uart/ rs485/ io_ext/ ad/  ← 对应 EXT 模式
+    ├─ uart/ rs485/ io_ext/ ad/  ← 对应 EXT 模式（IO=纯 GPIO）
     ├─ servo/ gimbal/ ← PWM 模式
-    ├─ led/          ← LED_ENABLE（EXT_PIN=LED；DIN=gpio_a）
+    ├─ led/          ← LED_ENABLE（EXT_PIN=LED；非 IO 栈）
     ├─ mqtt/ vision/ face_ai/ sensor/ http-server/ …
     └─ esp_sparkbot_board.cc 编排
 ```

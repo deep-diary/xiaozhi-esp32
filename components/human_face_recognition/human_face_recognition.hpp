@@ -47,6 +47,8 @@ public:
     std::vector<dl::recognition::result_t> recognize(const dl::image::img_t &img,
                                                      const std::list<dl::detect::result_t> &detect_res);
     esp_err_t enroll(const dl::image::img_t &img, const std::list<dl::detect::result_t> &detect_res);
+    /** 写入已算好的 feat（须在 internal 栈任务内调用 facedb Flash 路径） */
+    esp_err_t enroll_feat(dl::TensorBase *feat);
     esp_err_t clear_all_feats();
     esp_err_t delete_feat(uint16_t id);
     esp_err_t delete_last_feat();

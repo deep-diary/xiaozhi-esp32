@@ -60,7 +60,7 @@ Topic 前缀：`deepdiary/deep-dog/<device_id>/...`
 
 Key 存设备 NVS（`fdog_im`），经 `POST /api/immich_config` 下发；**禁止**写入本仓库。无同步搜人 API → 上传临时 asset → 轮询 `people`（**不**主动 `PUT /jobs`）→ 绑名；临时 asset **默认保留**（`delete_asset=0`），可配删除（[S05](./server/S05-immich-real-name.md)）。须先有 [S04](./server/S04-local-face-numeric-id.md) 去重。
 
-联调图：[`fixtures/ge_weidong.png`](./fixtures/ge_weidong.png)（葛维冬）。旧 **240** 预览 Immich 易失败；S06 实选 **640×480**，见 [S06](./server/S06-higher-resolution.md)。
+联调图：[`fixtures/ge_weidong.png`](./fixtures/ge_weidong.png)（葛维冬）。旧 **240²** Immich 易失败；S06 **§9** 规划 640 采集 + 320 推流（OV2640，评估可行，待实现），见 [S06 §9](./server/S06-higher-resolution.md)。
 
 ## 4. 安全
 

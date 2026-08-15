@@ -50,6 +50,11 @@
 #define DEEP_DOG_MQTT_FACE_POLL_INTERVAL_US (500 * 1000)
 #endif
 
+/** face/status 控制态心跳：每 N 次轮询强制发一帧（retain=false 时供晚订阅 UI 同步开关） */
+#ifndef DEEP_DOG_MQTT_FACE_STATUS_HEARTBEAT_POLLS
+#define DEEP_DOG_MQTT_FACE_STATUS_HEARTBEAT_POLLS 60  /* 500ms × 60 ≈ 30s */
+#endif
+
 /** track/status 轮询周期（µs），on_change ≈ 2 Hz */
 #ifndef DEEP_DOG_MQTT_TRACK_POLL_INTERVAL_US
 #define DEEP_DOG_MQTT_TRACK_POLL_INTERVAL_US (500 * 1000)

@@ -245,12 +245,16 @@ topics:
               free: { type: int }
               min: { type: int }
               total: { type: int }
+              largest_free: { type: int, optional: true }
+              used: { type: int, optional: true, note: "total - free" }
           psram:
             type: object
             fields:
               free: { type: int }
               min: { type: int }
               total: { type: int, note: "0 if no PSRAM" }
+              largest_free: { type: int, optional: true }
+              used: { type: int, optional: true }
       rssi: { type: int, optional: true }
       wifi_ssid: { type: string, optional: true, note: "status only; may change on roam" }
       wifi_channel: { type: int, optional: true }
@@ -262,7 +266,24 @@ topics:
           warn:
             type: array
             items: { type: string }
-            note: "e.g. low_internal_heap (<32KiB free); motor faults stay in dog/status"
+            note: "e.g. low_internal_heap (<32KiB free); clock_unsynced; motor faults stay in dog/status"
+      clock_synced:
+        type: bool
+        optional: true
+        note: "true when time() is plausible Unix sec (>=1e9); see swrs/net/N01-sntp-clock-sync.md"
+      task_count: { type: int, optional: true, note: "requires CONFIG_FREERTOS_USE_TRACE_FACILITY" }
+      tasks:
+        type: array
+        optional: true
+        items:
+          type: object
+          fields:
+            name: { type: string }
+            prio: { type: int }
+            stack_hwm: { type: int, note: "FreeRTOS high water mark bytes (unused stack)" }
+            stack_domain: { type: string, optional: true, enum: [internal, psram, unknown] }
+            stack_used_est: { type: int, optional: true, note: "known alloc - stack_hwm" }
+            state: { type: int, note: "eTaskState enum value" }
       ts: { type: int }
       ts_iso: { type: string, optional: true }
 
@@ -347,7 +368,11 @@ topics:
       error:
         type: string
         optional: true
-        note: "empty when ok; codes: invalid_json|missing_action|bad_mode|start_requires_mode|unknown_action|stream_unavailable|push_error|no_rtp"
+        note: "empty when ok; codes: invalid_json|missing_action|bad_mode|start_requires_mode|unknown_action|stream_unavailable|push_error|no_rtp|auto_stop_timeout|http_stream_disabled"
+      voice_paused:
+        type: bool
+        optional: true
+        note: "true while RTSP push active and voice/AFE paused"
       ts: { type: int }
       ts_iso: { type: string, optional: true, note: "UTC ISO8601 for UI display" }
 
@@ -359,12 +384,21 @@ topics:
     retain: false
     http: "POST /api/face_enable (+ clear_db / pipeline / interval via MQTT)"
     payload:
-      enabled: { type: bool, optional: true, note: "master switch; default false at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED); lazy-loads runtime on first true" }
+      enabled: { type: bool, optional: true, note: "master switch; default true at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1); lazy-loads runtime on first true if not boot-started" }
       action:
         type: enum
-        values: [clear_db]
+        values: [clear_db, rename, delete_one, merge, refresh_immich, set_immich_config, ping_immich, refresh_status]
         optional: true
-        note: "clear facedb feats + NVS meta + session"
+        note: "clear_db= wipe all; merge=alias; refresh_status= force uplink face/status (UI sync); set_immich_config= NVS fdog_im; ping_immich= probe server/ping"
+      local_id: { type: int, optional: true }
+      target_local_id: { type: int, optional: true, note: "merge canonical target" }
+      display_name: { type: string, optional: true, note: "rename" }
+      api_url: { type: string, optional: true, note: "Immich API root for set_immich_config" }
+      api_key: { type: string, optional: true, note: "Immich x-api-key; never echoed on uplink" }
+      delete_asset: { type: int, optional: true, note: "0 keep temp asset / 1 delete after naming" }
+      latitude: { type: number, optional: true, note: "home GPS for Immich timeline (set_immich_config, with longitude)" }
+      longitude: { type: number, optional: true, note: "home GPS for Immich timeline (set_immich_config, with latitude)" }
+      recognize_enabled: { type: bool, optional: true, note: "false=detect only, no enroll" }
       pipeline:
         type: enum
         values: [live, identity]
@@ -381,10 +415,12 @@ topics:
     dir: uplink
     qos: 0
     retain: false
-    when: on_change_or_poll
+    when: on_change_or_poll_heartbeat
+    note: "retain=false; ~30s forced publish of control fields (enabled/recognize_enabled) for late subscribers; boxes on_change when detect on"
     http: "GET /api/face"
     payload:
       enabled: { type: bool }
+      recognize_enabled: { type: bool, optional: true }
       pipeline: { type: enum, values: [live, identity], optional: true }
       detect_interval_ms: { type: int, optional: true }
       has_person: { type: bool, alias: has_face }
@@ -410,6 +446,61 @@ topics:
           score: { type: number, optional: true }
           local_id: { type: int, optional: true }
           display_name: { type: string, optional: true }
+      ts: { type: int }
+
+  face/registry:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect, on_recognizer_ready, on_face_cmd, on_enroll_bind_rename_merge_delete_clear
+    note: "MQTT connect publishes current snapshot; recognizer NVS restore must republish to overwrite stale empty retain when Face AI lazy-starts"
+    payload:
+      version: { type: int }
+      count: { type: int, note: "canonical entries count" }
+      feat_count: { type: int, note: "embedding slots in use (may differ from count when aliases exist)" }
+      max_count: { type: int, note: "DEEP_DOG_FACE_RECOG_MAX (32)" }
+      entries:
+        type: array
+        item:
+          local_id: { type: int }
+          display_name: { type: string }
+          immich_person_id: { type: string, optional: true }
+          immich_asset_id: { type: string, optional: true }
+          aliases: { type: array, item: { type: int }, optional: true }
+          updated_at: { type: int, note: "meta write time (rename/Immich bind)" }
+          last_seen_at: { type: int, optional: true, note: "Unix sec, last successful recognition" }
+      ts: { type: int }
+
+  face/immich/status:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect_config_change_periodic_ping
+    payload:
+      configured: { type: bool }
+      url: { type: string }
+      key_len: { type: int }
+      delete_asset: { type: int }
+      server_ok: { type: bool }
+      server_http: { type: int, optional: true }
+      ping_ms: { type: int, optional: true }
+      inflight: { type: int }
+      last: { type: string }
+      last_local_id: { type: int }
+      ts: { type: int }
+
+  person/active:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: primary_local_id_changes
+    payload:
+      local_id: { type: int }
+      display_name: { type: string, optional: true }
+      immich_person_id: { type: string, optional: true }
       ts: { type: int }
 
   face/thumb:

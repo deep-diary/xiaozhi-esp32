@@ -2,6 +2,18 @@
 
 板级联调 / 验收工具集（与上游 `scripts/p3_tools`、`Image_Converter` 等分开）。
 
+## MQTT / 视觉 / 审计
+
+| 脚本 | 用途 |
+|------|------|
+| `deep_dog_mqtt_verify.py` | device/stream MQTT 验收 |
+| `deep_dog_mqtt_face_verify.py` | face/cmd + face/status |
+| `deep_dog_device_audit.py` | 人脸库 + mem + tasks（MQTT/WS MCP） |
+
+```bash
+python3 scripts/deep_dog/deep_dog_device_audit.py --device-ip 192.168.31.211 --via web --wait 8
+```
+
 ## 手柄 / 输入
 
 | 脚本 | 用途 |

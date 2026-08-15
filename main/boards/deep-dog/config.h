@@ -9,7 +9,7 @@
  * 联调剖面说明见 FEATURE_FLAGS.md。
  */
 
-/* -------- 自由引出脚 GPIO38/48：成对模式 --------
+/* -------- 自由引出脚 GPIO38/48：成对模式（同一时刻仅一种；IO 与 LED 互斥） --------
  * 必须用 #define 数值（不能仅用 enum）：#if 里未定义的标识符一律当 0，
  * 若用 enum 常量比较会出现 NONE==CAN 恒真，MODE_STR 误报 can。
  */
@@ -166,7 +166,7 @@ typedef int deep_dog_ext_pin_mode_t;
 #define DEEP_DOG_CAMERA_H_MIRROR 0
 #endif
 #ifndef DEEP_DOG_CAMERA_V_FLIP
-#define DEEP_DOG_CAMERA_V_FLIP 0
+#define DEEP_DOG_CAMERA_V_FLIP 1
 #endif
 #define SPARKBOT_LEDC_TIMER       (LEDC_TIMER_0)
 #define SPARKBOT_LEDC_CHANNEL     (LEDC_CHANNEL_0)
@@ -179,7 +179,7 @@ typedef int deep_dog_ext_pin_mode_t;
 #define TOUCH_BUTTON2_GPIO       (GPIO_NUM_2)
 #define TOUCH_BUTTON3_GPIO       (GPIO_NUM_3)
 
-/* 灯带：mode=led 时默认 DIN=gpio_a(38)、count=24；其它 mode 默认 NC/0（可覆盖） */
+/* 灯带：mode=led 时默认 DIN=gpio_a(38)、count=24；可覆盖 LED_STRIP_GPIO，仍须 EXT_PIN=LED + LED_ENABLE */
 #if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_LED
 #ifndef DEEP_DOG_LED_STRIP_GPIO
 #define DEEP_DOG_LED_STRIP_GPIO  DEEP_DOG_EXT_PIN_A_GPIO

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "face_ai_config.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -68,3 +70,18 @@ inline const char* DeepDogFaceRecognizeSourceStr(DeepDogFaceRecognizeSource s) {
             return "none";
     }
 }
+
+/** 已注册人脸条目（canonical 或 meta 索引；供 list/registry） */
+struct DeepDogFaceEnrolledEntry {
+    int local_id = 0;
+    int canonical_id = 0;
+    char display_name[32] = {};
+    char immich_person_id[40] = {};
+    char immich_asset_id[48] = {};
+    uint32_t updated_at = 0;
+    /** Unix 秒；最后一次识别命中该槽（LRU / UI「上次见面」） */
+    uint32_t last_seen_at = 0;
+    bool name_pending = false;
+    int aliases[DEEP_DOG_FACE_REGISTRY_MAX_ALIASES] = {};
+    int alias_count = 0;
+};

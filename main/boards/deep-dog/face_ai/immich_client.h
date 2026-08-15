@@ -10,6 +10,9 @@
 bool DeepDogImmichInit();
 void DeepDogImmichDeinit();
 
+/** dog_immich 任务是否已创建（upload/poll 依赖此项） */
+bool DeepDogImmichIsWorkerReady();
+
 bool DeepDogImmichIsConfigured();
 /**
  * 写入 NVS。api_url 可空则用默认局域网地址。
@@ -17,7 +20,23 @@ bool DeepDogImmichIsConfigured();
  * 若 api_key 为空但已配置过 Key，仍可只更新 delete_asset。
  * 禁止把 Key 打进完整日志。
  */
-bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset = -1);
+bool DeepDogImmichSetConfig(const char* api_url, const char* api_key, int delete_asset = -1,
+                            const double* latitude = nullptr, const double* longitude = nullptr);
+
+/** NVS 无 Key 时应用编译期默认 URL/Key（若有）并写入 NVS。必须在 internal 栈调用（会读/写 Flash）。 */
+void DeepDogImmichApplyDefaultsIfEmpty();
+
+/**
+ * 启动前在 internal 栈加载 Immich NVS 配置（RuntimeStart / immich_late / MQTT）。
+ * dog_face_ai / dog_immich（PSRAM 栈）meta NVS 须经 face_persist；facedb 须经 face_facedb。
+ */
+void DeepDogImmichPrepareConfig();
+
+/** GET {url}/server/ping；更新内部 server_ok/ping_ms 并触发 status 回调。 */
+bool DeepDogImmichPingServer();
+
+using DeepDogImmichStatusChangedFn = void (*)();
+void DeepDogImmichSetStatusChangedCallback(DeepDogImmichStatusChangedFn cb);
 
 /** 状态 JSON（无 Key 明文），写入 buf。 */
 size_t DeepDogImmichFormatStatusJson(char* buf, size_t buf_size);
@@ -31,3 +50,5 @@ bool DeepDogImmichRequestName(int local_id, uint8_t* jpeg, size_t jpeg_len, bool
 /** 标记下次出镜时强制刷新该 local_id（0=当前 primary，由 runtime 填）。 */
 void DeepDogImmichRequestRefresh(int local_id);
 bool DeepDogImmichConsumeForceRefresh(int local_id);
+/** 对 NVS 中已存 asset_id 立即 poll（无 upload）。 */
+bool DeepDogImmichPollStoredAsset(int local_id);

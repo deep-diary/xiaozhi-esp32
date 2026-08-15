@@ -4,8 +4,12 @@
 #include "face_ai_bridge.h"
 #include "face_ai_config.h"
 #include "face_ai_types.h"
+#include "mqtt/memory_report.h"
 #include "face_recognize.h"
 #include "immich_client.h"
+#include "face_persist.h"
+#include "face_facedb.h"
+#include "face_task_util.h"
 #include "image_to_jpeg.h"
 
 #include <algorithm>
@@ -38,9 +42,15 @@ struct FaceFrameJob {
 static QueueHandle_t s_queue = nullptr;
 static TaskHandle_t s_task = nullptr;
 static std::atomic<bool> s_user_enabled{DEEP_DOG_FACE_AI_DEFAULT_ENABLED != 0};
+static std::atomic<bool> s_recognition_enabled{true};
 static std::atomic<bool> s_runtime_started{false};
+static std::atomic<bool> s_runtime_start_inflight{false};
 static std::atomic<int> s_detect_interval_ms{DEEP_DOG_FACE_AI_MIN_INTERVAL_MS};
 static std::atomic<uint8_t> s_pipeline{static_cast<uint8_t>(DeepDogFacePipeline::Live)};
+static std::atomic<bool> s_vision_rtsp_active{false};
+/** clear_db 等 facedb 操作时暂停送帧/识别，避免 /facedb/db 被 fopen 占用导致 remove 失败。 */
+static std::atomic<bool> s_pipeline_paused{false};
+static std::atomic<bool> s_face_task_busy{false};
 static int64_t s_last_submit_us = 0;
 static int64_t s_last_recog_us = 0;
 static std::mutex s_snap_mu;
@@ -239,6 +249,27 @@ static void MaybeRequestImmichName(const uint8_t* rgb565, uint16_t w, uint16_t h
 #endif
 }
 
+/** 对当前帧检测框尝试 Immich 命名（完整识别帧与 sticky 降频帧共用）。 */
+static void MaybeRequestImmichForBoxes(const uint8_t* rgb565, uint16_t w, uint16_t h,
+                                       const std::vector<DeepDogFaceBox>& boxes, bool recog_on) {
+#if DEEP_DOG_FACE_IMMICH_ENABLE && DEEP_DOG_FACE_RECOG_ENABLE
+    if (!recog_on || boxes.empty()) {
+        return;
+    }
+    for (const auto& b : boxes) {
+        if (b.local_id > 0) {
+            MaybeRequestImmichName(rgb565, w, h, b);
+        }
+    }
+#else
+    (void)rgb565;
+    (void)w;
+    (void)h;
+    (void)boxes;
+    (void)recog_on;
+#endif
+}
+
 /** 检测框 IoU（像素坐标），用于 live 跳过识别时沿用上次 ID/人名。 */
 static float BoxIou(const DeepDogFaceBox& a, const DeepDogFaceBox& b) {
     const float ix0 = std::max(a.x0, b.x0);
@@ -322,6 +353,30 @@ static void StickyApplyPrevIds(std::vector<DeepDogFaceBox>* boxes, DeepDogFaceSn
     }
 }
 
+static void DrainFaceQueue() {
+    if (!s_queue) {
+        return;
+    }
+    FaceFrameJob j{};
+    while (xQueueReceive(s_queue, &j, 0) == pdTRUE) {
+        if (j.data) {
+            heap_caps_free(j.data);
+        }
+    }
+}
+
+static void WaitFacePipelineIdle(int timeout_ms) {
+    for (int elapsed = 0; elapsed <= timeout_ms; elapsed += 50) {
+        if (!s_face_task_busy.load(std::memory_order_acquire)) {
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (s_face_task_busy.load(std::memory_order_acquire)) {
+        ESP_LOGW(TAG, "clear_db: face pipeline still busy after %dms", timeout_ms);
+    }
+}
+
 static void FaceAiTask(void* /*arg*/) {
     FaceFrameJob job{};
     for (;;) {
@@ -331,6 +386,11 @@ static void FaceAiTask(void* /*arg*/) {
         if (job.data == nullptr || job.len == 0) {
             continue;
         }
+        if (s_pipeline_paused.load(std::memory_order_acquire)) {
+            heap_caps_free(job.data);
+            continue;
+        }
+        s_face_task_busy.store(true, std::memory_order_release);
         // 给 IDLE 喘息：识别卷积会长时间占满 CPU0，曾导致 TWDT → InstrFetchProhibited → 软重启后摄像头挂死
         vTaskDelay(pdMS_TO_TICKS(5));
 
@@ -352,30 +412,38 @@ static void FaceAiTask(void* /*arg*/) {
                 const DeepDogFacePipeline pipe =
                     static_cast<DeepDogFacePipeline>(s_pipeline.load(std::memory_order_relaxed));
                 const int64_t now_us = esp_timer_get_time();
+                const bool recog_on = s_recognition_enabled.load(std::memory_order_relaxed);
+                int recog_min_ms = DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS;
+#if DEEP_DOG_FACE_AI_DURING_RTSP
+                if (s_vision_rtsp_active.load(std::memory_order_relaxed) && recog_on &&
+                    recog_min_ms < DEEP_DOG_FACE_AI_RTSP_RECOG_MIN_INTERVAL_MS) {
+                    recog_min_ms = DEEP_DOG_FACE_AI_RTSP_RECOG_MIN_INTERVAL_MS;
+                }
+#endif
                 const bool run_recog =
-                    (pipe == DeepDogFacePipeline::Identity) ||
-                    ((now_us - s_last_recog_us) >= (int64_t)DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS * 1000);
+                    recog_on &&
+                    ((pipe == DeepDogFacePipeline::Identity) ||
+                     ((now_us - s_last_recog_us) >= (int64_t)recog_min_ms * 1000));
                 int recog_ms = -1;
                 if (run_recog && !boxes.empty()) {
                     dl::image::img_t img{};
                     uint8_t* owned = nullptr;
                     if (DeepDogFaceDetectMakeImg(job.data, job.len, job.w, job.h, &img, &owned)) {
+                        taskYIELD();
                         const int64_t t_recog0 = esp_timer_get_time();
                         DeepDogFaceRecognizeProcess(img, raw, &boxes, &snap);
+                        taskYIELD();
                         recog_ms = static_cast<int>((esp_timer_get_time() - t_recog0) / 1000);
                         s_last_recog_us = now_us;
                         if (owned) {
                             heap_caps_free(owned);
                         }
                         vTaskDelay(pdMS_TO_TICKS(5));
-                        for (const auto& b : boxes) {
-                            if (b.local_id > 0) {
-                                MaybeRequestImmichName(job.data, job.w, job.h, b);
-                            }
-                        }
+                        MaybeRequestImmichForBoxes(job.data, job.w, job.h, boxes, recog_on);
                     }
                 } else if (!boxes.empty()) {
                     StickyApplyPrevIds(&boxes, &snap);
+                    MaybeRequestImmichForBoxes(job.data, job.w, job.h, boxes, recog_on);
                 }
                 static int s_timing_logs = 0;
                 if (s_timing_logs < 16) {
@@ -390,6 +458,7 @@ static void FaceAiTask(void* /*arg*/) {
 #endif
         }
         heap_caps_free(job.data);
+        s_face_task_busy.store(false, std::memory_order_release);
 
         snap.count = static_cast<int>(boxes.size());
         if (snap.count > 8) {
@@ -407,63 +476,9 @@ static void FaceAiTask(void* /*arg*/) {
     }
 }
 
-bool DeepDogFaceAiRuntimeStart() {
-    if (s_runtime_started.exchange(true)) {
-        return true;
-    }
-    if (!DeepDogFaceDetectInit()) {
-        s_runtime_started = false;
-        return false;
-    }
-#if DEEP_DOG_FACE_RECOG_ENABLE
-    if (!DeepDogFaceRecognizeInit()) {
-        ESP_LOGW(TAG, "face recognize init failed (detect still available)");
-    }
-#endif
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-    if (!DeepDogImmichInit()) {
-        ESP_LOGW(TAG, "immich worker init failed (local id still available)");
-    }
-#endif
-    s_queue = xQueueCreate(1, sizeof(FaceFrameJob));
-    if (!s_queue) {
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-        DeepDogImmichDeinit();
-#endif
-#if DEEP_DOG_FACE_RECOG_ENABLE
-        DeepDogFaceRecognizeDeinit();
-#endif
-        DeepDogFaceDetectDeinit();
-        s_runtime_started = false;
-        return false;
-    }
-    // facedb/FAT 会关 flash cache；任务栈必须在内部 DRAM（PSRAM 栈会触发
-    // esp_task_stack_is_sane_cache_disabled 断言，导致采帧/推流中断）。
-    if (xTaskCreate(FaceAiTask, "dog_face_ai", 12288, nullptr, 2, &s_task) != pdPASS) {
-        vQueueDelete(s_queue);
-        s_queue = nullptr;
-#if DEEP_DOG_FACE_IMMICH_ENABLE
-        DeepDogImmichDeinit();
-#endif
-#if DEEP_DOG_FACE_RECOG_ENABLE
-        DeepDogFaceRecognizeDeinit();
-#endif
-        DeepDogFaceDetectDeinit();
-        s_runtime_started = false;
-        return false;
-    }
-    ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms, recog_min=%d ms, during_rtsp=%d, recog=%d immich=%d)",
-             DEEP_DOG_FACE_AI_MIN_INTERVAL_MS, DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS, DEEP_DOG_FACE_AI_DURING_RTSP,
-             DEEP_DOG_FACE_RECOG_ENABLE, DEEP_DOG_FACE_IMMICH_ENABLE);
-    return true;
-}
-
-void DeepDogFaceAiRuntimeStop() {
-    if (!s_runtime_started.load()) {
-        return;
-    }
+static void TeardownRuntimeTask() {
     if (s_task) {
-        vTaskDeleteWithCaps(s_task);
+        vTaskDelete(s_task);
         s_task = nullptr;
     }
     if (s_queue) {
@@ -476,24 +491,173 @@ void DeepDogFaceAiRuntimeStop() {
         vQueueDelete(s_queue);
         s_queue = nullptr;
     }
+}
+
+static void TeardownRuntimeAll() {
+    TeardownRuntimeTask();
 #if DEEP_DOG_FACE_IMMICH_ENABLE
     DeepDogImmichDeinit();
 #endif
 #if DEEP_DOG_FACE_RECOG_ENABLE
+    (void)DeepDogFacePersistFlushSync();
     DeepDogFaceRecognizeDeinit();
+    DeepDogFaceFacedbShutdown();
+    DeepDogFacePersistShutdown();
 #endif
     DeepDogFaceDetectDeinit();
-    s_runtime_started = false;
 }
+
+static void LogRuntimeStartFail(const char* step) {
+    ESP_LOGW(TAG, "runtime start failed at %s (largest_int=%u free_int=%u)", step,
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+static void ScheduleImmichWorkerAfterBoot();
+#endif
+
+bool DeepDogFaceAiRuntimeStart() {
+    if (s_runtime_started.load(std::memory_order_acquire)) {
+        return true;
+    }
+    // 先占 task 栈再加载模型，避免 RTSP 等场景下 internal 碎片化导致 xTaskCreate 失败
+    s_queue = xQueueCreate(1, sizeof(FaceFrameJob));
+    if (!s_queue) {
+        LogRuntimeStartFail("queue");
+        return false;
+    }
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    DeepDogImmichPrepareConfig();
+#endif
+#if DEEP_DOG_FACE_RECOG_ENABLE
+    if (!DeepDogFacePersistInit()) {
+        LogRuntimeStartFail("face_persist");
+        TeardownRuntimeAll();
+        return false;
+    }
+    if (!DeepDogFaceFacedbInit()) {
+        LogRuntimeStartFail("face_facedb");
+        TeardownRuntimeAll();
+        return false;
+    }
+#endif
+    if (!DeepDogFaceTaskCreate("dog_face_ai", FaceAiTask, DEEP_DOG_FACE_AI_TASK_STACK, nullptr, 2, &s_task)) {
+        LogRuntimeStartFail("dog_face_ai task");
+        vQueueDelete(s_queue);
+        s_queue = nullptr;
+#if DEEP_DOG_FACE_RECOG_ENABLE
+        DeepDogFaceFacedbShutdown();
+        DeepDogFacePersistShutdown();
+#endif
+        return false;
+    }
+    if (!DeepDogFaceDetectInit()) {
+        LogRuntimeStartFail("detect init");
+        TeardownRuntimeAll();
+        return false;
+    }
+#if DEEP_DOG_FACE_RECOG_ENABLE
+    if (!DeepDogFaceRecognizeInit()) {
+        ESP_LOGW(TAG, "face recognize init failed (detect still available)");
+    }
+#endif
+    s_runtime_started.store(true, std::memory_order_release);
+    ESP_LOGI(TAG, "runtime started (queue=1, interval>=%d ms, recog_min=%d ms, during_rtsp=%d, recog=%d immich=%d)",
+             DEEP_DOG_FACE_AI_MIN_INTERVAL_MS, DEEP_DOG_FACE_RECOG_MIN_INTERVAL_MS, DEEP_DOG_FACE_AI_DURING_RTSP,
+             DEEP_DOG_FACE_RECOG_ENABLE, DEEP_DOG_FACE_IMMICH_ENABLE);
+    DeepDogMemoryReportLog("face_ready");
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    ScheduleImmichWorkerAfterBoot();
+#endif
+    return true;
+}
+
+void DeepDogFaceAiRuntimeStop() {
+    if (!s_runtime_started.load()) {
+        return;
+    }
+    TeardownRuntimeAll();
+    s_runtime_started.store(false, std::memory_order_release);
+}
+
+static void FaceRuntimeStartWorker(void*) {
+    if (!s_user_enabled.load(std::memory_order_acquire)) {
+        s_runtime_start_inflight.store(false, std::memory_order_release);
+        vTaskDelete(nullptr);
+        return;
+    }
+    if (s_runtime_started.load(std::memory_order_acquire)) {
+        s_runtime_start_inflight.store(false, std::memory_order_release);
+        vTaskDelete(nullptr);
+        return;
+    }
+    const bool started = DeepDogFaceAiRuntimeStart();
+    if (!started) {
+        ESP_LOGW(TAG, "deferred runtime start failed");
+    } else if (s_user_enabled.load(std::memory_order_acquire)) {
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+        ScheduleImmichWorkerAfterBoot();
+#endif
+    }
+    s_runtime_start_inflight.store(false, std::memory_order_release);
+    vTaskDelete(nullptr);
+}
+
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+/** face_ready 后再建 dog_immich（PSRAM 栈；与 vision_hub 错峰并重试）。 */
+static void ImmichLateStartTask(void* /*arg*/) {
+    DeepDogImmichPrepareConfig();
+    constexpr int kMaxAttempts = 12;
+    for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+        if (DeepDogImmichIsWorkerReady()) {
+            vTaskDelete(nullptr);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(attempt == 0 ? 800 : 2000));
+        if (DeepDogImmichInit()) {
+            ESP_LOGI(TAG, "immich worker started (post-boot attempt=%d)", attempt + 1);
+            vTaskDelete(nullptr);
+            return;
+        }
+        ESP_LOGW(TAG, "immich post-boot retry %d/%d (free_int=%u largest_int=%u psram=%u)", attempt + 1,
+                 kMaxAttempts, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    }
+    ESP_LOGE(TAG, "immich worker failed to start after %d attempts", kMaxAttempts);
+    vTaskDelete(nullptr);
+}
+
+static void ScheduleImmichWorkerAfterBoot() {
+    static TaskHandle_t s_immich_late = nullptr;
+    if (s_immich_late != nullptr) {
+        return;
+    }
+    constexpr uint32_t kImmichLateStack = 4096;
+    if (!DeepDogFaceTaskCreate("immich_late", ImmichLateStartTask, kImmichLateStack, nullptr, 2, &s_immich_late)) {
+        ESP_LOGW(TAG, "immich_late task create failed (free_int=%u largest_int=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    }
+}
+#endif
 
 void DeepDogFaceAiSetEnabled(bool on) {
     if (on) {
         if (!s_runtime_started.load(std::memory_order_acquire)) {
-            if (!DeepDogFaceAiRuntimeStart()) {
-                ESP_LOGW(TAG, "SetEnabled(true) failed: runtime start failed");
-                return;
+            if (!s_runtime_start_inflight.exchange(true, std::memory_order_acq_rel)) {
+                // 模型加载栈深；禁止在 mqtt_task（~6KB）上同步 RuntimeStart
+                if (xTaskCreate(FaceRuntimeStartWorker, "face_boot", DEEP_DOG_FACE_BOOT_TASK_STACK, nullptr, 2,
+                                nullptr) != pdPASS) {
+                    s_runtime_start_inflight.store(false, std::memory_order_release);
+                    ESP_LOGW(TAG, "SetEnabled(true) failed: face_boot task");
+                    return;
+                }
             }
         }
+    } else {
+        s_runtime_start_inflight.store(false, std::memory_order_release);
     }
     s_user_enabled.store(on, std::memory_order_relaxed);
     if (!on) {
@@ -511,6 +675,15 @@ void DeepDogFaceAiSetEnabled(bool on) {
 
 bool DeepDogFaceAiIsEnabled() {
     return s_user_enabled.load(std::memory_order_relaxed);
+}
+
+void DeepDogFaceAiSetRecognitionEnabled(bool on) {
+    s_recognition_enabled.store(on, std::memory_order_relaxed);
+    ESP_LOGI(TAG, "recognition_enabled=%d", on ? 1 : 0);
+}
+
+bool DeepDogFaceAiIsRecognitionEnabled() {
+    return s_recognition_enabled.load(std::memory_order_relaxed);
 }
 
 void DeepDogFaceAiSetPipeline(DeepDogFacePipeline pipeline) {
@@ -537,12 +710,30 @@ int DeepDogFaceAiGetDetectIntervalMs() {
     return s_detect_interval_ms.load(std::memory_order_relaxed);
 }
 
+void DeepDogFaceAiSetVisionRtspActive(bool active) {
+    s_vision_rtsp_active.store(active, std::memory_order_relaxed);
+}
+
+bool DeepDogFaceAiIsVisionRtspActive() {
+    return s_vision_rtsp_active.load(std::memory_order_relaxed);
+}
+
 bool DeepDogFaceAiClearDb() {
+    s_pipeline_paused.store(true, std::memory_order_release);
+    DrainFaceQueue();
+    WaitFacePipelineIdle(2000);
 #if DEEP_DOG_FACE_RECOG_ENABLE
+    for (int i = 0; i < 60 && !DeepDogFaceRecognizeReady(); ++i) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    DeepDogFaceFacedbQuiesceBegin();
+    (void)DeepDogFaceFacedbWaitIdle(3000);
     const bool ok = DeepDogFaceRecognizeClearAll();
+    DeepDogFaceFacedbQuiesceEnd();
 #else
     const bool ok = true;
 #endif
+    s_pipeline_paused.store(false, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lock(s_snap_mu);
         s_snapshot.count = 0;
@@ -558,14 +749,23 @@ bool DeepDogFaceAiClearDb() {
 }
 
 void DeepDogFaceAiSubmitFrameIfDue(const uint8_t* rgb565, size_t len, uint16_t width, uint16_t height) {
-    if (!s_runtime_started.load() || !rgb565 || width == 0 || height == 0) {
+    if (!s_runtime_started.load(std::memory_order_acquire) || !s_queue || !rgb565 || width == 0 || height == 0) {
         return;
     }
     if (!s_user_enabled.load(std::memory_order_relaxed)) {
         return;
     }
+    if (s_pipeline_paused.load(std::memory_order_acquire)) {
+        return;
+    }
     const int64_t now = esp_timer_get_time();
-    const int interval_ms = s_detect_interval_ms.load(std::memory_order_relaxed);
+    int interval_ms = s_detect_interval_ms.load(std::memory_order_relaxed);
+#if DEEP_DOG_FACE_AI_DURING_RTSP
+    if (s_vision_rtsp_active.load(std::memory_order_relaxed) &&
+        interval_ms < DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS) {
+        interval_ms = DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS;
+    }
+#endif
     if ((now - s_last_submit_us) < (int64_t)interval_ms * 1000) {
         return;
     }
@@ -682,6 +882,10 @@ void DeepDogFaceAiSetEnabled(bool) {}
 bool DeepDogFaceAiIsEnabled() {
     return false;
 }
+void DeepDogFaceAiSetRecognitionEnabled(bool) {}
+bool DeepDogFaceAiIsRecognitionEnabled() {
+    return false;
+}
 void DeepDogFaceAiSetPipeline(DeepDogFacePipeline) {}
 DeepDogFacePipeline DeepDogFaceAiGetPipeline() {
     return DeepDogFacePipeline::Live;
@@ -689,6 +893,10 @@ DeepDogFacePipeline DeepDogFaceAiGetPipeline() {
 void DeepDogFaceAiSetDetectIntervalMs(int) {}
 int DeepDogFaceAiGetDetectIntervalMs() {
     return DEEP_DOG_FACE_AI_MIN_INTERVAL_MS;
+}
+void DeepDogFaceAiSetVisionRtspActive(bool) {}
+bool DeepDogFaceAiIsVisionRtspActive() {
+    return false;
 }
 bool DeepDogFaceAiClearDb() {
     return true;

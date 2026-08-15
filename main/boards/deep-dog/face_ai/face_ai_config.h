@@ -17,7 +17,17 @@
 
 /** 开机运行时总开关（检测+识别）；0=关，运行中由 MQTT face/cmd / HTTP 再开 */
 #ifndef DEEP_DOG_FACE_AI_DEFAULT_ENABLED
-#define DEEP_DOG_FACE_AI_DEFAULT_ENABLED 0
+#define DEEP_DOG_FACE_AI_DEFAULT_ENABLED 1
+#endif
+
+/** 主动招呼默认间隔（秒）；NVS 无记录时使用；见 P02 */
+#ifndef DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC
+#define DEEP_DOG_FACE_GREET_DEFAULT_GAP_SEC 1800
+#endif
+
+/** 1=DeepDogFaceGreetInit 时用 GREET_DEFAULT_GAP_SEC 写 NVS（覆盖旧联调 10s） */
+#ifndef DEEP_DOG_FACE_GREET_BOOT_APPLY
+#define DEEP_DOG_FACE_GREET_BOOT_APPLY 1
 #endif
 
 /**
@@ -43,6 +53,16 @@
 /** 1=RTSP 推流时仍做人脸；0=推流时跳过送帧 */
 #ifndef DEEP_DOG_FACE_AI_DURING_RTSP
 #define DEEP_DOG_FACE_AI_DURING_RTSP 1
+#endif
+
+/** RTSP/H264 推流活跃时送帧最小间隔下限（ms），减轻与 vision_hub 并发 WDT */
+#ifndef DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS
+#define DEEP_DOG_FACE_AI_RTSP_MIN_INTERVAL_MS 2000
+#endif
+
+/** RTSP 推流活跃时识别最小间隔（ms），仅运行时抬高，不写 NVS */
+#ifndef DEEP_DOG_FACE_AI_RTSP_RECOG_MIN_INTERVAL_MS
+#define DEEP_DOG_FACE_AI_RTSP_RECOG_MIN_INTERVAL_MS 4000
 #endif
 
 /** 1=检测前对 RGB565 每像素做高/低字节对调（仅在 INPUT_RGB888=0 时有意义） */
@@ -113,9 +133,25 @@
 #define DEEP_DOG_FACE_RECOG_ENABLE 1
 #endif
 
-/** 本地库最大人数 */
+/** 本地库最大 feat 条数（含 alias embedding；canonical 人数通常更少） */
 #ifndef DEEP_DOG_FACE_RECOG_MAX
-#define DEEP_DOG_FACE_RECOG_MAX 16
+/** 库容上限；FaceMeta s_meta[] 为 static BSS（约 140B/人，32 人≈4.5KiB internal） */
+#define DEEP_DOG_FACE_RECOG_MAX 32
+#endif
+
+/** 自动 enroll 最低检测 score（质量门控） */
+#ifndef DEEP_DOG_FACE_RECOG_MIN_ENROLL_SCORE
+#define DEEP_DOG_FACE_RECOG_MIN_ENROLL_SCORE 0.55f
+#endif
+
+/** registry 条目 aliases 数组上限（单 canonical） */
+#ifndef DEEP_DOG_FACE_REGISTRY_MAX_ALIASES
+#define DEEP_DOG_FACE_REGISTRY_MAX_ALIASES 8
+#endif
+
+/** MQTT retain face/registry JSON 缓冲（32 槽 + Immich 字段；32768 足够） */
+#ifndef DEEP_DOG_FACE_REGISTRY_JSON_BUF
+#define DEEP_DOG_FACE_REGISTRY_JSON_BUF 32768
 #endif
 
 /** 会话去重窗口（ms）：窗口内相似则复用同一 local_id */
@@ -158,6 +194,18 @@
 #define DEEP_DOG_FACE_IMMICH_DEFAULT_URL "http://192.168.31.25:2283/api"
 #endif
 
+/** 可选：复制 face_ai_secrets.h.example → face_ai_secrets.h 注入联调 Key（勿提交） */
+#if __has_include("face_ai_secrets.h")
+#include "face_ai_secrets.h"
+#endif
+#ifndef DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY
+#ifdef DEEP_DOG_FACE_IMMICH_SECRET_API_KEY
+#define DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY DEEP_DOG_FACE_IMMICH_SECRET_API_KEY
+#else
+#define DEEP_DOG_FACE_IMMICH_DEFAULT_API_KEY ""
+#endif
+#endif
+
 /** 失败后同一 local_id 的退避（秒）。联调 15；量产可改 60 */
 #ifndef DEEP_DOG_FACE_IMMICH_BACKOFF_S
 #define DEEP_DOG_FACE_IMMICH_BACKOFF_S 15
@@ -165,10 +213,15 @@
 
 /** 轮询 GET /assets/{id} 次数与间隔 */
 #ifndef DEEP_DOG_FACE_IMMICH_POLL_MAX
-#define DEEP_DOG_FACE_IMMICH_POLL_MAX 40
+#define DEEP_DOG_FACE_IMMICH_POLL_MAX 60
 #endif
 #ifndef DEEP_DOG_FACE_IMMICH_POLL_MS
-#define DEEP_DOG_FACE_IMMICH_POLL_MS 1500
+#define DEEP_DOG_FACE_IMMICH_POLL_MS 2000
+#endif
+
+/** 延迟 poll：对已存 asset_id 且 name_pending 的条目周期重试（秒） */
+#ifndef DEEP_DOG_FACE_IMMICH_DEFERRED_POLL_S
+#define DEEP_DOG_FACE_IMMICH_DEFERRED_POLL_S 300
 #endif
 
 /** 裁剪脸 JPEG 质量 */
@@ -194,6 +247,48 @@
  */
 #ifndef DEEP_DOG_FACE_IMMICH_DELETE_ASSET
 #define DEEP_DOG_FACE_IMMICH_DELETE_ASSET 0
+#endif
+
+/**
+ * FreeRTOS 任务栈（字节）。
+ * dog_face_ai 优先 PSRAM 栈（7680）；6144 在 RTSP+识别长跑下 stack_hwm≈44 会溢出。
+ * NVS meta 由 face_persist（internal）承接；facedb enroll/delete 由 face_facedb（internal）承接。
+ * dog_immich 优先 PSRAM 栈（HTTP/TLS；meta/asset NVS 经 face_persist internal worker）。
+ * 评估方法：CONFIG_FREERTOS_USE_TRACE_FACILITY → uxTaskGetStackHighWaterMark
+ * 或 MCP self.board.diagnostics → tasks[].stack_hwm。
+ */
+#ifndef DEEP_DOG_FACE_AI_TASK_STACK
+#define DEEP_DOG_FACE_AI_TASK_STACK 7680
+#endif
+#ifndef DEEP_DOG_FACE_IMMICH_TASK_STACK
+#define DEEP_DOG_FACE_IMMICH_TASK_STACK 7168
+#endif
+#ifndef DEEP_DOG_FACE_PERSIST_TASK_STACK
+#define DEEP_DOG_FACE_PERSIST_TASK_STACK 3072
+#endif
+/** facedb FAT enroll/delete/clear；须在 internal 栈（Flash cache 约束） */
+#ifndef DEEP_DOG_FACE_FACEDB_TASK_STACK
+#define DEEP_DOG_FACE_FACEDB_TASK_STACK 6144
+#endif
+#ifndef DEEP_DOG_FACE_BOOT_TASK_STACK
+#define DEEP_DOG_FACE_BOOT_TASK_STACK 16384
+#endif
+
+/**
+ * 1=Face AI / VisionHub / 板级 MQTT·HTTP 延后到小智激活完成（OTA HTTPS 释放后再启），
+ * 避免与 esp-aes / mqtt_task 抢 internal SRAM。
+ */
+#ifndef DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION
+#define DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION 1
+#endif
+#ifndef DEEP_DOG_BOOT_MIN_INTERNAL_FREE
+#define DEEP_DOG_BOOT_MIN_INTERNAL_FREE (24 * 1024)
+#endif
+#ifndef DEEP_DOG_BOOT_MIN_INTERNAL_LARGEST
+#define DEEP_DOG_BOOT_MIN_INTERNAL_LARGEST (12 * 1024)
+#endif
+#ifndef DEEP_DOG_BOOT_MEMORY_WAIT_MS
+#define DEEP_DOG_BOOT_MEMORY_WAIT_MS 15000
 #endif
 
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

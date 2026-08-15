@@ -17,6 +17,7 @@ main/assets/lang_config.h
 main/mmap_generate_emoji.h
 .DS_Store
 .cache
+main/boards/deep-dog/face_ai/face_ai_secrets.h
 *.pyc
 *.bin
 mmap_generate_*.h

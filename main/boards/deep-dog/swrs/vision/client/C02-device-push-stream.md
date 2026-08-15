@@ -27,11 +27,11 @@
 ## 4. 与 face_ai 复用
 
 ```text
-EspVideo 帧源
+EspVideo 帧源（§9 规划：640×480 采集）
   └─ VisionFrameHub
-       ├─ face_ai（永驻，默认开）
+       ├─ face_ai（永驻，默认开）— 全分辨率
        ├─ HTTP MJPEG /stream（mode=stream）
-       └─ RTSP Push（mode=rtsp_push）：默认 H.264；JPEG 可编译回退
+       └─ RTSP Push（mode=rtsp_push）：H.264；§9 推流前缩至 320×240
 ```
 
 ## 5. 功能需求
@@ -60,5 +60,6 @@ python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir h264 --python-onl
 
 ## 7. 选型
 
-当前默认：**RTSP + H.264**（`espressif/esp_h264` SW，约 240×240 @3fps）。  
+**当前默认**：RTSP + H.264，传感器 **240×240** @ ~3～5fps（§8.1）。§9 640→320 代码保留，改 `config.json` + `sdkconfig` 可复验。
+
 JPEG（`DEEP_DOG_VISION_CODEC_H264=0`）保留作回退；实测 MediaMTX 对 JPEG **不产出**可用 `index.m3u8`。

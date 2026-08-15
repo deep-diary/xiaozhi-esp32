@@ -1,11 +1,14 @@
 #include "mqtt/modules/face_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/modules/device_mqtt.h"
 #include "mqtt/mqtt_config.h"
 
-#include "face_ai_bridge.h"
 #include "face_ai_config.h"
 #include "face_ai_types.h"
+#include "face_control.h"
+#include "face_greet.h"
+#include "immich_client.h"
 
 #include <cJSON.h>
 #include <esp_log.h>
@@ -14,10 +17,16 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <memory>
+#include <string>
+#include <vector>
 
 #define TAG "dog_mqtt_face"
 
 namespace {
+
+DeepDogFaceMqtt* s_immich_status_target = nullptr;
+DeepDogDeviceMqtt* s_device_mqtt_target = nullptr;
 
 int64_t UnixTs() {
     const time_t now = time(nullptr);
@@ -39,9 +48,125 @@ int BestFaceIndex(const DeepDogFaceSnapshot& snap) {
     return best;
 }
 
+bool HandleCmdAction(const char* action, cJSON* root) {
+    if (!action) {
+        return false;
+    }
+    if (strcmp(action, "clear_db") == 0) {
+        const bool ok = DeepDogFaceControlClearAll();
+        ESP_LOGI(TAG, "face/cmd clear_db ok=%d", ok ? 1 : 0);
+        return true;
+    }
+    const cJSON* lid = cJSON_GetObjectItem(root, "local_id");
+    const int local_id = cJSON_IsNumber(lid) ? lid->valueint : 0;
+    if (strcmp(action, "rename") == 0) {
+        const cJSON* name = cJSON_GetObjectItem(root, "display_name");
+        if (local_id <= 0 || !cJSON_IsString(name) || !name->valuestring) {
+            ESP_LOGW(TAG, "face/cmd rename bad args");
+            return false;
+        }
+        const bool ok = DeepDogFaceControlRename(local_id, name->valuestring);
+        ESP_LOGI(TAG, "face/cmd rename id=%d ok=%d", local_id, ok ? 1 : 0);
+        return ok;
+    }
+    if (strcmp(action, "delete_one") == 0) {
+        if (local_id <= 0) {
+            return false;
+        }
+        const bool ok = DeepDogFaceControlDeleteOne(local_id);
+        ESP_LOGI(TAG, "face/cmd delete_one id=%d ok=%d", local_id, ok ? 1 : 0);
+        return ok;
+    }
+    if (strcmp(action, "merge") == 0) {
+        const cJSON* tgt = cJSON_GetObjectItem(root, "target_local_id");
+        const int target_id = cJSON_IsNumber(tgt) ? tgt->valueint : 0;
+        if (local_id <= 0 || target_id <= 0) {
+            return false;
+        }
+        const bool ok = DeepDogFaceControlMergeAlias(local_id, target_id);
+        ESP_LOGI(TAG, "face/cmd merge %d->%d ok=%d", local_id, target_id, ok ? 1 : 0);
+        return ok;
+    }
+    if (strcmp(action, "refresh_immich") == 0) {
+        const bool ok = DeepDogFaceControlRefreshImmich(local_id);
+        ESP_LOGI(TAG, "face/cmd refresh_immich id=%d ok=%d", local_id, ok ? 1 : 0);
+        return ok;
+    }
+    if (strcmp(action, "set_immich_config") == 0) {
+        const cJSON* url = cJSON_GetObjectItem(root, "api_url");
+        const cJSON* key = cJSON_GetObjectItem(root, "api_key");
+        const cJSON* del = cJSON_GetObjectItem(root, "delete_asset");
+        const cJSON* lat = cJSON_GetObjectItem(root, "latitude");
+        const cJSON* lon = cJSON_GetObjectItem(root, "longitude");
+        const char* url_s = cJSON_IsString(url) ? url->valuestring : nullptr;
+        const char* key_s = cJSON_IsString(key) ? key->valuestring : nullptr;
+        int delete_asset = -1;
+        if (cJSON_IsNumber(del)) {
+            delete_asset = del->valueint ? 1 : 0;
+        }
+        double lat_v = 0.0;
+        double lon_v = 0.0;
+        const double* lat_p = nullptr;
+        const double* lon_p = nullptr;
+        if (cJSON_IsNumber(lat) && cJSON_IsNumber(lon)) {
+            lat_v = lat->valuedouble;
+            lon_v = lon->valuedouble;
+            lat_p = &lat_v;
+            lon_p = &lon_v;
+        }
+        const bool ok = DeepDogImmichSetConfig(url_s, key_s, delete_asset, lat_p, lon_p);
+        ESP_LOGI(TAG, "face/cmd set_immich_config ok=%d", ok ? 1 : 0);
+        return ok;
+    }
+    if (strcmp(action, "ping_immich") == 0) {
+        const bool ok = DeepDogImmichPingServer();
+        ESP_LOGI(TAG, "face/cmd ping_immich ok=%d", ok ? 1 : 0);
+        return true;
+    }
+    if (strcmp(action, "refresh_status") == 0) {
+        ESP_LOGI(TAG, "face/cmd refresh_status");
+        return true;
+    }
+    if (strcmp(action, "simulate_greet") == 0) {
+        const cJSON* name = cJSON_GetObjectItem(root, "name");
+        if (!cJSON_IsString(name) || !name->valuestring || !name->valuestring[0]) {
+            const cJSON* dn = cJSON_GetObjectItem(root, "display_name");
+            if (cJSON_IsString(dn) && dn->valuestring && dn->valuestring[0]) {
+                name = dn;
+            }
+        }
+        if (!cJSON_IsString(name) || !name->valuestring) {
+            ESP_LOGW(TAG, "face/cmd simulate_greet missing name");
+            return false;
+        }
+        const bool ok = DeepDogFaceControlSimulateGreet(name->valuestring, local_id);
+        ESP_LOGI(TAG, "face/cmd simulate_greet name=%s ok=%d", name->valuestring, ok ? 1 : 0);
+        return ok;
+    }
+    if (strcmp(action, "clear_speaker") == 0) {
+        DeepDogFaceControlClearSpeaker();
+        ESP_LOGI(TAG, "face/cmd clear_speaker ok=1");
+        return true;
+    }
+    if (strcmp(action, "set_greet_config") == 0) {
+        const cJSON* en = cJSON_GetObjectItem(root, "greet_enabled");
+        const cJSON* gap = cJSON_GetObjectItem(root, "greet_gap_sec");
+        const bool enabled = cJSON_IsBool(en) ? cJSON_IsTrue(en) : DeepDogFaceGreetIsEnabled();
+        const int gap_sec =
+            cJSON_IsNumber(gap) ? static_cast<int>(gap->valuedouble) : DeepDogFaceGreetGetGapSec();
+        const bool ok = DeepDogFaceControlSetGreetConfig(enabled, gap_sec);
+        ESP_LOGI(TAG, "face/cmd set_greet_config enabled=%d gap=%d ok=%d", enabled ? 1 : 0, gap_sec,
+                 ok ? 1 : 0);
+        return ok;
+    }
+    ESP_LOGW(TAG, "face/cmd unknown action=%s", action);
+    return false;
+}
+
 }  // namespace
 
 DeepDogFaceMqtt::DeepDogFaceMqtt(DeepDogMqttClient* client) : client_(client) {
+    s_immich_status_target = this;
     esp_timer_create_args_t args = {
         .callback = &DeepDogFaceMqtt::PollTimerCb,
         .arg = this,
@@ -50,20 +175,90 @@ DeepDogFaceMqtt::DeepDogFaceMqtt(DeepDogMqttClient* client) : client_(client) {
         .skip_unhandled_events = true,
     };
     esp_timer_create(&args, &poll_timer_);
+    esp_timer_create_args_t reg_args = {
+        .callback = &DeepDogFaceMqtt::RegistryPublishTimerCb,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "dog_face_reg_pub",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&reg_args, &registry_publish_timer_);
 }
 
 DeepDogFaceMqtt::~DeepDogFaceMqtt() {
+    if (s_immich_status_target == this) {
+        s_immich_status_target = nullptr;
+    }
     Stop();
+    if (registry_publish_timer_) {
+        esp_timer_stop(registry_publish_timer_);
+        esp_timer_delete(registry_publish_timer_);
+        registry_publish_timer_ = nullptr;
+    }
     if (poll_timer_) {
         esp_timer_delete(poll_timer_);
         poll_timer_ = nullptr;
     }
 }
 
+void DeepDogFaceMqtt::ScheduleRegistryPublish() {
+    if (!registry_publish_timer_) {
+        return;
+    }
+    esp_timer_stop(registry_publish_timer_);
+    esp_timer_start_once(registry_publish_timer_, 0);
+}
+
+void DeepDogFaceMqtt::RegistryPublishTimerCb(void* arg) {
+    auto* self = static_cast<DeepDogFaceMqtt*>(arg);
+    if (self) {
+        self->PublishRegistry(true);
+    }
+}
+
+void DeepDogFaceMqtt::InitRegistryHook() {
+#if DEEP_DOG_FACE_AI_ENABLE
+    DeepDogFaceGreetInit();
+    DeepDogFaceGreetSetNotifyCallback([this]() {
+        const DeepDogFaceSpeaker sp = DeepDogFaceGreetGetSpeaker();
+        PublishPersonActiveSpeaker(sp.local_id, sp.display_name, sp.immich_person_id);
+        last_person_active_id_ = sp.local_id;
+        last_fingerprint_.clear();
+        PublishStatus(true);
+        if (s_device_mqtt_target) {
+            (void)s_device_mqtt_target->PublishStatus();
+        }
+    });
+    DeepDogFaceControlSetRegistryChangedCallback([this]() {
+        ScheduleRegistryPublish();
+    });
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    DeepDogImmichSetStatusChangedCallback(+[]() {
+        if (s_immich_status_target) {
+            s_immich_status_target->PublishImmichStatus(true);
+        }
+    });
+#endif
+#endif
+}
+
 void DeepDogFaceMqtt::PollTimerCb(void* arg) {
     auto* self = static_cast<DeepDogFaceMqtt*>(arg);
     if (self) {
-        self->PublishStatus(false);
+        self->status_poll_n_++;
+        const bool heartbeat =
+            self->status_poll_n_ >= static_cast<uint32_t>(DEEP_DOG_MQTT_FACE_STATUS_HEARTBEAT_POLLS);
+        if (heartbeat) {
+            self->status_poll_n_ = 0;
+        }
+        self->PublishStatus(heartbeat);
+        self->immich_ping_every_n_++;
+        if (self->immich_ping_every_n_ >= 120) {
+            self->immich_ping_every_n_ = 0;
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+            (void)DeepDogImmichPingServer();
+#endif
+        }
     }
 }
 
@@ -75,7 +270,16 @@ void DeepDogFaceMqtt::OnConnected() {
         client_->Subscribe("face/cmd", 1);
     }
     last_fingerprint_.clear();
+    last_registry_fp_.clear();
+    last_immich_fp_.clear();
+    immich_ping_every_n_ = 0;
+    status_poll_n_ = 0;
     PublishStatus(true);
+    PublishRegistry(true);
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    (void)DeepDogImmichPingServer();
+    PublishImmichStatus(true);
+#endif
     if (poll_timer_) {
         esp_timer_stop(poll_timer_);
         esp_timer_start_periodic(poll_timer_, DEEP_DOG_MQTT_FACE_POLL_INTERVAL_US);
@@ -113,29 +317,32 @@ void DeepDogFaceMqtt::OnMessage(const std::string& topic, const std::string& pay
     bool touched = false;
     const cJSON* action = cJSON_GetObjectItem(root, "action");
     if (cJSON_IsString(action) && action->valuestring) {
-        if (strcmp(action->valuestring, "clear_db") == 0) {
-            const bool ok = DeepDogFaceAiClearDb();
-            ESP_LOGI(TAG, "face/cmd clear_db ok=%d", ok ? 1 : 0);
+        if (HandleCmdAction(action->valuestring, root)) {
             touched = true;
-        } else {
-            ESP_LOGW(TAG, "face/cmd unknown action=%s", action->valuestring);
         }
     }
 
     const cJSON* en = cJSON_GetObjectItem(root, "enabled");
     if (cJSON_IsBool(en)) {
-        DeepDogFaceAiSetEnabled(cJSON_IsTrue(en));
+        DeepDogFaceControlSetDetectionEnabled(cJSON_IsTrue(en));
         ESP_LOGI(TAG, "face/cmd enabled=%d", cJSON_IsTrue(en) ? 1 : 0);
+        touched = true;
+    }
+
+    const cJSON* recog = cJSON_GetObjectItem(root, "recognize_enabled");
+    if (cJSON_IsBool(recog)) {
+        DeepDogFaceControlSetRecognitionEnabled(cJSON_IsTrue(recog));
+        ESP_LOGI(TAG, "face/cmd recognize_enabled=%d", cJSON_IsTrue(recog) ? 1 : 0);
         touched = true;
     }
 
     const cJSON* pipe = cJSON_GetObjectItem(root, "pipeline");
     if (cJSON_IsString(pipe) && pipe->valuestring) {
         if (strcmp(pipe->valuestring, "identity") == 0) {
-            DeepDogFaceAiSetPipeline(DeepDogFacePipeline::Identity);
+            DeepDogFaceControlSetPipeline(DeepDogFacePipeline::Identity);
             touched = true;
         } else if (strcmp(pipe->valuestring, "live") == 0) {
-            DeepDogFaceAiSetPipeline(DeepDogFacePipeline::Live);
+            DeepDogFaceControlSetPipeline(DeepDogFacePipeline::Live);
             touched = true;
         } else {
             ESP_LOGW(TAG, "face/cmd bad pipeline=%s", pipe->valuestring);
@@ -144,17 +351,165 @@ void DeepDogFaceMqtt::OnMessage(const std::string& topic, const std::string& pay
 
     const cJSON* interval = cJSON_GetObjectItem(root, "detect_interval_ms");
     if (cJSON_IsNumber(interval)) {
-        DeepDogFaceAiSetDetectIntervalMs(static_cast<int>(interval->valuedouble));
+        DeepDogFaceControlSetDetectIntervalMs(static_cast<int>(interval->valuedouble));
         touched = true;
     }
 
+    const cJSON* greet_en = cJSON_GetObjectItem(root, "greet_enabled");
+    const cJSON* greet_gap = cJSON_GetObjectItem(root, "greet_gap_sec");
+    if (cJSON_IsBool(greet_en) || cJSON_IsNumber(greet_gap)) {
+        const bool gen = cJSON_IsBool(greet_en) ? cJSON_IsTrue(greet_en) : DeepDogFaceGreetIsEnabled();
+        const int ggap =
+            cJSON_IsNumber(greet_gap) ? static_cast<int>(greet_gap->valuedouble) : DeepDogFaceGreetGetGapSec();
+        if (DeepDogFaceControlSetGreetConfig(gen, ggap)) {
+            touched = true;
+        }
+    }
+
+#if DEEP_DOG_FACE_IMMICH_ENABLE
+    const cJSON* api_url = cJSON_GetObjectItem(root, "api_url");
+    const cJSON* api_key = cJSON_GetObjectItem(root, "api_key");
+    const cJSON* del_asset = cJSON_GetObjectItem(root, "delete_asset");
+    const cJSON* lat = cJSON_GetObjectItem(root, "latitude");
+    const cJSON* lon = cJSON_GetObjectItem(root, "longitude");
+    if (cJSON_IsString(api_url) || cJSON_IsString(api_key) || cJSON_IsNumber(del_asset) ||
+        (cJSON_IsNumber(lat) && cJSON_IsNumber(lon))) {
+        const char* url_s = cJSON_IsString(api_url) ? api_url->valuestring : nullptr;
+        const char* key_s = cJSON_IsString(api_key) ? api_key->valuestring : nullptr;
+        int delete_asset = -1;
+        if (cJSON_IsNumber(del_asset)) {
+            delete_asset = del_asset->valueint ? 1 : 0;
+        }
+        double lat_v = 0.0;
+        double lon_v = 0.0;
+        const double* lat_p = nullptr;
+        const double* lon_p = nullptr;
+        if (cJSON_IsNumber(lat) && cJSON_IsNumber(lon)) {
+            lat_v = lat->valuedouble;
+            lon_v = lon->valuedouble;
+            lat_p = &lat_v;
+            lon_p = &lon_v;
+        }
+        if (DeepDogImmichSetConfig(url_s, key_s, delete_asset, lat_p, lon_p)) {
+            touched = true;
+        }
+    }
+#endif
+
     cJSON_Delete(root);
     if (!touched) {
-        ESP_LOGW(TAG, "face/cmd empty (need enabled|action|pipeline|detect_interval_ms)");
+        ESP_LOGW(TAG, "face/cmd empty");
         return;
     }
     last_fingerprint_.clear();
     PublishStatus(true);
+    ScheduleRegistryPublish();
+#endif
+}
+
+void DeepDogFaceMqtt::SetDeviceMqttTarget(DeepDogDeviceMqtt* device) {
+    s_device_mqtt_target = device;
+}
+
+void DeepDogFaceMqtt::PublishPersonActiveSpeaker(int local_id, const char* display_name,
+                                                 const char* immich_person_id) {
+    if (!client_ || !client_->IsConnected()) {
+        return;
+    }
+    cJSON* root = cJSON_CreateObject();
+    if (local_id > 0) {
+        cJSON_AddNumberToObject(root, "local_id", local_id);
+        if (display_name && display_name[0]) {
+            cJSON_AddStringToObject(root, "display_name", display_name);
+        }
+        if (immich_person_id && immich_person_id[0]) {
+            cJSON_AddStringToObject(root, "immich_person_id", immich_person_id);
+        }
+    } else {
+        cJSON_AddNumberToObject(root, "local_id", 0);
+    }
+    cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
+    char* printed = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (printed) {
+        client_->Publish("person/active", printed, 0, true);
+        cJSON_free(printed);
+    }
+}
+
+void DeepDogFaceMqtt::MaybePublishPersonActive(const DeepDogFaceSnapshot& snap) {
+    if (!client_ || !client_->IsConnected()) {
+        return;
+    }
+    const int best = BestFaceIndex(snap);
+    int active_id = 0;
+    const char* display = "";
+    const char* immich_pid = nullptr;
+    if (best >= 0 && snap.faces[best].local_id > 0) {
+        active_id = snap.faces[best].local_id;
+        display = snap.faces[best].display_name;
+        std::vector<DeepDogFaceEnrolledEntry> entries;
+        (void)DeepDogFaceControlListEnrolled(&entries);
+        for (const auto& e : entries) {
+            if (e.local_id == active_id && e.immich_person_id[0]) {
+                immich_pid = e.immich_person_id;
+                break;
+            }
+        }
+        DeepDogFaceGreetOnPrimaryFace(active_id);
+    } else {
+        DeepDogFaceGreetOnNoFace();
+    }
+    if (active_id == last_person_active_id_) {
+        return;
+    }
+    last_person_active_id_ = active_id;
+    PublishPersonActiveSpeaker(active_id, display, immich_pid);
+}
+
+bool DeepDogFaceMqtt::PublishRegistry(bool force) {
+    if (!enabled_ || !client_ || !client_->IsConnected()) {
+        return false;
+    }
+#if !DEEP_DOG_FACE_AI_ENABLE
+    return client_->Publish("face/registry", "{\"version\":1,\"count\":0,\"entries\":[],\"ts\":0}", 0, true);
+#else
+    auto buf = std::make_unique<char[]>(DEEP_DOG_FACE_REGISTRY_JSON_BUF);
+    const size_t n = DeepDogFaceControlFormatRegistryJson(buf.get(), DEEP_DOG_FACE_REGISTRY_JSON_BUF);
+    if (n == 0) {
+        ESP_LOGW(TAG, "PublishRegistry: FormatRegistryJson returned 0 (recognizer not ready or buf too small?)");
+        return false;
+    }
+    const std::string payload(buf.get(), n);
+    if (!force && last_registry_fp_ == payload) {
+        return true;
+    }
+    last_registry_fp_ = payload;
+    return client_->Publish("face/registry", payload.c_str(), 0, true);
+#endif
+}
+
+bool DeepDogFaceMqtt::PublishImmichStatus(bool force) {
+    if (!enabled_ || !client_ || !client_->IsConnected()) {
+        return false;
+    }
+#if !DEEP_DOG_FACE_IMMICH_ENABLE
+    return client_->Publish("face/immich/status",
+                            "{\"configured\":false,\"url\":\"\",\"key_len\":0,\"delete_asset\":0,"
+                            "\"server_ok\":false,\"server_http\":0,\"ping_ms\":-1,\"inflight\":0,"
+                            "\"last\":\"disabled\",\"last_local_id\":0,\"ts\":0}",
+                            0, true);
+#else
+    char buf[768];
+    const size_t n = DeepDogImmichFormatStatusJson(buf, sizeof(buf));
+    if (n == 0) {
+        return false;
+    }
+    if (!force && last_immich_fp_ == buf) {
+        return true;
+    }
+    last_immich_fp_ = buf;
+    return client_->Publish("face/immich/status", buf, 0, true);
 #endif
 }
 
@@ -166,6 +521,7 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
 #if !DEEP_DOG_FACE_AI_ENABLE
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "enabled", false);
+    cJSON_AddBoolToObject(root, "recognize_enabled", false);
     cJSON_AddStringToObject(root, "pipeline", "live");
     cJSON_AddNumberToObject(root, "detect_interval_ms", DEEP_DOG_FACE_AI_MIN_INTERVAL_MS);
     cJSON_AddBoolToObject(root, "has_person", false);
@@ -184,14 +540,15 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
     return ok;
 #else
     DeepDogFaceSnapshot snap{};
-    DeepDogFaceAiCopySnapshot(&snap);
-    const bool user_on = DeepDogFaceAiIsEnabled();
-    const DeepDogFacePipeline pipeline = DeepDogFaceAiGetPipeline();
-    const int interval_ms = DeepDogFaceAiGetDetectIntervalMs();
+    DeepDogFaceControlCopySnapshot(&snap);
+    const bool user_on = DeepDogFaceControlIsDetectionEnabled();
+    const bool recog_on = DeepDogFaceControlIsRecognitionEnabled();
+    const DeepDogFacePipeline pipeline = DeepDogFaceControlGetPipeline();
+    const int interval_ms = DeepDogFaceControlGetDetectIntervalMs();
     const bool has_person = snap.count > 0;
     const int best = BestFaceIndex(snap);
 
-    char fingerprint[448];
+    char fingerprint[512];
     int cx_i = 0, cy_i = 0;
     float score = 0;
     if (best >= 0) {
@@ -200,8 +557,8 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
         cy_i = static_cast<int>((b.y0 + b.y1) * 0.5f + 0.5f);
         score = b.score;
     }
-    snprintf(fingerprint, sizeof(fingerprint), "%d|%s|%d|%d|%d|%u|%u|%d|%d|%.2f|%d", user_on ? 1 : 0,
-             DeepDogFacePipelineStr(pipeline), interval_ms, has_person ? 1 : 0, snap.count,
+    snprintf(fingerprint, sizeof(fingerprint), "%d|%d|%s|%d|%d|%d|%u|%u|%d|%d|%.2f|%d", user_on ? 1 : 0,
+             recog_on ? 1 : 0, DeepDogFacePipelineStr(pipeline), interval_ms, has_person ? 1 : 0, snap.count,
              (unsigned)snap.frame_w, (unsigned)snap.frame_h, cx_i, cy_i, score,
              best >= 0 ? snap.faces[best].local_id : 0);
     for (int i = 0; i < snap.count && i < 8; ++i) {
@@ -220,6 +577,7 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "enabled", user_on);
+    cJSON_AddBoolToObject(root, "recognize_enabled", recog_on);
     cJSON_AddStringToObject(root, "pipeline", DeepDogFacePipelineStr(pipeline));
     cJSON_AddNumberToObject(root, "detect_interval_ms", interval_ms);
     cJSON_AddBoolToObject(root, "has_person", has_person);
@@ -256,6 +614,8 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
         cJSON_AddItemToArray(faces, f);
     }
     cJSON_AddItemToObject(root, "faces", faces);
+    cJSON_AddBoolToObject(root, "greet_enabled", DeepDogFaceGreetIsEnabled());
+    cJSON_AddNumberToObject(root, "greet_gap_sec", DeepDogFaceGreetGetGapSec());
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
     char* printed = cJSON_PrintUnformatted(root);
@@ -264,13 +624,8 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
         return false;
     }
     const bool ok = client_->Publish("face/status", printed, 0, false);
-    static int s_log = 0;
-    if (s_log < 5 || force) {
-        ESP_LOGI(TAG, "face/status enabled=%d pipeline=%s interval=%d has_person=%d n=%d pub=%d", user_on ? 1 : 0,
-                 DeepDogFacePipelineStr(pipeline), interval_ms, has_person ? 1 : 0, snap.count, ok ? 1 : 0);
-    }
-    ++s_log;
     cJSON_free(printed);
+    MaybePublishPersonActive(snap);
     return ok;
 #endif
 }

@@ -30,4 +30,17 @@
 #define DEEP_DOG_WIFI_STATIC_NM_O4 0
 #endif
 
+/** WiFi 获 IP 后 SNTP 同步 UTC（见 swrs/net/N01-sntp-clock-sync.md） */
+#ifndef DEEP_DOG_SNTP_ENABLE
+#define DEEP_DOG_SNTP_ENABLE 1
+#endif
+
+#ifndef DEEP_DOG_SNTP_SERVER_0
+#define DEEP_DOG_SNTP_SERVER_0 "pool.ntp.org"
+#endif
+
+#ifndef DEEP_DOG_SNTP_SERVER_1
+#define DEEP_DOG_SNTP_SERVER_1 "ntp.aliyun.com"
+#endif
+
 #endif  // _DEEP_DOG_NET_CONFIG_H_

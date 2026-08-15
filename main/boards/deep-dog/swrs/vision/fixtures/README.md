@@ -10,6 +10,6 @@
 | [`camera_view_couple.png`](./camera_view_couple.png) | 旧设备 **240×240** 预览截图（双人） | S06 对照：低像素 Immich 易失败 |
 | [`web_screenshot_ge_weidong_ui.png`](./web_screenshot_ge_weidong_ui.png) | 控制页整页截图（#2） | 含 UI；验证 Immich 时建议裁预览区 |
 
-S06 起设备预览/检测实选 **640×480**（见 [S06](../server/S06-higher-resolution.md)）。
+S06 **§9**（待实现）：OV2640 **640×480 采集** + RTSP **320×240** 推流；Immich crop 短边 ≥320。见 [S06 §9](../server/S06-higher-resolution.md)。
 
 **禁止**把 Immich API Key 写进本目录或仓库。主机侧探针可用 DeepWeb `config.json` 的局域网 Key；设备侧用 `POST /api/immich_config` 写入 NVS。

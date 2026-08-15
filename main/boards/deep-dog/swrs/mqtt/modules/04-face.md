@@ -5,8 +5,8 @@
 | module_id | `face` |
 | capabilities | `face`（入口卡；含原 person 能力） |
 | 路由建议 | `/device/:deviceId/modules/face` |
-| 契约 | ready（检测/cmd）；`person/active` 草案；`face/thumb` planned |
-| YAML | `face/cmd`、`face/status`；可选 `person/active`；预留 `face/thumb` |
+| 契约 | ready；`face/registry` retain；`person/active` ready |
+| YAML | `face/cmd`、`face/status`、`face/registry`；`person/active` |
 | 说明 | **实时框/跟踪 UI 在 [02-stream](./02-stream.md)**；本页做人脸开关、清库、间隔、Immich 轮播与打招呼 |
 
 ## 入口卡文案
@@ -19,7 +19,8 @@
 
 | 分区 | 内容 |
 |------|------|
-| **检测控制** | `enabled` / `pipeline` / `detect_interval_ms`；`action=clear_db` |
+| **检测控制** | `enabled` / `recognize_enabled` / `pipeline` / `detect_interval_ms`；`action=clear_db` |
+| **人脸库** | 订 `face/registry`；rename / delete_one / merge |
 | **当前身份** | `faces[]`、`display_name`；可选订 `person/active` |
 | **Immich / 打招呼** | 按身份拉相册轮播；节流打招呼（见下） |
 | **实时画面** | 不嵌主直播；链到 Stream 页。预留日后 `face/thumb` |
@@ -36,9 +37,11 @@
 
 | Topic | 方向 | QoS | retain | 说明 |
 |-------|------|-----|--------|------|
-| `…/face/status` | ↑ | 0 | false | on_change |
+| `…/face/status` | ↑ | 0 | false | on_change 实时框 + **≈30s 控制态心跳**（非 retain，晚订阅靠心跳/`refresh_status`） |
+| `…/face/registry` | ↑ | 0 | **true** | 已注册 canonical 人脸库 |
+| `…/face/immich/status` | ↑ | 0 | **true** | Immich 配置 + 探活（见 [04-face-immich-mqtt](./04-face-immich-mqtt.md)） |
 | `…/face/cmd` | ↓ | 1 | false | 见字段表 |
-| `…/person/active` | ↑ | 0 | true | 身份事件（可选） |
+| `…/person/active` | ↑ | 0 | true | primary 身份变化 |
 | `…/face/thumb` | ↑ | 0 | false | **planned**，默认不发 |
 | `…/track/*` | — | — | — | UI 在 Stream 页 |
 
@@ -50,8 +53,16 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `enabled` | bool | 否* | 总开关；关则检测+识别均停；**开机默认 false**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED`） |
-| `action` | enum | 否 | `clear_db`：清空本地已注册人脸 |
+| `enabled` | bool | 否* | 检测总开关 |
+| `recognize_enabled` | bool | 否 | 识别开关；false 时只检测不 enroll |
+| `action` | enum | 否 | `clear_db` \| `rename` \| `delete_one` \| `merge` \| `refresh_immich` \| `set_immich_config` \| `ping_immich` \| **`refresh_status`** |
+| `local_id` | int | 否 | rename/delete/merge/refresh 目标 |
+| `target_local_id` | int | 否 | merge 的 canonical id |
+| `display_name` | string | 否 | rename 新名称 |
+| `api_url` | string | 否 | Immich API 根（`set_immich_config` 或稀疏更新） |
+| `api_key` | string | 否 | Immich Key（写入 NVS；status 仅回 `key_len`） |
+| `delete_asset` | int | 否 | 0 保留临时图 / 1 识别后删除 |
+| `latitude` / `longitude` | number | 否 | 可选家庭 GPS；upload 后 `PUT /assets/{id}` 写入 Immich 时间轴 |
 | `pipeline` | enum | 否 | `live` \| `identity` |
 | `detect_interval_ms` | int | 否 | **200–5000**；越界夹紧；status 回显生效值 |
 | `ts` | int | 否 | Unix 秒 |
@@ -70,11 +81,14 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `enabled` | bool | 总开关 |
+| `recognize_enabled` | bool | 识别开关 |
 | `pipeline` | string | `live` / `identity` |
 | `detect_interval_ms` | int | 当前生效间隔 |
 | `has_person` / `n` / `w` / `h` | — | 检测摘要；坐标为**像素** |
 | `primary` / `faces[]` | — | 框 + `local_id` / `display_name` |
 | `ts` | int | Unix 秒 |
+
+**晚订阅**：`retain=false`，MQTT 重连时会 force 发一帧；之后检测关且画面不变时 fingerprint 去重会跳过。**固件每 ≈30s 强制发一帧**（含 `enabled`/`recognize_enabled` 等控制态，框可为空）。前端 mount 时可发 `face/cmd {"action":"refresh_status"}` 立即拉一帧。
 
 ## 样例 · `face/cmd`
 
@@ -120,6 +134,18 @@
 { "detect_interval_ms": 3000, "ts": 1710000000 }
 ```
 
+**alias 合并（侧脸→正脸，保留 embedding）**
+
+```json
+{ "action": "merge", "local_id": 3, "target_local_id": 2, "ts": 1710000000 }
+```
+
+**重命名**
+
+```json
+{ "action": "rename", "local_id": 2, "display_name": "张三", "ts": 1710000000 }
+```
+
 **清空已识别人脸（重测）**
 
 ```json
@@ -151,7 +177,41 @@
 }
 ```
 
-## `person/active`（草案）
+- **`w` / `h`**：当前**采集帧**像素尺寸（联调默认 240×240；S06 §9 规划 **640×480**）。与 RTSP/HLS 推流分辨率（§9 规划 **320×240**）可不同，见 [S06 §9](../../vision/server/S06-higher-resolution.md)。
+
+## 样例 · `face/registry`
+
+```json
+{
+  "version": 1,
+  "clock_synced": true,
+  "ts_iso": "2026-08-14T13:41:54Z",
+  "count": 1,
+  "feat_count": 20,
+  "max_count": 32,
+  "entries": [
+    {
+      "local_id": 2,
+      "display_name": "张三",
+      "immich_person_id": "uuid",
+      "immich_asset_id": "asset-uuid",
+      "aliases": [3],
+      "updated_at": 1710000000,
+      "last_seen_at": 1710001200,
+      "last_seen_iso": "2024-03-09T17:40:00Z"
+    }
+  ],
+  "ts": 1710000000
+}
+```
+
+- **`feat_count` / `max_count`**：embedding 槽用量（UI 显示 `20/32`）；`count` 为 canonical 人数。
+- **`clock_synced` / `ts_iso`**：与 [N01 SNTP](../../net/N01-sntp-clock-sync.md)、`device/status` 一致；前端应用 **`last_seen_iso`**（UTC `Z` 后缀）展示「上次见面」，勿把 `last_seen_at` 当本地墙钟秒解析（否则会误判设备时钟超前 8h）。
+- **`last_seen_at`**：上次成功识别或 **enroll 成功**（Unix 秒，UTC）；与 `updated_at`（meta 写入，同为 Unix 秒）分离。init 补 orphan 槽不写此字段。
+- **`updated_at`**：元数据变更时刻（Unix 秒，`time()` / SNTP）；**禁止**使用 `esp_timer`  boot 毫秒。时钟前提见 [N01 SNTP](../../net/N01-sntp-clock-sync.md)。
+- **满库 LRU**：`feat_count >= max_count` 时新人 enroll 淘汰 `last_seen_at` 最久槽位（tie：优先 placeholder / 无 Immich）。
+
+## `person/active`
 
 ```json
 { "local_id": 2, "display_name": "张三", "immich_person_id": "uuid-optional", "ts": 1710000000 }
@@ -173,8 +233,14 @@
 
 ## 固件要点
 
-- `DURING_RTSP=1`；`clear_db` 清 facedb+NVS+session。
+- `DURING_RTSP=1`；`clear_db` 清 facedb+NVS+session（recognizer 未就绪时亦 wipe `/facedb/db` 文件，避免 Init 恢复旧库）。
 - `live` / `identity` 分频；`detect_interval_ms` 运行时夹紧 200–5000。
+- **`face/registry` retain 与 `face/status` 语义分离**：status 为实时框；registry 为 canonical 已注册库。
+- **boot 默认开 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1`）且 **`DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION=1`（默认）** 时：WiFi IP 后**不**立即启 Face；等小智 **OTA/激活完成**（`Application::OnActivationComplete` → `post_activation` 内存报告）且 internal 达标后再 `DeepDogFaceAiRuntimeStart()`，避免与 HTTPS OTA / 云端 MQTT 抢 internal。串口：`post_activation` → `face_ready`。
+- **关闭延后**（`DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION=0`）：恢复 WiFi IP 后立即启 Face/hub/MQTT（联调旧行为）。
+- **boot 默认关 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=0`）时，MQTT 首连可能先于 recognizer 就绪而 retain 空库；**recognizer 从 NVS/facedb 恢复后必须 republish registry**（覆盖陈旧 retain）。
+- **`face/cmd` lazy-start**：先创建 `face_persist`（internal，NVS meta）、**`face_facedb`（internal，facedb enroll/delete/clear）** 与 `dog_face_ai`（**优先 PSRAM 栈**，仅检测/feat/内存 query），`dog_immich` 仍为 **internal 栈**；再加载检测/识别模型。见 [S08 §3.1](../../vision/server/S08-rtsp-face-wdt-mitigation.md)。
+- **`face/cmd` 变更检测/识别开关成功后**，须 republish registry（`esp_timer` 异步 publish）。
 
 ## 验收
 
@@ -182,3 +248,7 @@
 - [ ] `clear_db` 后身份清空可重测
 - [ ] `pipeline` / 间隔在 status 回显
 - [ ] 入口无独立 Person 卡；Track UI 在 Stream
+- [ ] 有 enrolled 库的设备：`face/registry` retain `count≥1`，entries 与 `face/status` 识别 id/名称一致
+- [ ] enroll 新人脸不触发 `esp_task_stack_is_sane_cache_disabled`（facedb 经 `face_facedb` internal 栈）
+- [ ] 冷启动 Face AI off→MQTT cmd `enabled:true` 后 registry 从 0 变为完整库
+- [ ] 晚订阅 Stream/Face 页：≤30s 内收到 `face/status` 控制态，或 `refresh_status` 立即回一帧

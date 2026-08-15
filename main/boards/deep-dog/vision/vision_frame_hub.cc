@@ -12,6 +12,8 @@
 #include "esp_video.h"
 #include "camera.h"
 #include "face_ai_bridge.h"
+#include "vision/stream_audio_gate.h"
+#include "vision/rgb565_downscale.h"
 #include "face_ai_config.h"
 #include "image_to_jpeg.h"
 
@@ -19,7 +21,9 @@
 
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
 #include <freertos/idf_additions.h>
+#include <freertos/task.h>
 
 #include <cstring>
 #include <linux/videodev2.h>
@@ -166,6 +170,10 @@ void VisionFrameHub::SetPublishMode(VisionPublishMode mode) {
         jpeg_latest_.clear();
     }
     ESP_LOGI(TAG, "publish mode -> %s", VisionPublishModeStr(mode));
+#if DEEP_DOG_FACE_AI_ENABLE
+    DeepDogFaceAiSetVisionRtspActive(mode == VisionPublishMode::RtspPush);
+#endif
+    DeepDogStreamAudioGateSetRtspActive(mode == VisionPublishMode::RtspPush);
 }
 
 void VisionFrameHub::PublishJpeg(std::vector<uint8_t>&& jpeg) {
@@ -258,6 +266,28 @@ void VisionFrameHub::EnsurePusherConnected() {
     if (reconnect_delay_ms_ > DEEP_DOG_VISION_RECONNECT_MAX_MS) {
         reconnect_delay_ms_ = DEEP_DOG_VISION_RECONNECT_MAX_MS;
     }
+}
+
+bool VisionFrameHub::EnsureStreamScaledBuffer() {
+#if DEEP_DOG_VISION_CODEC_H264
+    if (stream_scaled_ready_) {
+        return true;
+    }
+    const size_t need = Rgb565DownscaleHalfBytes(DEEP_DOG_VISION_STREAM_W, DEEP_DOG_VISION_STREAM_H);
+    if (need == 0) {
+        return false;
+    }
+    stream_scaled_.resize(need);
+    stream_scaled_ready_ = !stream_scaled_.empty();
+    if (stream_scaled_ready_) {
+        ESP_LOGI(TAG, "stream scale buffer %ux%u (%u bytes)",
+                 (unsigned)DEEP_DOG_VISION_STREAM_W, (unsigned)DEEP_DOG_VISION_STREAM_H,
+                 (unsigned)need);
+    }
+    return stream_scaled_ready_;
+#else
+    return false;
+#endif
 }
 
 bool VisionFrameHub::CapturePackedRgb565(std::vector<uint8_t>* packed, uint16_t* w, uint16_t* h, uint32_t* v4l_fmt) {
@@ -416,27 +446,64 @@ void VisionFrameHub::TaskLoop() {
             } else if (mode == VisionPublishMode::RtspPush) {
 #if DEEP_DOG_VISION_CODEC_H264
                 if (pusher_ && pusher_->IsConnected() && h264_enc_) {
-                    std::vector<uint8_t> annexb;
-                    if (h264_enc_->EncodeRgb565(packed.data(), packed.size(), w, h, &annexb) &&
-                        !annexb.empty()) {
-                        if (!pusher_->PushAnnexB(annexb.data(), annexb.size())) {
-                            EnsurePusherConnected();
+                    uint16_t enc_w = DEEP_DOG_VISION_STREAM_W;
+                    uint16_t enc_h = DEEP_DOG_VISION_STREAM_H;
+                    const uint8_t* enc_rgb = packed.data();
+                    size_t enc_len = packed.size();
+                    bool use_scaled = false;
+                    if (w == enc_w && h == enc_h) {
+                        use_scaled = false;
+                    } else if (w == enc_w * 2 && h == enc_h * 2 && EnsureStreamScaledBuffer()) {
+                        if (Rgb565DownscaleHalf(packed.data(), w, h, stream_scaled_.data(), enc_w, enc_h)) {
+                            enc_rgb = stream_scaled_.data();
+                            enc_len = stream_scaled_.size();
+                            use_scaled = true;
                         } else {
-                            last_rtp_ok_ms_.store(esp_timer_get_time() / 1000, std::memory_order_release);
-                            static int s_ok = 0;
-                            if (s_ok < 8) {
-                                ESP_LOGI(TAG, "H264 push ok bytes=%u %ux%u",
-                                         static_cast<unsigned>(annexb.size()), w, h);
-                                ++s_ok;
+                            static int s_scale_fail = 0;
+                            if (s_scale_fail < 4) {
+                                ESP_LOGW(TAG, "RGB565 downscale fail %ux%u -> %ux%u", w, h, enc_w, enc_h);
+                                ++s_scale_fail;
                             }
                         }
-                    } else {
-                        static int s_enc_fail = 0;
-                        if (s_enc_fail < 8) {
-                            ESP_LOGW(TAG, "H264 encode fail %ux%u", w, h);
-                            ++s_enc_fail;
+                    } else if (w <= enc_w && h <= enc_h) {
+                        /* 240² 联调：采集小于 STREAM 宏时直编采集分辨率（§9 640→320 仍走 2× 分支） */
+                        enc_w = w;
+                        enc_h = h;
+                    } else if (w != enc_w || h != enc_h) {
+                        static int s_size_mismatch = 0;
+                        if (s_size_mismatch < 4) {
+                            ESP_LOGW(TAG, "RTSP encode skip: capture %ux%u, expect %ux%u or 2x",
+                                     w, h, DEEP_DOG_VISION_STREAM_W, DEEP_DOG_VISION_STREAM_H);
+                            ++s_size_mismatch;
                         }
                     }
+                    if ((w == enc_w && h == enc_h) || use_scaled ||
+                        (enc_w == w && enc_h == h && w <= DEEP_DOG_VISION_STREAM_W &&
+                         h <= DEEP_DOG_VISION_STREAM_H)) {
+                        std::vector<uint8_t> annexb;
+                        if (h264_enc_->EncodeRgb565(enc_rgb, enc_len, enc_w, enc_h, &annexb) &&
+                            !annexb.empty()) {
+                            if (!pusher_->PushAnnexB(annexb.data(), annexb.size())) {
+                                EnsurePusherConnected();
+                            } else {
+                                last_rtp_ok_ms_.store(esp_timer_get_time() / 1000, std::memory_order_release);
+                                static int s_ok = 0;
+                                if (s_ok < 8) {
+                                    ESP_LOGI(TAG, "H264 push ok bytes=%u capture=%ux%u encode=%ux%u",
+                                             static_cast<unsigned>(annexb.size()), w, h, enc_w, enc_h);
+                                    ++s_ok;
+                                }
+                            }
+                        } else {
+                            static int s_enc_fail = 0;
+                            if (s_enc_fail < 8) {
+                                ESP_LOGW(TAG, "H264 encode fail capture=%ux%u encode=%ux%u", w, h, enc_w,
+                                         enc_h);
+                                ++s_enc_fail;
+                            }
+                        }
+                    }
+                    taskYIELD();
                 }
 #else
                 std::vector<uint8_t> jpeg;

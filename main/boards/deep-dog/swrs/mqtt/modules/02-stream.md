@@ -20,8 +20,8 @@
 1. 显示 `state` / `mode` / `url`（外网 HLS）/ `lan_url` / `push_url` / `error`；start / stop；嵌 HLS 或外链 `url`。  
 2. **人脸叠加（推荐）**：若 `capabilities.face`，同页订 `face/status`；UI 开关「显示人脸框 / 显示人名」。  
 3. **跟踪（推荐）**：若 `capabilities.track`，同页订 `track/status`，开关发 `track/cmd`；可 `#track` 锚点。  
-4. **拍照视觉解释（推荐）**：按钮发 `stream/cmd` `take_photo`，订 `stream/photo` 展示结果（与推流并存，不改 mode）。  
-5. 人脸总开关 / 间隔 / 清库可链到 [04-face](./04-face.md)，或本页简化发 `face/cmd`。
+4. **拍照视觉解释（推荐）**：局域网优先 WS MCP `self.camera.take_photo`；否则 `stream/cmd` `take_photo` → `stream/photo`（与推流并存，不改 mode）。  
+5. **人脸 MCP（推荐）**：若 `capabilities.face`，同页经 WS MCP `self.face.*`（`set_mode` 等），超时降级 MQTT `face/cmd`；订 `face/status` 叠层。
 
 ## 边界
 
@@ -62,13 +62,15 @@
 
 异步执行，约数秒；结果走 `stream/photo`（不改推流 `mode`）。并发第二次会 `ok=false, error=busy`。需设备已配置 Explain URL（曾连小智云下发 vision）。
 
+**局域网优先**：同页可经 WS MCP `self.camera.take_photo` 同步返回（不占 MQTT 侧 `dog_stream_photo` 任务栈）。MQTT `take_photo` 在 internal SRAM 紧张时可能 `error=task_fail`（固件已将任务栈迁至 PSRAM）。
+
 ## 字段表 · `stream/photo`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `ok` | bool | 是否成功 |
 | `result` | string | 成功时 Explain 返回（多为 **字符串化 JSON**，内含 `text`） |
-| `error` | string | `busy` / `capture_fail` / `Image explain URL or token is not set` 等 |
+| `error` | string | `busy` / `capture_fail` / `task_fail`（internal 内存不足未能建任务；优先 WS MCP）/ `oom` / `Image explain URL or token is not set` 等 |
 | `elapsed_ms` | int | 耗时 |
 | `ts` | int | Unix 秒 |
 
@@ -82,6 +84,7 @@
 | `lan_url` | string | 否 | 局域网 HLS |
 | `push_url` | string | 否 | 设备 RTSP 发布地址；未推流时可为空 |
 | `error` | string | 否 | 空字符串表示无错；见下表 |
+| `voice_paused` | bool | 否 | RTSP 推流中为 `true`（语音/AFE 已暂停） |
 | `ts` | int | 是 | Unix 秒 |
 | `ts_iso` | string | 否 | UTC ISO8601；前端展示优先用此字段 |
 
@@ -109,8 +112,13 @@
 | `stream_unavailable` | 固件 | Hub/HTTP 未就绪 |
 | `push_error` | 推流 | `state=error` 且无更细错误 |
 | `no_rtp` | 推流 | `starting` 且尚未收到 RTP |
+| `auto_stop_timeout` | 固件 | RTSP 推流超过 5 分钟自动 stop |
+| `http_stream_disabled` | cmd | `mode=stream` 但 `DEEP_DOG_HTTP_SERVER_ENABLE=0` |
 
-## 样例 JSON · `stream/cmd`
+### RTSP 与语音互斥
+
+- **`start` 缺省 / `mode=rtsp_push`**：H264 → MediaMTX；**暂停唤醒与语音**；最长 **5 分钟** 自动停并恢复语音。
+- **`mode=stream`**：仅 `DEEP_DOG_HTTP_SERVER_ENABLE=1` 时有效（HTTP `/stream` MJPEG）；当前联调剖面 HTTP 关，应返回 `http_stream_disabled`。
 
 **开始推流（推荐缺省）**
 

@@ -27,10 +27,13 @@
 | **V-S03** | 人脸框叠加 | [vision/server/S03](./vision/server/S03-http-face-overlay.md) | S02 | 一期 ✅ |
 | **V-S04** | 本地数字 ID | [vision/server/S04](./vision/server/S04-local-face-numeric-id.md) | S03 | ✅ |
 | **V-S05** | Immich 真名 | [vision/server/S05](./vision/server/S05-immich-real-name.md) | S04 | ✅ |
-| **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | ✅（真名待 Immich 队列空闲复验） |
+| **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | §9 代码保留；**联调默认 240²**（8MB PSRAM 并发不足） |
+| **V-S07** | 人脸 MCP + registry | [vision/server/S07](./vision/server/S07-face-control-mcp.md) | S05 · M01 | 本轮 |
+| **V-S08** | RTSP+人脸 WDT 缓解 | [vision/server/S08](./vision/server/S08-rtsp-face-wdt-mitigation.md) | C02 · S04 | 已落地间隔下限 |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 基建可达；完整推拉待稳定 LAN 复验 |
 | V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | **固件已实现**（人脸永驻 + MJPEG/RTSP 互斥）；实机长稳待勾 |
 | **M01** | 板级 MQTT 总览 | [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md) / [YAML](./mqtt/protocol/deep-dog-mqtt.yml) / [modules](./mqtt/modules/) | infra | **文档 ✅**（入口卡+详情页规格） |
+| **N01** | SNTP 时钟 | [net/N01](./net/N01-sntp-clock-sync.md) | WiFi | 本轮 |
 | V-C03 | MQTT 推流开关 | [mqtt/modules/02-stream](./mqtt/modules/02-stream.md) | C02、**M01** | **固件已实现**（device+stream）；实机 MQTTX 待勾 |
 | V-C04 | MQTT 云台 | [mqtt/modules/09-gimbal](./mqtt/modules/09-gimbal.md) | stream 客户端、**M01** | 更后（协议已细化） |
 | **I-HANDLE** | 手柄双源输入 | [input/](./input/) · [11-handle](./mqtt/modules/11-handle.md) · [`handle/`](../handle/) | **M01**；BT 需 Bluepad32+BTstack | **wifi ✅**；BT 适配已落地（默认关）；分区已扩 |
@@ -63,7 +66,7 @@ D9 (BMI270) ──────────────────────�
 | S03 | Streaming + 人脸开 → Canvas 有框 |
 | S04 | **不同人显示不同数字 ID**；同人稳定同一 ID；不调 Immich |
 | S05 | 本地 ID 可绑定 Immich 真名；失败仍显示数字 ID |
-| S06 | 预览/检测 **640×480**；Immich 裁剪短边 ≥320；拉流仍可遥控 |
+| S06 | 采集 **640×480**（face/Immich）；RTSP **320×240** 推流降级（§9）；Immich crop 短边 ≥320；见 [S06 §9](./vision/server/S06-higher-resolution.md) |
 | C02 | 设备推到 MediaMTX，外网/内网可拉；人脸逻辑复用 |
 
 ## 基础设施与 MQTT

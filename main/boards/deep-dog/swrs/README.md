@@ -32,6 +32,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | [dog/](./dog/) | 四足运动 |
 | [vision/](./vision/) | HTTP / Immich / MediaMTX / Kiosk |
 | [vision/infra.md](./vision/infra.md) | MediaMTX、EMQX、Immich（无明文密钥） |
+| [net/](./net/) | SNTP / 时钟同步（N01） |
 
 ## 交付序号（摘要）
 

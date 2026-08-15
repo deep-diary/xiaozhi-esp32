@@ -22,7 +22,7 @@ S04 已用数字 ID 区分人。本阶段在**已有或新建 local_id** 上，�
          → （可选）DELETE 临时 asset；默认不删，便于在 Immich 网页核对
 ```
 
-延迟秒级；须配合 S04 去重，禁止 1Hz 狂刷。详见 [infra](../infra.md)。
+延迟秒级～数十秒（Immich ML 队列，**非** HTTP 超时）；设备轮询上限见 `DEEP_DOG_FACE_IMMICH_POLL_MAX` × `POLL_MS`（默认 **60×2000ms≈120s**）。超时后保留 asset 并 `name_pending=1`，每 `DEFERRED_POLL_S`（默认 300s）重试 poll。须配合 S04 去重，禁止 1Hz 狂刷。详见 [infra](../infra.md)。
 
 Immich 开启 Facial Recognition 后，**上传本身会入队**检测/识别；设备**不得** `PUT /jobs/faceDetection|facialRecognition`，以免误伤全局队列或已命名库。
 
@@ -43,6 +43,10 @@ AND 未处于失败退避窗口
 **尚无有效真名**：`immich_person_id` 空，或 `display_name` 为空 / 等于 `#<id>`。
 
 因此：设备上已有 `#1`、`#2` 但无真名时，再次对着 `#1` **也会**调 Immich（不只「新 enrolled」）。
+
+**无 `immich_asset_id` 的重试**：依赖实时帧裁剪 JPEG，**无** deferred 后台 upload。除完整识别帧外，**识别降频 sticky 帧**（IoU 沿用上一帧 `local_id`）在满足 §3 门控时同样尝试上传，避免人一直在镜头前却因 `RECOG_MIN_INTERVAL` 长期无 asset。
+
+**有 `immich_asset_id` 无真名**：Immich worker 每 `DEFERRED_POLL_S` 对已存 asset 轮询 `people[]`（与出镜无关）。
 
 会话/NVS 已有真名且未点刷新 → **不调** Immich。
 
@@ -81,7 +85,7 @@ Key：NVS（`fdog_im`）；禁止 git 明文。
 
 | ID | 需求 |
 |----|------|
-| NAM-01 | 按 §3 门控调用 Immich（含已有无真名的 local_id） |
+| NAM-01 | 按 §3 门控调用 Immich（含已有无真名的 local_id；含 sticky 降频帧） |
 | NAM-02 | 异步不阻塞检测/MJPEG/狗控 |
 | NAM-03 | 成功绑定 local_id ↔ 真名 |
 | NAM-04 | 失败降级为数字 ID |
@@ -107,8 +111,18 @@ Key：NVS（`fdog_im`）；禁止 git 明文。
 - [ ] 串口无 `job faceDetection` / `facialRecognition` 主动触发日志  
 - [ ] 仓库无 API Key 明文  
 
-> **已知局限（S06 应对）**：设备旧 **240×240** 预览/翻拍上传 Immich 时经常 `people=[]`；主机清晰 [`ge_weidong.png`](../fixtures/ge_weidong.png) 可识别。S06 实选 **640×480**，见 [S06](./S06-higher-resolution.md)。
+> **已知局限（S06 应对）**：设备 **240×240** 上传 Immich 时经常 `people=[]`；主机清晰 [`ge_weidong.png`](../fixtures/ge_weidong.png) 可识别。**下一增量**：S06 §9 — OV2640 **640×480 采集** + Immich crop≥320，RTSP **320×240** 推流降级（评估可行，待实现）。见 [S06 §9](./S06-higher-resolution.md)。
 
 ## 9. 不包含
 
 DeepDiary 后台中转主路径；Kiosk 正文（[P01](../product/P01-kiosk-personalization.md)）。分辨率提升见 **S06**。
+
+## 10. 时间轴与 GPS
+
+| 阶段 | 做法 | 效果 |
+|------|------|------|
+| **A** | multipart `fileCreatedAt` / `fileModifiedAt` = SNTP 同步后的 UTC ISO8601 | Immich 时间轴按真实拍摄/upload 分散 |
+| **B** | MQTT `set_immich_config` 可选 `latitude`/`longitude` 写入 NVS；upload 成功后 `PUT /assets/{id}` | 地图/地点视图有 pin |
+
+- 禁止写死 `2026-01-01`（会导致时间轴堆叠）。
+- 不推荐公网 IP geolocation（LAN 精度差、隐私与延迟）。

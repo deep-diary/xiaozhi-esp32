@@ -127,6 +127,17 @@ esp_err_t HumanFaceRecognizer::enroll(const dl::image::img_t &img, const std::li
     }
 }
 
+esp_err_t HumanFaceRecognizer::enroll_feat(dl::TensorBase *feat)
+{
+    if (!feat) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!m_db) {
+        m_db = new dl::recognition::DataBase(m_db_path, m_feat.get_feat_len());
+    }
+    return m_db->enroll_feat(feat);
+}
+
 esp_err_t HumanFaceRecognizer::clear_all_feats()
 {
     if (!m_db) {

@@ -72,13 +72,16 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 | `uptime_s` | int | 否 | 启动以来秒数 |
 | `free_heap` | int | 否 | `esp_get_free_heap_size`（字节） |
 | `min_free_heap` | int | 否 | 历史最小空闲堆 |
-| `mem.internal.{free,min,total}` | int | 否 | 内部 SRAM，字节 |
-| `mem.psram.{free,min,total}` | int | 否 | 外部 PSRAM；无则 `total=0` |
+| `mem.internal.{free,min,total,largest_free,used}` | int | 否 | 内部 SRAM heap 池，字节 |
+| `mem.psram.{free,min,total,largest_free,used}` | int | 否 | 外部 PSRAM；无则 `total=0` |
 | `rssi` | int | 否 | dBm |
 | `wifi_ssid` | string | 否 | 当前 AP |
 | `wifi_channel` | int | 否 | 信道 |
 | `health.ok` | bool | 否 | 无系统级告警时为 `true` |
-| `health.warn` | string[] | 否 | 如 `low_internal_heap`（internal free &lt; 32KiB） |
+| `health.warn` | string[] | 否 | 如 `low_internal_heap`（internal free &lt; 32KiB）、`clock_unsynced`（WiFi 已连但 SNTP/OTA 未设钟） |
+| `clock_synced` | bool | 否 | `time()` 为可信 Unix 秒（≥1e9）；见 [N01 SNTP](../../net/N01-sntp-clock-sync.md) |
+| `task_count` | int | 否 | 当前 FreeRTOS 任务数（需 `CONFIG_FREERTOS_USE_TRACE_FACILITY`） |
+| `tasks[]` | array | 否 | `{ name, prio, stack_hwm, state, stack_domain?, stack_used_est? }`；按 `stack_hwm` **升序**（余量最小=最紧张在前） |
 | `ts` / `ts_iso` | int / string | 是 / 否 | 时间戳 |
 
 ## 样例 JSON · `device/info`
@@ -118,13 +121,14 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
   "free_heap": 185000,
   "min_free_heap": 120000,
   "mem": {
-    "internal": { "free": 98000, "min": 72000, "total": 327680 },
-    "psram": { "free": 6200000, "min": 5100000, "total": 8388608 }
+    "internal": { "free": 98000, "min": 72000, "total": 327680, "largest_free": 45000, "used": 229680 },
+    "psram": { "free": 6200000, "min": 5100000, "total": 8388608, "largest_free": 6000000, "used": 2188608 }
   },
   "rssi": -57,
   "wifi_ssid": "HomeWiFi",
   "wifi_channel": 6,
   "health": { "ok": true, "warn": [] },
+  "clock_synced": true,
   "ts": 1710000005,
   "ts_iso": "2024-03-09T12:00:05Z"
 }
@@ -139,8 +143,8 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
   "free_heap": 42000,
   "min_free_heap": 28000,
   "mem": {
-    "internal": { "free": 24000, "min": 18000, "total": 327680 },
-    "psram": { "free": 4100000, "min": 3900000, "total": 8388608 }
+    "internal": { "free": 24000, "min": 18000, "total": 327680, "largest_free": 12000, "used": 303680 },
+    "psram": { "free": 4100000, "min": 3900000, "total": 8388608, "largest_free": 3800000, "used": 4288608 }
   },
   "rssi": -72,
   "wifi_ssid": "HomeWiFi",
@@ -167,6 +171,7 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 - `capabilities.*` 与编译宏 `DEEP_DOG_*_ENABLE` 对齐。
 - `ext_pins` 反映 `config.h` 中 `DEEP_DOG_EXT_PIN_MODE`（成对引出脚）；前端用 `mode` 切换 can/uart/pwm/led 等页面，用 `capabilities.motor` vs `dog` 区分单电机与四足；`mode=led` 时 DIN=`gpio_a`，须 `capabilities.led` 才出灯带卡。
 - `mem.*` 用 `heap_caps_get_*`；`health.warn` 含 `low_internal_heap` 当 internal free &lt; 32768。
+- `clock_synced`：`DeepDogClockIsSynced()`；WiFi 已连且未同步时 `health.warn` 含 `clock_unsynced`。SNTP 见 [N01](../../net/N01-sntp-clock-sync.md)。
 - `power`：当前固定 `{ "supported": false }`。
 
 ## 验收

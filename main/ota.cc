@@ -192,15 +192,14 @@ esp_err_t Ota::CheckVersion() {
         cJSON *timezone_offset = cJSON_GetObjectItem(server_time, "timezone_offset");
         
         if (cJSON_IsNumber(timestamp)) {
-            // 设置系统时间
+            // settimeofday 要求 UTC；server_time.timestamp 已是 UTC 毫秒，禁止叠加 timezone_offset
             struct timeval tv;
             double ts = timestamp->valuedouble;
-            
-            // 如果有时区偏移，计算本地时间
             if (cJSON_IsNumber(timezone_offset)) {
-                ts += (timezone_offset->valueint * 60 * 1000); // 转换分钟为毫秒
+                ESP_LOGW(TAG, "server_time: ignore timezone_offset=%d min (clock must stay UTC)",
+                         timezone_offset->valueint);
             }
-            
+
             tv.tv_sec = (time_t)(ts / 1000);  // 转换毫秒为秒
             tv.tv_usec = (suseconds_t)((long long)ts % 1000) * 1000;  // 剩余的毫秒转换为微秒
             settimeofday(&tv, NULL);
