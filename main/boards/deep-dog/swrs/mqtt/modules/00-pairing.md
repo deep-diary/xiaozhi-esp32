@@ -53,7 +53,8 @@
                    ├─ 收到 pairing/cmd bound → NVS bound=true → 屏显「绑定成功」→ 停重播
                    │
                    └─ MCP unbind / hold1_tap3 → pairing/request unbind
-                         → 后端 unbind → pairing/cmd unbind → NVS bound=false → 静默
+                         → 后端：有 Device 则 DB 解绑；**无论 DB 是否有记录**均下行 pairing/cmd unbind
+                         → NVS bound=false → Topic 切回 `dev` → 静默
 ```
 
 码有效期由后端 PendingPairing TTL 约束（建议 10～15 min）；配对会话内可周期性重播同一码。

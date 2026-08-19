@@ -30,16 +30,17 @@
 | API | `POST /api/v1/homes/{homeCode}/devices/bind`，body `{ code, name? }` |
 | 成功 | 列表出现设备；标签「已配对」；`edge._server_bound=true`；进入 Hub |
 | Topic | 前缀 `deepdiary/deep-dog/{device_id}/`；`device_id` 为 API 返回的 MAC 紧凑串 |
-| Broker | `wss://mqtt-ws.deep-diary.com/mqtt` |
+| Broker | `wss://broker.emqx.io:8084/mqtt` |
 
 ## 调试路径 · 本地 device_id（REQ-IOT-140）
 
 | 项 | 约定 |
 |----|------|
+| **默认壳** | 列表 **始终** 展示 `device_id=dev`（显示名「调试」），对应未绑定设备 Topic；不可删 |
 | 入口 | 添加对话框勾选「高级：按 device_id 本地添加（调试）」 |
 | 落库 | `localStorage`（`deep-trace:home-devices:${homeCode}`） |
-| 标签 | 「本地绑定」；`edge._local_bound=true` |
-| 删除 | 仅本地移除，不调后端 |
+| 标签 | 「本地绑定」；`edge._local_bound=true`（默认壳用「调试」标签，非本地绑定） |
+| 删除 | 仅本地移除，不调后端；`dev` 壳不可删 |
 
 ## 解绑 / 删除
 

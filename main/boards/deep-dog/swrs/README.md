@@ -32,7 +32,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | [dog/](./dog/) | 四足运动 |
 | [vision/](./vision/) | HTTP / Immich / MediaMTX / Kiosk |
 | [vision/infra.md](./vision/infra.md) | MediaMTX、EMQX、Immich（无明文密钥） |
-| [net/](./net/) | SNTP / 时钟同步（N01） |
+| [net/](./net/) | SNTP（N01）· STA DHCP 寻址（N02） |
 
 ## 交付序号（摘要）
 
@@ -46,7 +46,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | **I-HANDLE** | 手柄双源（Xbox BT / PC→MQTT） | [input/](./input/) **文档 ✅**；wifi/keymap 已落地 |
 | **MOT** | CAN + 单电机 + 手柄 motor/轴 | [motor/](./motor/) · I08b | 本轮落地 |
 | V-C03 | 推流 MQTT | [modules/02-stream](./mqtt/modules/02-stream.md) 待办 |
-| V-C04 | 云台 MQTT | [modules/09-gimbal](./mqtt/modules/09-gimbal.md) 更后 |
+| V-C04 | 云台 MQTT | [modules/09-gimbal](./mqtt/modules/09-gimbal.md) 本轮联调 |
 | V-P01 | Kiosk | 更后 |
 
 ## 约定

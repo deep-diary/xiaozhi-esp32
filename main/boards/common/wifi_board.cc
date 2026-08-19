@@ -345,6 +345,12 @@ std::string WifiBoard::GetDeviceStatusJson() {
     auto network = cJSON_CreateObject();
     cJSON_AddStringToObject(network, "type", "wifi");
     cJSON_AddStringToObject(network, "ssid", wifi.GetSsid().c_str());
+    // [deep-dog] 合入说明: network.ip 供语音「查 IP」与 WS 发现口述；N02/WS-01
+    // 背景: GetDeviceStatusJson 原先只有 ssid/signal，口述局域网地址需另开工具；与 otto get_ip 对齐字段
+    {
+        const std::string ip = wifi.GetIpAddress();
+        cJSON_AddStringToObject(network, "ip", ip.c_str());
+    }
     int rssi = wifi.GetRssi();
     const char* signal = rssi >= -60 ? "strong" : (rssi >= -70 ? "medium" : "weak");
     cJSON_AddStringToObject(network, "signal", signal);

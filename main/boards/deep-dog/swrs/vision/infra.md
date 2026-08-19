@@ -26,11 +26,12 @@
 
 | 用途 | 地址 |
 |------|------|
-| 设备 MQTT 局域网 | `mqtt://192.168.31.25:1883`（**设备首选**） |
-| 网页 MQTT WS 外网 | `wss://mqtt-ws.deep-diary.com/mqtt` |
+| **设备 MQTT 联调默认** | `mqtt://broker.emqx.io:1883`（公共站，匿名、无 TLS；**勿当生产**） |
+| 设备 MQTT 局域网（可选） | `mqtt://192.168.31.25:1883`（NVS 可覆盖） |
+| 网页 / ingest WSS | `wss://broker.emqx.io:8084/mqtt`（Hub 与云端 worker；与设备公共站 **同一** broker） |
 | Dashboard | 局域网 `:18083` / `https://mqtt.deep-diary.com/` |
 
-密码见密钥库；固件用 NVS。ESP 勿裸连公网 `mqtt-tcp.`（须 Access TCP）。
+密码见密钥库；固件用 NVS。自建公网 `mqtt-tcp.` 勿裸连（须 Access TCP）。公共站 `broker.emqx.io:1883` 为当前联调路径，设备需能解析公网 DNS。Topic `deepdiary/deep-dog/dev/` 无鉴权可被他人订阅。
 
 Topic 前缀：`deepdiary/deep-dog/<device_id>/...`  
 **字段真源**：[mqtt/protocol/deep-dog-mqtt.yml](../mqtt/protocol/deep-dog-mqtt.yml)（需求 [M01](../mqtt/M01-board-mqtt-protocol.md)）。

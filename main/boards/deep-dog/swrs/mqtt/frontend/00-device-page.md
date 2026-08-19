@@ -24,7 +24,7 @@
 
 前缀：`deepdiary/deep-dog/{device_id}/`。  
 生产默认 `device_id` = STA MAC 紧凑串；之家添加设备用配对码，见 [00-pairing](../modules/00-pairing.md)（**无入口卡**）。  
-Broker（网页）：`wss://mqtt-ws.deep-diary.com/mqtt`。
+Broker（网页）：`wss://broker.emqx.io:8084/mqtt`。
 
 ## 入口卡顺序
 

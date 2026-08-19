@@ -26,9 +26,13 @@ protocol:
     sparse_cmd: true  # only include keys to change
 
 broker:
-  device_preferred: "mqtt://192.168.31.25:1883"
-  web_ws: "wss://mqtt-ws.deep-diary.com/mqtt"
-  note: "Addresses owned by vision/infra.md; credentials in NVS / secret store only."
+  device_preferred: "mqtt://broker.emqx.io:1883"
+  device_lan_optional: "mqtt://192.168.31.25:1883"
+  web_ws: "wss://broker.emqx.io:8084/mqtt"
+  note: >
+    Addresses owned by vision/infra.md. Device TCP :1883 and web/ingest WSS :8084
+    share public broker.emqx.io (anonymous lab, not production). LAN EMQX optional.
+    Credentials in NVS / secret store only.
 
 modules:
   pairing:

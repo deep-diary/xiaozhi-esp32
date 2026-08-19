@@ -14,8 +14,8 @@
 | 场景 | 通道 |
 |------|------|
 | 局域网本地调试 | `ws://{ip}:{port}/ws` → `McpServer::ParseMessage` |
-| 远程 / 云控 | MQTT（`device/info` 可含 `ws_mcp_port` 供同网段发现） |
-| 语音 / 云端 MCP | 与 WS 共用同一套 `AddTool` 定义 |
+| 远程 / 云控 | MQTT（`device/info` 含 `ip` + `ws_mcp_port` 供同网段发现后再连 WS） |
+| 语音 / 云端 MCP | 与 WS 共用同一套 `AddTool`；查 IP 用 `self.board.get_ip`（勿指望本地 WS 引导自己） |
 
 ## 架构
 
@@ -35,15 +35,24 @@
 
 | 字段 | 说明 |
 |------|------|
+| `ip` | STA IPv4（DHCP）；Web 拼 WS URL 的主机 |
 | `ws_mcp_port` | WS 监听端口（未启用则不出现） |
 | `ws_mcp_path` | 默认 `/ws` |
 | `capabilities.ws_mcp` | `true` |
+
+## MCP（语音 / 云端）
+
+| 工具 | 说明 |
+|------|------|
+| `self.board.get_ip` | 返回 `ip` / `connected` / `ws_url`；用户问「IP 是多少 / WebSocket 地址」时调用并口述 |
+| `self.get_device_status` | `network.ip`（与 ssid/signal 同层）；问「网络状态」时一并给出 |
 
 ## 验收
 
 - [x] `DEEP_DOG_WS_MCP_ENABLE=1` 时 WiFi 就绪后启动 WS（`dog_ws_mcp` 日志）
 - [x] `tools/list` / `tools/call` → `self.get_device_status` 经 WS 往返
 - [x] `self.camera.take_photo` 可达 MCP（摄像头未就绪时返回 error，仍证明链路）
+- [x] `self.board.get_ip` 返回当前 STA IP 与 `ws_url`（语音口述 / 手动填 Web）
 - [ ] deep-trace 前端 WS 连接模式（Device 模块页 PoC 面板）
 
 ## 非目标（PoC）
