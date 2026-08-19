@@ -18,7 +18,8 @@
 | 生命周期 | `Gimbal_init` / `deinit` / `isInitialized` |
 | 绝对角 | `Gimbal_setAngles`（按当前轴速度插值） |
 | 相对 | `Gimbal_nudgeLeft/Right/Up/Down`；`Gimbal_moveRelative` |
-| Jog | `Gimbal_startJog` / `stopJog` / `stop` |
+| Jog / 停 | `Gimbal_startJog` / `stopJog` / `stop` |
+| **回中复位** | `Gimbal_home`（中心角 + 默认速度/步进；清 jog/模拟） |
 | 速度 | `Gimbal_setPanSpeed` / `setTiltSpeed`；`panSpeedUp/Down`；`tiltSpeedUp/Down` |
 | 状态 | `Gimbal_getStatus` |
 
@@ -33,9 +34,11 @@
 
 | 键 | press | hold |
 |----|-------|------|
-| a | none | gimbal.left |
-| b | none | gimbal.right |
-| x | none | gimbal.up |
-| y | none | gimbal.down |
-| l1 | gimbal.pan_speed_up | none |
+| a | gimbal.left | gimbal.left |
+| b | gimbal.right | gimbal.right |
+| x | gimbal.up | gimbal.up |
+| y | gimbal.down | gimbal.down |
+| dpad | 调速 | — |
+| **r3** | **gimbal.home** | none |
+| 轴 rx/ry | pan_rate / tilt_rate | — |
 | r1 | gimbal.pan_speed_down | none |

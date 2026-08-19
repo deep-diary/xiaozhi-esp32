@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |----|------|
-| 状态 | **拍板**（与 I08a 合并上行：`schema_ver` **5**） |
+| 状态 | **拍板**（与 I08a 合并上行：`schema_ver` **7**） |
 | 依据 | [I08a](./I08a-keymap-mqtt-contract-draft.md) · [I08 评估](./I08-dynamic-key-action-mapping-eval.md) |
 | 范围 | `lx|ly|rx|ry|l2|r2` → catalog 连续动作；跨 **所有** keymap profile |
 | 宿主 | `HandleAppKeyMap` + `keymap_store`（**非**某业务独占 App） |
@@ -104,7 +104,17 @@ OnSnapshot:
 | profile | 默认轴（摘要） |
 |---------|----------------|
 | `motor` | `rx→motor.pos_norm`；其余 `none`（见 motor/04） |
-| `gimbal` / `led_demo` / `dog` / `off` | 全 `none`（本轮；可后补 `gimbal.pan_rate` 等） |
+| `gimbal` | `rx→gimbal.pan_rate`，`ry→gimbal.tilt_rate`；`r3.press→gimbal.home`；`lx`/`ly`/`l2`/`r2`→`none` |
+| `led_demo` / `dog` / `off` | 全 `none` |
+
+云台连续动作（`kind=axis`，`value_domain=signed`）：
+
+| id | 语义 |
+|----|------|
+| `gimbal.pan_rate` | `u∈[-1,1]` → 水平速率；`u>0` 右、`u<0` 左；回中停该轴 |
+| `gimbal.tilt_rate` | `u∈[-1,1]` → 垂直速率；`u>0` 下、`u<0` 上 |
+
+`l2`/`r2`（unit `[0,1]`）本轮默认 `none`，须出现在 `axis_bindings` 与前端轴面板，供后续无负量业务绑定。
 
 ---
 
@@ -144,7 +154,7 @@ OnSnapshot:
 | 项 | 约定 |
 |----|------|
 | namespace | `h_keymap`（与 I08a 同） |
-| schema_ver | **5**（含轴表；旧 blob 失效 → 出厂默认） |
+| schema_ver | **7**（云台剖面出厂 `profile=gimbal` + 默认轴；旧 blob 失效） |
 
 ---
 
@@ -162,7 +172,9 @@ OnSnapshot:
 
 ## 9. 验收
 
-- [ ] `handle/keymap` 含 `bindable_axes` + `axis_bindings`，`schema_ver=5`
-- [ ] `profile=motor` 默认 `rx→motor.pos_norm` 实机生效
-- [ ] 切 `led_demo`/`gimbal`：轴面板仍渲染，catalog 按 profile 过滤
+- [x] `handle/keymap` 含 `bindable_axes` + `axis_bindings`，`schema_ver=5`
+- [x] `profile=motor` 默认 `rx→motor.pos_norm` 实机生效
+- [ ] `profile=gimbal` 默认 `rx/ry→pan_rate/tilt_rate`；斜推双轴同动
+- [ ] 轴面板六轴（含 `l2`/`r2` 标注 0～1）可编辑并 persist
+- [ ] 切 `led_demo`：轴面板仍渲染，catalog 按 profile 过滤
 - [ ] `dog`/`off`：轴不驱动执行器

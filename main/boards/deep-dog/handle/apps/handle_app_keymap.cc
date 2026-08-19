@@ -32,9 +32,11 @@
 
 namespace {
 
+#if DEEP_DOG_MOTOR_ENABLE
 uint8_t ResolveMotorId(uint8_t mid) {
     return mid == 0 ? 1 : mid;
 }
+#endif
 
 float ApplyDeadzone(float u, float dz) {
     const float d = dz > 0.f ? dz : DEEP_DOG_HANDLE_AXIS_DEADZONE;
@@ -107,7 +109,7 @@ void HandleAppKeyMap::Fire(const HandleActionBinding_t& act, bool hold) {
     }
 #endif
 
-    if (act.id >= HK_ACT_GIMBAL_LEFT && act.id <= HK_ACT_GIMBAL_TILT_SPEED_DOWN) {
+    if (act.id >= HK_ACT_GIMBAL_LEFT && act.id <= HK_ACT_GIMBAL_HOME) {
 #if DEEP_DOG_GIMBAL_ENABLE
         Gimbal_t* g = DeepDogGimbalGet();
         if (!g || !Gimbal_isInitialized(g)) {
@@ -155,6 +157,9 @@ void HandleAppKeyMap::Fire(const HandleActionBinding_t& act, bool hold) {
                 break;
             case HK_ACT_GIMBAL_TILT_SPEED_DOWN:
                 Gimbal_tiltSpeedDown(g);
+                break;
+            case HK_ACT_GIMBAL_HOME:
+                Gimbal_home(g);
                 break;
             default:
                 break;
@@ -205,6 +210,35 @@ void HandleAppKeyMap::FireContinuous(const HandleAxisBinding_t& act, float u) {
     if (act.id == HK_ACT_NONE) {
         return;
     }
+#if DEEP_DOG_GIMBAL_ENABLE
+    if (act.id == HK_ACT_GIMBAL_PAN_RATE || act.id == HK_ACT_GIMBAL_TILT_RATE) {
+        Gimbal_t* g = DeepDogGimbalGet();
+        if (!g || !Gimbal_isInitialized(g)) {
+            return;
+        }
+        float uu = u;
+        if (uu > 1.f) {
+            uu = 1.f;
+        }
+        if (uu < -1.f) {
+            uu = -1.f;
+        }
+        const float scale = act.scale != 0.f ? act.scale : 1.f;
+        uu *= scale;
+        if (uu > 1.f) {
+            uu = 1.f;
+        }
+        if (uu < -1.f) {
+            uu = -1.f;
+        }
+        if (act.id == HK_ACT_GIMBAL_PAN_RATE) {
+            Gimbal_setPanRate(g, uu);
+        } else {
+            Gimbal_setTiltRate(g, uu);
+        }
+        return;
+    }
+#endif
 #if DEEP_DOG_MOTOR_ENABLE
     if (act.id == HK_ACT_MOTOR_POS_NORM || act.id == HK_ACT_MOTOR_VEL_NORM) {
         DeepMotor* motor = MotorOrNull();

@@ -8,12 +8,12 @@
 #define DEEP_DOG_GIMBAL_STEP_DEG 5
 #endif
 
-/** 默认轴速度（度/秒） */
+/** 默认轴速度（度/秒）；摇杆满杆 = 该值 */
 #ifndef DEEP_DOG_GIMBAL_DEFAULT_PAN_SPEED
-#define DEEP_DOG_GIMBAL_DEFAULT_PAN_SPEED 40
+#define DEEP_DOG_GIMBAL_DEFAULT_PAN_SPEED 60
 #endif
 #ifndef DEEP_DOG_GIMBAL_DEFAULT_TILT_SPEED
-#define DEEP_DOG_GIMBAL_DEFAULT_TILT_SPEED 30
+#define DEEP_DOG_GIMBAL_DEFAULT_TILT_SPEED 45
 #endif
 
 /** 速度档范围与步进（度/秒） */

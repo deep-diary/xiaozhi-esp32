@@ -26,12 +26,13 @@
 
 | 用途 | 地址 |
 |------|------|
-| **设备 MQTT 联调默认** | `mqtt://broker.emqx.io:1883`（公共站，匿名、无 TLS；**勿当生产**） |
-| 设备 MQTT 局域网（可选） | `mqtt://192.168.31.25:1883`（NVS 可覆盖） |
-| 网页 / ingest WSS | `wss://broker.emqx.io:8084/mqtt`（Hub 与云端 worker；与设备公共站 **同一** broker） |
-| Dashboard | 局域网 `:18083` / `https://mqtt.deep-diary.com/` |
+| **设备 MQTT 联调默认** | `mqtt://192.168.3.73:1883`（本机 Docker EMQX，`DeepServer/emqx/start.sh`；NVS 可覆盖） |
+| 设备 MQTT 公共站（可选） | `mqtt://broker.emqx.io:1883`（匿名、无 TLS；**勿当生产**） |
+| 网页 / ingest（内网） | `ws://192.168.3.73:8083/mqtt`（与设备本机 EMQX **同一** broker） |
+| 网页 / ingest（公网） | `wss://broker.emqx.io:8084/mqtt` |
+| Dashboard | 本机 `http://localhost:18083`（admin/public）/ `https://mqtt.deep-diary.com/` |
 
-密码见密钥库；固件用 NVS。自建公网 `mqtt-tcp.` 勿裸连（须 Access TCP）。公共站 `broker.emqx.io:1883` 为当前联调路径，设备需能解析公网 DNS。Topic `deepdiary/deep-dog/dev/` 无鉴权可被他人订阅。
+密码见密钥库；固件用 NVS。自建公网 `mqtt-tcp.` 勿裸连（须 Access TCP）。当前联调优先本机 EMQX（内网更快、更稳）；切回公共站时改宏/NVS 与前端 `via=web`。Topic `deepdiary/deep-dog/dev/` 在公共站无鉴权可被他人订阅。
 
 Topic 前缀：`deepdiary/deep-dog/<device_id>/...`  
 **字段真源**：[mqtt/protocol/deep-dog-mqtt.yml](../mqtt/protocol/deep-dog-mqtt.yml)（需求 [M01](../mqtt/M01-board-mqtt-protocol.md)）。

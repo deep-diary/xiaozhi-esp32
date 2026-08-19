@@ -17,7 +17,8 @@
 
 /** 开机运行时总开关（检测+识别）；0=关，运行中由 MQTT face/cmd / HTTP 再开 */
 #ifndef DEEP_DOG_FACE_AI_DEFAULT_ENABLED
-#define DEEP_DOG_FACE_AI_DEFAULT_ENABLED 1
+/** 云台/手柄联调剖面：默认关，避免 face 模型吃尽 internal 导致 MQTT 断连 */
+#define DEEP_DOG_FACE_AI_DEFAULT_ENABLED 0
 #endif
 
 /** 主动招呼默认间隔（秒）；NVS 无记录时使用；见 P02 */

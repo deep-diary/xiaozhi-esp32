@@ -711,10 +711,15 @@ private:
         ESP_LOGI(TAG, "post-activation: start heavy services");
         DeepDogMemoryReportLog("post_activation");
 #if DEEP_DOG_MQTT_ENABLE
-        if (board_mqtt_ && !board_mqtt_->IsRunning()) {
-            if (!board_mqtt_->Start()) {
-                ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
+        if (board_mqtt_) {
+            if (!board_mqtt_->IsRunning()) {
+                if (!board_mqtt_->Start()) {
+                    ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
+                }
             }
+            // Application idle 已切 LOW_POWER；板级 MQTT/手柄需立刻拉回 PERFORMANCE
+            SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+            ESP_LOGI(TAG, "WiFi PERFORMANCE for board MQTT / handle");
         }
 #endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE
@@ -880,6 +885,21 @@ public:
         return camera_;
     }
 
+#if DEEP_DOG_MQTT_ENABLE
+    /**
+     * 板级 MQTT（手柄 input / 心跳）需要低延迟 TCP。
+     * Application idle 会切 LOW_POWER(MAX_MODEM)，易触发 Poll/Write timeout → 断连失控。
+     * 见 swrs/mqtt/M01 §Broker 稳连。
+     */
+    void SetPowerSaveLevel(PowerSaveLevel level) override {
+        if (level == PowerSaveLevel::LOW_POWER) {
+            level = PowerSaveLevel::PERFORMANCE;
+            ESP_LOGD(TAG, "MQTT on: keep WiFi PERFORMANCE (ignore LOW_POWER)");
+        }
+        WifiBoard::SetPowerSaveLevel(level);
+    }
+#endif
+
     void StartNetwork() override {
 #if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
         // HCI 需要大块 INTERNAL|DMA；idle 后再启常 NO_MEM。先起 BT 占住 DMA。
@@ -933,10 +953,14 @@ public:
 #endif
 #if DEEP_DOG_FACE_AI_ENABLE && !DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION
 #if DEEP_DOG_MQTT_ENABLE
-        if (board_mqtt_ && !board_mqtt_->IsRunning()) {
-            if (!board_mqtt_->Start()) {
-                ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
+        if (board_mqtt_) {
+            if (!board_mqtt_->IsRunning()) {
+                if (!board_mqtt_->Start()) {
+                    ESP_LOGW(TAG, "板级 MQTT 首连失败（将后台重连 broker）");
+                }
             }
+            SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+            ESP_LOGI(TAG, "WiFi PERFORMANCE for board MQTT / handle");
         }
 #endif
 #if DEEP_DOG_HTTP_SERVER_ENABLE

@@ -117,7 +117,7 @@ Mac 蓝牙下 `hidapi` 可枚举并读 **17B** 输入 report；**无陀螺仪/�
 | 发布 | `deepdiary/deep-dog/{device_id}/handle/input` |
 | `device_id` | 默认 **`auto`**：订 `…/+/device/info`（+ `device/status`），优先在线且 `capabilities.handle`；恰好一台则锁定；多台用 `~/.cache/deep-dog/handle_bridge_device_id` 或要求 `--device-id`；环境变量 `DEEP_DOG_DEVICE_ID` 同显式 |
 | 节流 | on_change 或 ≤20～30 Hz |
-| 断线 | 桥发心跳；手柄休眠/拔出发 `connected:false`；**唤醒后自动 rescan 重连，无需重启脚本**；停发后设备超时 500ms 清零 |
+| 断线 | 桥发心跳；手柄休眠/拔出发 `connected:false`；**唤醒后自动 rescan 重连，无需重启脚本**；停发后设备超时 **1000ms** 清零（容忍短暂 MQTT 抖动） |
 | 触控 XY | **默认 HID 全量读**（触控双点 + motion + 灯震）；`--no-touchpad-xy` 回退 pygame（Xbox/通用输入 + **output 震动**）；探测见 `scripts/deep_dog/deep_dog_ds4_touchpad_probe.py`；[I06](./I06-touchpad-xy.md) · [I09](./I09-ds4-output-feedback.md) |
 | 凭证 | 环境变量，禁止写入仓库 |
 

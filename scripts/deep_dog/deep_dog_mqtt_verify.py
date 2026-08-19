@@ -37,7 +37,7 @@ except ImportError:
 
 
 WEB_WSS_DEFAULT = "wss://mqtt-ws.deep-diary.com/mqtt"
-LAN_HOST_DEFAULT = "192.168.31.25"
+LAN_HOST_DEFAULT = "192.168.3.73"
 LAN_PORT_DEFAULT = 1883
 
 

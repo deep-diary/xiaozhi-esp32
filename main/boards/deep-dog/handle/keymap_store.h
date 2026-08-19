@@ -65,6 +65,7 @@ typedef enum {
     HK_ACT_GIMBAL_PAN_SPEED_DOWN,
     HK_ACT_GIMBAL_TILT_SPEED_UP,
     HK_ACT_GIMBAL_TILT_SPEED_DOWN,
+    HK_ACT_GIMBAL_HOME,
     HK_ACT_MOTOR_ENABLE,
     HK_ACT_MOTOR_DISABLE,
     HK_ACT_MOTOR_POS_ZERO,
@@ -72,6 +73,9 @@ typedef enum {
     HK_ACT_MOTOR_NUDGE_NEG,
     HK_ACT_MOTOR_POS_NORM,
     HK_ACT_MOTOR_VEL_NORM,
+    /** Axis continuous (append at end to keep NVS motor ids stable) */
+    HK_ACT_GIMBAL_PAN_RATE,
+    HK_ACT_GIMBAL_TILT_RATE,
     HK_ACT_COUNT
 } HandleActionId_t;
 

@@ -107,7 +107,7 @@
 ## 联调前置
 
 ```bash
-MQTT_HOST=192.168.31.25 MQTT_PORT=8083 MQTT_USE_TLS=false MQTT_PATH=/mqtt \
+MQTT_HOST=192.168.3.73 MQTT_PORT=8083 MQTT_USE_TLS=false MQTT_PATH=/mqtt \
   python manage.py run_pairing_ingest
 ```
 
