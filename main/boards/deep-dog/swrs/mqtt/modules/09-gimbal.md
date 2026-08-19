@@ -94,7 +94,7 @@
 - **Step 1** 校验 `capabilities.gimbal`（Hub 另需 `ext_pins.mode===pwm`）。
 - **Step 2** 订阅 retain `gimbal/status`。
 - **Step 3** 控制区：绝对滑块；方向 pointerdown→`jog_start` / pointerup→`jog_stop`；调速点按；`set_speed`。
-- **Step 4** 绑定区：订 `handle/keymap`；`set_profile`=`gimbal`；六键 ×（press + hold）`set_keymap`。
+- **Step 4** 绑定区：订 `handle/keymap`；**进云台页自动** `set_profile`=`gimbal`（不选手动切应用）；六键 ×（press + hold）`set_keymap`。
 - **Step 5** `ready===false` 禁用控制。
 - **Step 6** unmount 退订。
 
