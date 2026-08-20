@@ -65,6 +65,7 @@ void WifiBoard::StartNetwork() {
         snprintf(hostname, sizeof(hostname), "%s-%02X%02X", config.ssid_prefix.c_str(), mac[4], mac[5]);
         config.station_hostname = hostname;
     }
+    CustomizeWifiManagerConfig(config);
     wifi_manager.Initialize(config);
 
     // Set unified event callback - forward to NetworkEvent with SSID data

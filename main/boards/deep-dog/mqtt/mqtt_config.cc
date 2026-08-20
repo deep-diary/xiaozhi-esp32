@@ -88,11 +88,8 @@ DeepDogMqttSettings DeepDogMqttConfig::Load() {
     if (s.broker_port <= 0) {
         s.broker_port = DEEP_DOG_MQTT_DEFAULT_BROKER_PORT;
     }
-    // 联调：NVS 仍是公共站 / 旧家宽 EMQX 时，跟编译期默认迁到本机 broker
-    const bool lab_default =
-        std::string(DEEP_DOG_MQTT_DEFAULT_BROKER_HOST) != "broker.emqx.io";
-    if (lab_default &&
-        (s.broker_host == "broker.emqx.io" || s.broker_host == "192.168.31.25")) {
+    // 仅迁移明确废弃的旧联调地址；勿改用户手填的 broker.emqx.io（配网页 N03）
+    if (s.broker_host == "192.168.31.25") {
         ESP_LOGW(TAG, "migrate broker_host %s → %s", s.broker_host.c_str(),
                  DEEP_DOG_MQTT_DEFAULT_BROKER_HOST);
         s.broker_host = DEEP_DOG_MQTT_DEFAULT_BROKER_HOST;

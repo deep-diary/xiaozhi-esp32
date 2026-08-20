@@ -219,10 +219,6 @@ public:
         }
         if (enable) {
             Es8311AudioCodec::EnableOutput(enable);
-            // GPIO46：背光 PWM 与 PA 复用（SparkBot 硬件）；gpio_set_level 后恢复 LEDC 背光
-            if (Backlight* bl = Board::GetInstance().GetBacklight()) {
-                bl->RestoreBrightness();
-            }
         } else {
            // Nothing todo because the display io and PA io conflict
         }
@@ -866,9 +862,11 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
+        // GPIO46 同时是背光 PWM 与 PA：传 AUDIO_CODEC_PA_PIN 会让 es8311_codec_new
+        // 把脚改成 GPIO 并拉低 → 已亮的背光闪黑。PA 改由背光 PWM 兼驱（与官方「勿关 PA」同理）。
          static SparkBotEs8311AudioCodec audio_codec(i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+            GPIO_NUM_NC, AUDIO_CODEC_ES8311_ADDR);
         return &audio_codec;
     }
 
@@ -900,6 +898,12 @@ public:
     }
 #endif
 
+    // [deep-dog] N03：配网页高级项展示 OTA URL + 板级 MQTT broker
+    void CustomizeWifiManagerConfig(WifiManagerConfig& config) override {
+        config.show_ota_config = true;
+        config.show_mqtt_broker_config = true;
+    }
+
     void StartNetwork() override {
 #if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
         // HCI 需要大块 INTERNAL|DMA；idle 后再启常 NO_MEM。先起 BT 占住 DMA。
@@ -925,21 +929,33 @@ public:
             DeepDogApplyStaticStaIpv4();
         }
 #endif
-        // 等 IP 再启 face/hub/http/mqtt：避免 WiFi/NVS 与 facedb(FAT) 并发踩 flash 断言崩溃，
-        // 进而导致摄像头/采帧异常、RTSP 只握手不推帧、MediaMTX 超时掉流。
+        // 等 IP 再启 face/hub/http/mqtt：避免 WiFi/NVS 与 facedb(FAT) 并发踩 flash 断言崩溃。
+        // 配网 AP 模式无 STA IP，不可死等满超时（约 30s）。
         {
+            auto& wifi = WifiManager::GetInstance();
             std::string ip;
-            for (int i = 0; i < 60; ++i) {
-                ip = WifiManager::GetInstance().GetIpAddress();
-                if (!ip.empty() && ip != "0.0.0.0") {
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(500));
-            }
-            if (ip.empty() || ip == "0.0.0.0") {
-                ESP_LOGW(TAG, "WiFi IP 超时未就绪，仍继续启动视觉/MQTT");
+            if (wifi.IsConfigMode() ||
+                Application::GetInstance().GetDeviceState() == kDeviceStateWifiConfiguring) {
+                ESP_LOGI(TAG, "配网模式跳过等待 STA IP");
             } else {
-                ESP_LOGI(TAG, "WiFi IP=%s，启动 face/hub/http/mqtt/imu", ip.c_str());
+                for (int i = 0; i < 60; ++i) {
+                    if (wifi.IsConfigMode() ||
+                        Application::GetInstance().GetDeviceState() == kDeviceStateWifiConfiguring) {
+                        ESP_LOGI(TAG, "配网模式跳过等待 STA IP");
+                        ip.clear();
+                        break;
+                    }
+                    ip = wifi.GetIpAddress();
+                    if (!ip.empty() && ip != "0.0.0.0") {
+                        break;
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                }
+                if (ip.empty() || ip == "0.0.0.0") {
+                    ESP_LOGW(TAG, "WiFi IP 超时未就绪，仍继续启动视觉/MQTT");
+                } else {
+                    ESP_LOGI(TAG, "WiFi IP=%s，启动 face/hub/http/mqtt/imu", ip.c_str());
+                }
             }
         }
 #if DEEP_DOG_IMU_ENABLE

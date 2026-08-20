@@ -36,6 +36,7 @@
 | **M01** | 板级 MQTT 总览 | [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md) / [YAML](./mqtt/protocol/deep-dog-mqtt.yml) / [modules](./mqtt/modules/) | infra | **文档 ✅**（入口卡+详情页规格） |
 | **N01** | SNTP 时钟 | [net/N01](./net/N01-sntp-clock-sync.md) | WiFi | 本轮 |
 | **N02** | STA DHCP 寻址 | [net/N02](./net/N02-sta-address.md) | WiFi | **本轮**（默认 DHCP；静态 IP 可选） |
+| **N03** | 配网页 MQTT Broker | [net/N03](./net/N03-wifi-portal-mqtt-broker.md) | WiFi AP · M01 | **本轮** |
 | V-C03 | MQTT 推流开关 | [mqtt/modules/02-stream](./mqtt/modules/02-stream.md) | C02、**M01** | **固件已实现**（device+stream）；实机 MQTTX 待勾 |
 | V-C04 | MQTT 云台 | [mqtt/modules/09-gimbal](./mqtt/modules/09-gimbal.md) | stream 客户端、**M01** | **本轮联调**（固件已有；默认剖面 PWM + GIMBAL；实机 MQTTX 待勾） |
 | **I-HANDLE** | 手柄双源输入 | [input/](./input/) · [11-handle](./mqtt/modules/11-handle.md) · [`handle/`](../handle/) | **M01**；BT 需 Bluepad32+BTstack | **wifi ✅**；BT 适配已落地（默认关）；分区已扩 |

@@ -32,7 +32,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | [dog/](./dog/) | 四足运动 |
 | [vision/](./vision/) | HTTP / Immich / MediaMTX / Kiosk |
 | [vision/infra.md](./vision/infra.md) | MediaMTX、EMQX、Immich（无明文密钥） |
-| [net/](./net/) | SNTP（N01）· STA DHCP 寻址（N02） |
+| [net/](./net/) | SNTP（N01）· STA DHCP 寻址（N02）· 配网页 MQTT Broker（N03） |
 
 ## 交付序号（摘要）
 
