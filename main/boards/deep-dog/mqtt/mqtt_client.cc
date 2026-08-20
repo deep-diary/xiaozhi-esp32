@@ -16,8 +16,11 @@ namespace {
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kErrorBit = BIT1;
 constexpr int kConnectTimeoutMs = 12000;
-constexpr int kReconnectIntervalUs = 15 * 1000 * 1000;
+/** 断连后尽快重连；过长会导致手柄/云台长时间失控 */
+constexpr int kReconnectIntervalUs = 3 * 1000 * 1000;
 constexpr int kMaxReconnect = 0;  // 0 = unlimited
+constexpr int kNetworkTimeoutMs = 20000;
+constexpr int kMqttBufferSize = 4096;
 
 }  // namespace
 
@@ -98,8 +101,10 @@ bool DeepDogMqttClient::Impl::DoConnect() {
     }
     cfg.session.keepalive = s.keepalive_s;
     cfg.network.disable_auto_reconnect = true;
+    cfg.network.timeout_ms = kNetworkTimeoutMs;
     cfg.task.stack_size = 6144;
-    cfg.buffer.size = 2048;
+    cfg.buffer.size = kMqttBufferSize;
+    cfg.buffer.out_size = kMqttBufferSize;
 
     handle = esp_mqtt_client_init(&cfg);
     if (!handle) {

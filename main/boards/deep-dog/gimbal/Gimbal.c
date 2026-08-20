@@ -1,6 +1,7 @@
 #include "gimbal/Gimbal.h"
 
 #include <esp_log.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -63,6 +64,26 @@ static void ApplyTilt(Gimbal_t* g, int angle, int speed) {
     Servo_writeTimed(&g->tilt_servo, tgt, DurationForDelta(tgt - cur, speed));
 }
 
+static bool AxisActive(float analog_u, int discrete_dir, int* out_dir, float* out_rate) {
+    const float eps = 1e-3f;
+    if (fabsf(analog_u) > eps) {
+        *out_dir = analog_u > 0.f ? 1 : -1;
+        *out_rate = fabsf(analog_u);
+        if (*out_rate > 1.f) {
+            *out_rate = 1.f;
+        }
+        return true;
+    }
+    if (discrete_dir != 0) {
+        *out_dir = discrete_dir;
+        *out_rate = 1.f;
+        return true;
+    }
+    *out_dir = 0;
+    *out_rate = 0.f;
+    return false;
+}
+
 static void JogTick(void* arg) {
     Gimbal_t* g = (Gimbal_t*)arg;
     if (!g || !g->initialized) {
@@ -70,16 +91,22 @@ static void JogTick(void* arg) {
     }
     bool moved = false;
     const float period_s = (float)DEEP_DOG_GIMBAL_JOG_PERIOD_MS / 1000.0f;
-    if (g->jog_pan_dir != 0) {
-        const int step = (int)(g->pan_speed * period_s + 0.5f);
-        const int d = g->jog_pan_dir * (step > 0 ? step : 1);
-        ApplyPan(g, Servo_read(&g->pan_servo) + d, g->pan_speed);
+    int pan_dir = 0;
+    float pan_rate = 0.f;
+    if (AxisActive(g->analog_pan_u, g->jog_pan_dir, &pan_dir, &pan_rate)) {
+        const float eff_speed = (float)g->pan_speed * pan_rate;
+        const int step = (int)(eff_speed * period_s + 0.5f);
+        const int d = pan_dir * (step > 0 ? step : 1);
+        ApplyPan(g, Servo_read(&g->pan_servo) + d, (int)(eff_speed + 0.5f));
         moved = true;
     }
-    if (g->jog_tilt_dir != 0) {
-        const int step = (int)(g->tilt_speed * period_s + 0.5f);
-        const int d = g->jog_tilt_dir * (step > 0 ? step : 1);
-        ApplyTilt(g, Servo_read(&g->tilt_servo) + d, g->tilt_speed);
+    int tilt_dir = 0;
+    float tilt_rate = 0.f;
+    if (AxisActive(g->analog_tilt_u, g->jog_tilt_dir, &tilt_dir, &tilt_rate)) {
+        const float eff_speed = (float)g->tilt_speed * tilt_rate;
+        const int step = (int)(eff_speed * period_s + 0.5f);
+        const int d = tilt_dir * (step > 0 ? step : 1);
+        ApplyTilt(g, Servo_read(&g->tilt_servo) + d, (int)(eff_speed + 0.5f));
         moved = true;
     }
     if (moved) {
@@ -104,15 +131,31 @@ static void EnsureJogTimer(Gimbal_t* g) {
     }
 }
 
+static bool JogOrAnalogActive(const Gimbal_t* g) {
+    const float eps = 1e-3f;
+    return g->jog_pan_dir != 0 || g->jog_tilt_dir != 0 || fabsf(g->analog_pan_u) > eps ||
+           fabsf(g->analog_tilt_u) > eps;
+}
+
 static void RefreshJogTimer(Gimbal_t* g) {
     EnsureJogTimer(g);
     if (!g->jog_timer) {
         return;
     }
     esp_timer_stop(g->jog_timer);
-    if (g->jog_pan_dir != 0 || g->jog_tilt_dir != 0) {
+    if (JogOrAnalogActive(g)) {
         esp_timer_start_periodic(g->jog_timer, (uint64_t)DEEP_DOG_GIMBAL_JOG_PERIOD_MS * 1000ULL);
     }
+}
+
+static float ClampUnitSigned(float u) {
+    if (u > 1.f) {
+        return 1.f;
+    }
+    if (u < -1.f) {
+        return -1.f;
+    }
+    return u;
 }
 
 esp_err_t Gimbal_init(Gimbal_t* gimbal, int pan_gpio, int tilt_gpio) {
@@ -258,13 +301,57 @@ void Gimbal_stopJog(Gimbal_t* gimbal) {
     Notify(gimbal);
 }
 
+void Gimbal_setPanRate(Gimbal_t* gimbal, float u) {
+    if (!Gimbal_isInitialized(gimbal)) {
+        return;
+    }
+    const float nu = ClampUnitSigned(u);
+    if (fabsf(gimbal->analog_pan_u - nu) < 1e-4f) {
+        return;
+    }
+    gimbal->analog_pan_u = nu;
+    RefreshJogTimer(gimbal);
+    Notify(gimbal);
+}
+
+void Gimbal_setTiltRate(Gimbal_t* gimbal, float u) {
+    if (!Gimbal_isInitialized(gimbal)) {
+        return;
+    }
+    const float nu = ClampUnitSigned(u);
+    if (fabsf(gimbal->analog_tilt_u - nu) < 1e-4f) {
+        return;
+    }
+    gimbal->analog_tilt_u = nu;
+    RefreshJogTimer(gimbal);
+    Notify(gimbal);
+}
+
 void Gimbal_stop(Gimbal_t* gimbal) {
     if (!Gimbal_isInitialized(gimbal)) {
         return;
     }
+    gimbal->analog_pan_u = 0.f;
+    gimbal->analog_tilt_u = 0.f;
     Gimbal_stopJog(gimbal);
     Servo_write(&gimbal->pan_servo, Servo_read(&gimbal->pan_servo));
     Servo_write(&gimbal->tilt_servo, Servo_read(&gimbal->tilt_servo));
+    Notify(gimbal);
+}
+
+void Gimbal_home(Gimbal_t* gimbal) {
+    if (!Gimbal_isInitialized(gimbal)) {
+        return;
+    }
+    Gimbal_stop(gimbal);
+    gimbal->pan_speed = DEEP_DOG_GIMBAL_DEFAULT_PAN_SPEED;
+    gimbal->tilt_speed = DEEP_DOG_GIMBAL_DEFAULT_TILT_SPEED;
+    gimbal->step_deg = DEEP_DOG_GIMBAL_STEP_DEG;
+    const int pan_c = (gimbal->pan_servo.min_angle + gimbal->pan_servo.max_angle) / 2;
+    const int tilt_c = (gimbal->tilt_servo.min_angle + gimbal->tilt_servo.max_angle) / 2;
+    Gimbal_setAnglesTimed(gimbal, pan_c, tilt_c, gimbal->pan_speed);
+    ESP_LOGI(TAG, "home pan=%d tilt=%d spd=%d/%d", pan_c, tilt_c, gimbal->pan_speed,
+             gimbal->tilt_speed);
     Notify(gimbal);
 }
 
@@ -321,8 +408,10 @@ bool Gimbal_getStatus(Gimbal_t* gimbal, GimbalStatus_t* out) {
     out->pan_speed = gimbal->pan_speed;
     out->tilt_speed = gimbal->tilt_speed;
     out->step_deg = gimbal->step_deg;
-    out->moving_pan = Servo_isMoving(&gimbal->pan_servo) || gimbal->jog_pan_dir != 0;
-    out->moving_tilt = Servo_isMoving(&gimbal->tilt_servo) || gimbal->jog_tilt_dir != 0;
+    out->moving_pan = Servo_isMoving(&gimbal->pan_servo) || gimbal->jog_pan_dir != 0 ||
+                      fabsf(gimbal->analog_pan_u) > 1e-3f;
+    out->moving_tilt = Servo_isMoving(&gimbal->tilt_servo) || gimbal->jog_tilt_dir != 0 ||
+                       fabsf(gimbal->analog_tilt_u) > 1e-3f;
     out->ready = true;
     out->lim_pan_min = gimbal->pan_servo.min_angle;
     out->lim_pan_max = gimbal->pan_servo.max_angle;
@@ -410,7 +499,16 @@ void Gimbal_startJog(Gimbal_t* gimbal, gimbal_dir_t dir) {
     (void)dir;
 }
 void Gimbal_stopJog(Gimbal_t* gimbal) { (void)gimbal; }
+void Gimbal_setPanRate(Gimbal_t* gimbal, float u) {
+    (void)gimbal;
+    (void)u;
+}
+void Gimbal_setTiltRate(Gimbal_t* gimbal, float u) {
+    (void)gimbal;
+    (void)u;
+}
 void Gimbal_stop(Gimbal_t* gimbal) { (void)gimbal; }
+void Gimbal_home(Gimbal_t* gimbal) { (void)gimbal; }
 void Gimbal_setPanSpeed(Gimbal_t* gimbal, int speed_deg_s) {
     (void)gimbal;
     (void)speed_deg_s;

@@ -1,5 +1,7 @@
 #include "handle/keymap_store.h"
 
+#include "config.h"
+
 #include <nvs.h>
 #include <nvs_flash.h>
 #include <esp_log.h>
@@ -10,8 +12,8 @@
 #define TAG "handle_keymap"
 #define NVS_NS "h_keymap"
 #define NVS_KEY "blob"
-/** v5: motor profile + axis_bindings (I08b) */
-#define SCHEMA_VER 5
+/** v8: gimbal.home + default r3→home；v7: factory gimbal + rx/ry rates */
+#define SCHEMA_VER 8
 
 namespace {
 
@@ -104,6 +106,9 @@ void ApplyGimbalDefaults(HandleKeymapState_t* st) {
     st->keys[HANDLE_KEY_DPAD_RIGHT].press = MakeAct(HK_ACT_GIMBAL_PAN_SPEED_UP);
     st->keys[HANDLE_KEY_DPAD_UP].press = MakeAct(HK_ACT_GIMBAL_TILT_SPEED_UP);
     st->keys[HANDLE_KEY_DPAD_DOWN].press = MakeAct(HK_ACT_GIMBAL_TILT_SPEED_DOWN);
+    st->keys[HANDLE_KEY_R3].press = MakeAct(HK_ACT_GIMBAL_HOME);
+    st->axes[HANDLE_AXIS_RX] = MakeAxis(HK_ACT_GIMBAL_PAN_RATE);
+    st->axes[HANDLE_AXIS_RY] = MakeAxis(HK_ACT_GIMBAL_TILT_RATE);
 }
 
 void ApplyMotorDefaults(HandleKeymapState_t* st) {
@@ -371,10 +376,12 @@ void AppendCatalogForProfile(cJSON* catalog, HandleProfile_t profile) {
                 catalog, CatalogItem(HandleKeymapActionName(static_cast<HandleActionId_t>(i)), "edge"));
         }
     } else if (profile == HANDLE_PROFILE_GIMBAL) {
-        for (int i = HK_ACT_GIMBAL_LEFT; i <= HK_ACT_GIMBAL_TILT_SPEED_DOWN; ++i) {
+        for (int i = HK_ACT_GIMBAL_LEFT; i <= HK_ACT_GIMBAL_HOME; ++i) {
             cJSON_AddItemToArray(
                 catalog, CatalogItem(HandleKeymapActionName(static_cast<HandleActionId_t>(i)), "edge"));
         }
+        cJSON_AddItemToArray(catalog, CatalogItem("gimbal.pan_rate", "axis", "signed"));
+        cJSON_AddItemToArray(catalog, CatalogItem("gimbal.tilt_rate", "axis", "signed"));
     } else if (profile == HANDLE_PROFILE_MOTOR) {
         cJSON_AddItemToArray(catalog, CatalogItem("motor.enable", "edge"));
         cJSON_AddItemToArray(catalog, CatalogItem("motor.disable", "edge"));
@@ -396,7 +403,8 @@ bool HandleKeymapActionInProfile(HandleActionId_t id, HandleProfile_t profile) {
         return id >= HK_ACT_LED_OFF && id <= HK_ACT_LED_SYSTEM;
     }
     if (profile == HANDLE_PROFILE_GIMBAL) {
-        return id >= HK_ACT_GIMBAL_LEFT && id <= HK_ACT_GIMBAL_TILT_SPEED_DOWN;
+        return (id >= HK_ACT_GIMBAL_LEFT && id <= HK_ACT_GIMBAL_HOME) ||
+               id == HK_ACT_GIMBAL_PAN_RATE || id == HK_ACT_GIMBAL_TILT_RATE;
     }
     if (profile == HANDLE_PROFILE_MOTOR) {
         return id >= HK_ACT_MOTOR_ENABLE && id <= HK_ACT_MOTOR_VEL_NORM;
@@ -409,12 +417,17 @@ void HandleKeymapInit(void) {
         return;
     }
     if (!LoadNvs(&s_state)) {
+#if DEEP_DOG_GIMBAL_ENABLE
+        ApplyProfileDefaults(&s_state, HANDLE_PROFILE_GIMBAL);
+#else
         ApplyProfileDefaults(&s_state, HANDLE_PROFILE_LED_DEMO);
+#endif
         s_state.source = "default";
         SaveNvs(&s_state);
         s_state.persist = true;
         s_state.source = "nvs";
-        ESP_LOGI(TAG, "keymap factory default saved (schema=%d)", SCHEMA_VER);
+        ESP_LOGI(TAG, "keymap factory default saved (schema=%d profile=%s)", SCHEMA_VER,
+                 HandleKeymapProfileName(s_state.profile));
     } else {
         ESP_LOGI(TAG, "keymap loaded from NVS profile=%s", HandleKeymapProfileName(s_state.profile));
     }
@@ -634,6 +647,8 @@ const char* HandleKeymapActionName(HandleActionId_t id) {
             return "gimbal.tilt_speed_up";
         case HK_ACT_GIMBAL_TILT_SPEED_DOWN:
             return "gimbal.tilt_speed_down";
+        case HK_ACT_GIMBAL_HOME:
+            return "gimbal.home";
         case HK_ACT_MOTOR_ENABLE:
             return "motor.enable";
         case HK_ACT_MOTOR_DISABLE:
@@ -648,6 +663,10 @@ const char* HandleKeymapActionName(HandleActionId_t id) {
             return "motor.pos_norm";
         case HK_ACT_MOTOR_VEL_NORM:
             return "motor.vel_norm";
+        case HK_ACT_GIMBAL_PAN_RATE:
+            return "gimbal.pan_rate";
+        case HK_ACT_GIMBAL_TILT_RATE:
+            return "gimbal.tilt_rate";
         default:
             return "none";
     }

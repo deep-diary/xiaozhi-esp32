@@ -62,8 +62,8 @@ UI：先选应用 → 下拉只显示该应用 `catalog` → 表已是默认，�
 | `motor` | `none` + `motor.*`（见 [motor/04](../motor/04-handle-motor-catalog.md)） |
 | `dog` / `off` | 仅 `none` |
 
-`gimbal.*`：`left|right|up|down|pan_speed_up|pan_speed_down|tilt_speed_up|tilt_speed_down`  
-触发：`press`=单次（方向=nudge，调速=±档）；`hold`=jog 至松开。
+`gimbal.*`：`left|right|up|down|pan_speed_up|pan_speed_down|tilt_speed_up|tilt_speed_down|home`  
+触发：`press`=单次（方向=nudge，调速=±档，`home`=回中复位）；`hold`=jog 至松开（`home` 仅 press）。
 
 Catalog 项可带 `kind` / `value_domain`（I08b）；兼容纯字符串数组。
 

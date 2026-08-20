@@ -146,10 +146,12 @@ PC 桥将 `source` 设为 `"wifi"`。axes ∈ [-1,1]（**右/下为正**）；l2
 
 1. 校验 `capabilities.handle`。  
 2. 订阅 `handle/status`；可视化摇杆/按键与 `source`。  
-3. 可选订 retain `handle/keymap`；展示/编辑 profile 与六键绑定（需 `capabilities.led` 时更完整）。  
-4. 可选发 `handle/cmd`（`output` / `rumble` / `set_profile` / `set_keymap`）。  
+3. 可选订 retain `handle/keymap`；展示/编辑 profile、离散 press/hold、**六轴**（`lx|ly|rx|ry|l2|r2`；扳机标 0～1）。  
+4. 可选发 `handle/cmd`（`output` / `rumble` / `set_profile` / `set_keymap` 含 `axis_bindings`）。  
 5. 调试可发 `handle/input`。  
 6. unmount 退订 status（及 keymap）。  
+
+默认轴摘要：`motor`→`rx→motor.pos_norm`；`gimbal`→`rx→gimbal.pan_rate`、`ry→gimbal.tilt_rate`；其余 profile 轴全 `none`（见 [I08b](../../input/I08b-axis-mapping.md)）。
 
 ## 固件实现
 

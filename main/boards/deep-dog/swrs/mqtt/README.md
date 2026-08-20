@@ -46,22 +46,23 @@ Broker 地址：[vision/infra.md](../vision/infra.md)。推流能力依赖 [C02]
 源码：`main/boards/deep-dog/mqtt/`（`DEEP_DOG_MQTT_ENABLE`，默认 1）。
 
 NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password` / `bound` / `pair_code`。  
-默认 broker `192.168.31.25:1883`。**未绑定**时 `device_id` 默认为 **`dev`**（Topic `deepdiary/deep-dog/dev/`、RTSP path `deep-dog/dev`）；**已绑定**后切换为 STA MAC 紧凑串（如 `aabbccddeeff`）。NVS 显式写入 `device_id` 可覆盖（仅联调）。绑定/解绑见 [00-pairing](./modules/00-pairing.md)。
+联调默认 broker `192.168.3.73:1883`（本机 Docker EMQX，`DeepServer/emqx/start.sh`；公共站可选 `broker.emqx.io:1883`，NVS 可覆盖）。**配网 AP 高级页**可改 `broker_host`/`broker_port`（见 [N03](../net/N03-wifi-portal-mqtt-broker.md)），免重编译。**未绑定**时 `device_id` 默认为 **`dev`**（Topic `deepdiary/deep-dog/dev/`、RTSP path `deep-dog/dev`）；**已绑定**后切换为 STA MAC 紧凑串（如 `aabbccddeeff`）。NVS 显式写入 `device_id` 可覆盖（仅联调）。绑定/解绑见 [00-pairing](./modules/00-pairing.md)。  
+Hub / ingest 内网走 `ws://192.168.3.73:8083/mqtt`，与设备本机 EMQX 为同一 broker（TCP 1883 与 WS 8083 互通）。MQTTX 可直连 `192.168.3.73:1883` 或 `ws://192.168.3.73:8083/mqtt`。
 
 ### MQTTX / 脚本验收清单
 
-**网页同款路径（推荐）**：`wss://mqtt-ws.deep-diary.com/mqtt`  
+**网页同款路径（推荐，内网）**：`ws://192.168.3.73:8083/mqtt`  
 凭证用环境变量，勿写进仓库：`DEEP_DOG_MQTT_USER` / `DEEP_DOG_MQTT_PASS`。
 
 ```bash
-# 外网 WSS（默认，对齐前端）
-/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --wait 30 --start-stream
-
-# 仅局域网 TCP（设备同路径）
+# 本机 EMQX TCP（设备同路径；默认）
 /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via lan --wait 20
+
+# 外网 WSS（切回公共站时）
+/usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via web --wait 30 --start-stream
 ```
 
-1. 连接外网 WSS（或局域网 `192.168.31.25:1883`）。
+1. 连接本机 TCP `192.168.3.73:1883`（当前设备默认；或公共站 `broker.emqx.io:1883` / 网页 WS 对齐前端）。
 2. 订阅 `deepdiary/deep-dog/{device_id}/device/info`（联调可用 `dev`）→ retain 可见 capabilities / ip / firmware。
 3. 未绑定设备另订 `…/pairing/status` → retain 含 6 位 `code`；向 `…/pairing/cmd` 发 `{"action":"bound","ts":…}` 可模拟后端确认。
 4. 订阅 `…/device/status` → 约 5s 心跳。

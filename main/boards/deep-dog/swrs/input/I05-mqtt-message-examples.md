@@ -200,7 +200,7 @@ STATUS {"connected":true,"source":"wifi","axes":{"lx":0,"ly":0,"rx":0,"ry":0},"b
 }
 ```
 
-超时清零（桥停发 >500ms）时设备会上报：
+超时清零（桥停发 >1000ms）时设备会上报：
 
 ```json
 {

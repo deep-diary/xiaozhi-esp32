@@ -88,6 +88,16 @@ DeepDogMqttSettings DeepDogMqttConfig::Load() {
     if (s.broker_port <= 0) {
         s.broker_port = DEEP_DOG_MQTT_DEFAULT_BROKER_PORT;
     }
+    // 仅迁移明确废弃的旧联调地址；勿改用户手填的 broker.emqx.io（配网页 N03）
+    if (s.broker_host == "192.168.31.25") {
+        ESP_LOGW(TAG, "migrate broker_host %s → %s", s.broker_host.c_str(),
+                 DEEP_DOG_MQTT_DEFAULT_BROKER_HOST);
+        s.broker_host = DEEP_DOG_MQTT_DEFAULT_BROKER_HOST;
+        s.broker_port = DEEP_DOG_MQTT_DEFAULT_BROKER_PORT;
+        Settings writable("deep_dog_mqtt", true);
+        writable.SetString("broker_host", s.broker_host);
+        writable.SetInt("broker_port", s.broker_port);
+    }
     ESP_LOGI(TAG, "broker %s:%d bound=%d device_id=%s client_id=%s", s.broker_host.c_str(),
              s.broker_port, bound ? 1 : 0, s.device_id.c_str(), s.client_id.c_str());
     return s;

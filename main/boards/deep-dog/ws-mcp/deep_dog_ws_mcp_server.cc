@@ -3,6 +3,7 @@
 #if DEEP_DOG_WS_MCP_ENABLE
 
 #include "mcp_server.h"
+#include <wifi_manager.h>
 
 #include <cJSON.h>
 #include <esp_heap_caps.h>
@@ -13,6 +14,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <string>
 
 static const char* TAG = "dog_ws_mcp";
 
@@ -121,8 +123,12 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
         return false;
     }
 
-    ESP_LOGI(TAG, "WS MCP bridge ws://<ip>:%u%s (generic McpServer::ParseMessage)",
-             static_cast<unsigned>(port_), DEEP_DOG_WS_MCP_PATH);
+    {
+        const std::string ip = WifiManager::GetInstance().GetIpAddress();
+        ESP_LOGI(TAG, "WS MCP bridge ws://%s:%u%s (generic McpServer::ParseMessage)",
+                 ip.empty() ? "<ip>" : ip.c_str(), static_cast<unsigned>(port_),
+                 DEEP_DOG_WS_MCP_PATH);
+    }
     return true;
 }
 

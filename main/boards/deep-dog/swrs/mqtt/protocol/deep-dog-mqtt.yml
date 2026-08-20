@@ -26,9 +26,15 @@ protocol:
     sparse_cmd: true  # only include keys to change
 
 broker:
-  device_preferred: "mqtt://192.168.31.25:1883"
-  web_ws: "wss://mqtt-ws.deep-diary.com/mqtt"
-  note: "Addresses owned by vision/infra.md; credentials in NVS / secret store only."
+  device_preferred: "mqtt://192.168.3.73:1883"
+  device_public_optional: "mqtt://broker.emqx.io:1883"
+  web_ws_lan: "ws://192.168.3.73:8083/mqtt"
+  web_ws: "wss://broker.emqx.io:8084/mqtt"
+  note: >
+    Addresses owned by vision/infra.md. Lab default is local Docker EMQX
+    (DeepServer/emqx/start.sh): device TCP :1883 and web/ingest WS :8083.
+    Public broker.emqx.io remains optional (anonymous lab, not production).
+    Credentials in NVS / secret store only.
 
 modules:
   pairing:
@@ -666,6 +672,7 @@ topics:
           - tilt_speed_down
           - set_speed
           - stop
+          - home
       dir:
         type: enum
         values: [left, right, up, down]
@@ -768,9 +775,11 @@ topics:
     retain: true
     when: on_change_or_reconnect_or_get
     note: >
-      I08a/I08b schema_ver 5: press/hold + axis_bindings; bindable_keys/axes;
+      I08a/I08b schema_ver 7: press/hold + axis_bindings; bindable_keys/axes;
       catalog filtered by profile (led_demo|gimbal|motor|dog|off).
       set_profile always loads that app's default key+axis bindings.
+      gimbal defaults: rx→gimbal.pan_rate, ry→gimbal.tilt_rate;
+      factory default profile=gimbal when GIMBAL_ENABLE.
     payload:
       schema_ver: { type: int }
       ok: { type: bool }
@@ -784,17 +793,21 @@ topics:
       bindable_axes:
         type: array
         item: { type: string }
-        note: "lx|ly|rx|ry|l2|r2"
+        note: "lx|ly|rx|ry (signed [-1,1]); l2|r2 (unit [0,1])"
       bindings:
         type: object
         note: "each bindable key → {press,hold} with {id, optional params}"
       axis_bindings:
         type: object
-        note: "each bindable axis → {id, optional params}"
+        note: >
+          each bindable axis → {id, optional params};
+          gimbal defaults rx→gimbal.pan_rate, ry→gimbal.tilt_rate
       catalog:
         type: array
         item: { type: [string, object] }
-        note: "action ids or {id,kind,value_domain} for current profile (+ none)"
+        note: >
+          action ids or {id,kind,value_domain} for current profile (+ none);
+          gimbal axis: gimbal.pan_rate|gimbal.tilt_rate (signed)
       warnings:
         type: array
         item: { type: string }

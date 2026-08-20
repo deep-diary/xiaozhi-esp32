@@ -38,7 +38,7 @@
 #endif
 /** EXT_PIN=LED：WS2812 灯带（DIN 默认 gpio_a；脚位见 config.h DEEP_DOG_LED_STRIP_GPIO） */
 #ifndef DEEP_DOG_LED_ENABLE
-#define DEEP_DOG_LED_ENABLE 1
+#define DEEP_DOG_LED_ENABLE 0
 #endif
 
 /* -------- CAN 产品链（须 CAN+MOTOR） -------- */
@@ -54,7 +54,7 @@
 #define DEEP_DOG_SERVO_ENABLE 0
 #endif
 #ifndef DEEP_DOG_GIMBAL_ENABLE
-#define DEEP_DOG_GIMBAL_ENABLE 0
+#define DEEP_DOG_GIMBAL_ENABLE 1
 #endif
 
 /* -------- 与 38/48 引出脚无关 -------- */

@@ -231,6 +231,9 @@ void DeepDogGimbalMqtt::OnMessage(const std::string& topic, const std::string& p
         } else if (strcmp(a, "stop") == 0) {
             Gimbal_stop(g);
             touched = true;
+        } else if (strcmp(a, "home") == 0) {
+            Gimbal_home(g);
+            touched = true;
         } else {
             ESP_LOGW(TAG, "unknown action=%s", a);
         }

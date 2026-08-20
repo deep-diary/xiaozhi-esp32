@@ -6,11 +6,12 @@
  */
 
 /**
- * Wi‑Fi STA 静态 IPv4（调试用）：置 1 后不再向 AP 要 DHCP。
- * 发布或换环境前建议改回 0 恢复 DHCP。
+ * Wi‑Fi STA 寻址（见 swrs/net/N02-sta-address.md）：
+ * 默认 DHCP——换网段不必改固件；WS MCP 听 0.0.0.0，客户端用当前 STA IP。
+ * 仅固定实验室可置 1，并填**当前**网段的 IP/网关（写死 31 网段在非 31 环境会搞挂 DNS/OTA）。
  */
 #ifndef DEEP_DOG_WIFI_USE_STATIC_IP
-#define DEEP_DOG_WIFI_USE_STATIC_IP 1
+#define DEEP_DOG_WIFI_USE_STATIC_IP 0
 #endif
 
 #if DEEP_DOG_WIFI_USE_STATIC_IP

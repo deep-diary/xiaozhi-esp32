@@ -6,6 +6,8 @@
 #include <freertos/event_groups.h>
 #include <esp_timer.h>
 
+struct WifiManagerConfig;
+
 class WifiBoard : public Board {
 protected:
     esp_timer_handle_t connect_timer_ = nullptr;
@@ -35,6 +37,12 @@ protected:
      * WiFi connection timeout callback
      */
     static void OnWifiConnectTimeout(void* arg);
+
+    /**
+     * Board-specific WifiManagerConfig tweaks (before Initialize).
+     * [deep-dog] 合入说明: 板级可开配网页 OTA / MQTT broker 高级项
+     */
+    virtual void CustomizeWifiManagerConfig(WifiManagerConfig& config) { (void)config; }
 
 public:
     WifiBoard();

@@ -44,9 +44,9 @@
 #define DEEP_DOG_HANDLE_EVENT_QUEUE_DEPTH 8
 #endif
 
-/** PC 桥无包超时后清零（ms） */
+/** PC 桥无包超时后清零（ms）；略宽于桥心跳，避免 WiFi/MQTT 抖动误清 */
 #ifndef DEEP_DOG_HANDLE_INPUT_TIMEOUT_MS
-#define DEEP_DOG_HANDLE_INPUT_TIMEOUT_MS 500
+#define DEEP_DOG_HANDLE_INPUT_TIMEOUT_MS 1000
 #endif
 
 /** status 发布最小间隔（ms）；过小易打满 Wi‑Fi，过大前端发粘 */

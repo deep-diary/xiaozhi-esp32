@@ -34,8 +34,9 @@
 
 见 [infra.md](../vision/infra.md)。
 
-- 设备：`mqtt://192.168.31.25:1883`
-- 网页：`wss://mqtt-ws.deep-diary.com/mqtt`
+- 设备联调默认：`mqtt://192.168.3.73:1883`（本机 EMQX；公共站可选 `mqtt://broker.emqx.io:1883`）
+- 网页 / ingest：内网 `ws://192.168.3.73:8083/mqtt`；公网 `wss://broker.emqx.io:8084/mqtt`（须与设备同一 broker）
+- **稳连**：板级 MQTT 开启时 WiFi **禁止** `LOW_POWER`（强制 PERFORMANCE / `WIFI_PS_NONE`），避免 `Poll timeout` / `Writing didn't complete` 后断连、手柄失控；重连间隔约 3s
 - 前缀：`deepdiary/deep-dog/{device_id}/`
 - **默认 `device_id`**：STA MAC 紧凑串（小写无冒号）；NVS 可覆盖为 `dev` 仅联调。见 [00-pairing](./modules/00-pairing.md)。
 - cmd QoS=1；status QoS=0；部分 status retain（见 YAML）
@@ -53,7 +54,7 @@
 | 4 | touch | [06-touch](./modules/06-touch.md) | ready |
 | 5 | dog | [07-dog](./modules/07-dog.md) | ready |
 | 6 | led | [08-led](./modules/08-led.md) | planned |
-| 7 | gimbal | [09-gimbal](./modules/09-gimbal.md)（V-C04） | ready / 更后 |
+| 7 | gimbal | [09-gimbal](./modules/09-gimbal.md)（V-C04） | ready / 本轮联调 |
 | 8 | servo | [10-servo](./modules/10-servo.md) | ready |
 | 9 | handle | [11-handle](./modules/11-handle.md)；架构 [input/](../input/) | 契约扩展 ready；固件 planned |
 | 10 | can | [12-can](./modules/12-can.md) | planned |

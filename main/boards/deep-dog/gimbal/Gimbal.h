@@ -44,8 +44,10 @@ typedef struct {
     int pan_speed;
     int tilt_speed;
     int step_deg;
-    int jog_pan_dir;   // -1 / 0 / +1
+    int jog_pan_dir;   // -1 / 0 / +1 (discrete hold)
     int jog_tilt_dir;  // -1 / 0 / +1
+    float analog_pan_u;   // stick rate [-1,1]; 0 = inactive (overrides discrete when nonzero)
+    float analog_tilt_u;
     esp_timer_handle_t jog_timer;
     GimbalNotifyCb on_notify;
     void* on_notify_ctx;
@@ -67,6 +69,13 @@ void Gimbal_nudgeDown(Gimbal_t* gimbal);
 void Gimbal_startJog(Gimbal_t* gimbal, gimbal_dir_t dir);
 void Gimbal_stopJog(Gimbal_t* gimbal);
 void Gimbal_stop(Gimbal_t* gimbal);
+
+/** 回中复位：行程中点角 + 默认速度/步进；清 jog/模拟（等同上电后姿态） */
+void Gimbal_home(Gimbal_t* gimbal);
+
+/** Stick axis rate ∈ [-1,1]; 0 clears that axis analog. Effective speed = |u| * axis speed. */
+void Gimbal_setPanRate(Gimbal_t* gimbal, float u);
+void Gimbal_setTiltRate(Gimbal_t* gimbal, float u);
 
 void Gimbal_setPanSpeed(Gimbal_t* gimbal, int speed_deg_s);
 void Gimbal_setTiltSpeed(Gimbal_t* gimbal, int speed_deg_s);
