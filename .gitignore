@@ -15,6 +15,7 @@ build/
 *.log
 dist/
 tools/gnumake/
+# 旧本地暂存目录（已改用 git 跟踪的 tools/microros_prebuilt/）
 tools/microros_component_stash/
 .vscode/
 .devcontainer/

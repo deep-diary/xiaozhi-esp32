@@ -66,6 +66,20 @@ CE01 阶段 A **仍不**把轨迹转发到 CAN（见边界）。本剖面只是 
 
 视觉关时跳过 `InitializeCamera()`（无摄像头的板子还会少两次 SCCB 失败重试）。
 
+## 预编译 libmicroros（Windows / 跳过编库）
+
+| 项 | 说明 |
+|----|------|
+| 路径 | [`tools/microros_prebuilt/`](../../../../tools/microros_prebuilt/)（git 跟踪，~26MB） |
+| 内容 | `libmicroros.a` + `include/` + `include_override/` + `MANIFEST.json` |
+| 安装 | `python scripts/deep_dog/install_microros_prebuilt.py`（在 `deep_dog_fetch_microros.sh` 之后） |
+| Win 补丁 | `python scripts/deep_dog/patch_microros_windows_cmake.py` |
+| 验收 | 日志 `[deep-dog] using existing libmicroros.a`，不跑 WSL/`libmicroros.mk` 长编 |
+
+`MANIFEST.json` 校验 `app-colcon.meta` sha256；改 meta 或升级组件后须在 Mac/Linux **重编并更新** prebuilt。
+
+**编库环境**：macOS/Linux 可原生 `make -f libmicroros.mk`；Windows 原生易失败，缺 prebuilt 时补丁改走 WSL（Linux 环境）编库——与整机固件在 Win+IDF 上编不矛盾。
+
 ## 验收
 
 1. 服务器 `ros2 launch a3_cloud_edge micro_ros_agent.launch.py port:=8888` 运行中，Agent 日志可见 session

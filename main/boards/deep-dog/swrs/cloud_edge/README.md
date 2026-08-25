@@ -30,4 +30,5 @@
 | 路径 | 说明 |
 |------|------|
 | [`microros/`](../../microros/) | Client 实现与联调 README |
+| [`tools/microros_prebuilt/`](../../../../tools/microros_prebuilt/) | vendored `libmicroros.a`（CE01；Win 跳过编库） |
 | [`board_features.h`](../../board_features.h) | `DEEP_DOG_MICROROS_ENABLE`（默认 0） |

@@ -9,7 +9,7 @@
 |----|-----|
 | CMake | `-DDEEP_DOG_MICROROS=ON`（同时定义 `DEEP_DOG_MICROROS_ENABLE=1` 并链接组件） |
 | 默认 | OFF（日常 MQTT/视觉构建不编 `libmicroros`） |
-| 组件 | 不进默认 `idf_component.yml`；联调前执行 `scripts/deep_dog/deep_dog_fetch_microros.sh`（Humble `>=22.0.0,<23.0.0`） |
+| 组件 | 不进默认 `idf_component.yml`；联调前 `deep_dog_fetch_microros.sh`；**Windows 推荐**再跑 `install_microros_prebuilt.py`（见下） |
 
 联调剖面建议：`EXT_PIN=CAN` + `CAN`/`MOTOR`，关 `FACE_AI` / `VISION_HUB` / `TRACK_MQTT` / `HTTP_SERVER` 省 SRAM。板级 MQTT 仍开；构造不能放在 `InitializeCamera()` 里。契约为 **a3 机械臂** 7 关节；阶段 A 轨迹业务处理限 50 Hz。
 
@@ -22,8 +22,11 @@ get_idf55   # 或 . $IDF_PATH/export.sh
 # IDF 所用 Python venv 内：
 pip install catkin_pkg colcon-common-extensions lark
 
-# 仅 CloudEdge 联调需要：拉取 Humble 组件（一次）
+# 仅 CloudEdge 联调需要：拉取 Humble 组件骨架（一次）
 ./scripts/deep_dog/deep_dog_fetch_microros.sh
+
+# Windows / 跳过编库：安装仓库内预编译 libmicroros（Mac 已编好，~26MB，git 跟踪）
+python3 scripts/deep_dog/install_microros_prebuilt.py
 # Windows 另执行：
 #   python scripts/deep_dog/patch_microros_windows_cmake.py
 
@@ -31,18 +34,23 @@ idf.py set-target esp32s3
 idf.py -DDEEP_DOG_MICROROS=ON build
 ```
 
-### Windows 注意（本机为 Windows + WSL）
+预编译说明：[tools/microros_prebuilt/README.md](../../../../tools/microros_prebuilt/README.md)
 
-`libmicroros.mk` 依赖 Unix `make` + LF 行尾；在 Windows NTFS/`/mnt/d` 上直接编常因 CRLF / path 失败。
+### Windows 注意
 
-推荐任选其一：
+**编 `libmicroros.a` 本身**依赖 Unix `make` + LF 行尾；Windows **原生** CMake 调 `libmicroros.mk` 常失败（CRLF、`/mnt/d` 路径）。因此补丁在缺 `.a` 时会改走 **WSL（Linux 环境）** 编库——不是说整机固件必须在 Linux 上编，只是**这一颗静态库**在 Win 上难编。
 
-1. **Linux / 原生 WSL 文件系统**内打开本仓库（或把工程拷到 `~/xiaozhi-esp32`）再 `idf.py -DDEEP_DOG_MICROROS=ON build`
-2. Windows 侧先拉组件，再补丁 CMake 并预编库：
+**推荐（无需 WSL 编库）**：clone 后仓库已含 `tools/microros_prebuilt/`，按上节 `install_microros_prebuilt.py` 复制到 `managed_components/` 即可。
+
+备选（无预编译包 / 需重编库时）：
+
+1. **Linux / WSL 原生文件系统**内 `idf.py -DDEEP_DOG_MICROROS=ON build`（或 `wsl_build_libmicroros.sh`）
+2. Windows 侧拉组件 + patch + WSL 编库：
    ```powershell
-   idf.py -DDEEP_DOG_MICROROS=ON reconfigure   # 拉取 managed_components
+   idf.py -DDEEP_DOG_MICROROS=ON reconfigure
    python scripts/deep_dog/patch_microros_windows_cmake.py
-   wsl bash scripts/deep_dog/wsl_build_libmicroros.sh   # 须在 LF/原生盘成功
+   python scripts/deep_dog/install_microros_prebuilt.py   # 有预编译则优先这步，跳过下一行
+   wsl bash scripts/deep_dog/wsl_build_libmicroros.sh
    idf.py -DDEEP_DOG_MICROROS=ON build
    ```
 

@@ -1,0 +1,20 @@
+{
+  "profile": "esp32s3-idf5.5-humble22",
+  "description": "Prebuilt libmicroros for deep-dog CE01; copy into managed_components after fetch",
+  "idf_target": "esp32s3",
+  "idf_version": "5.5.2",
+  "xtensa_gcc": "14.2.0 (crosstool-NG esp-14.2.0_20251107)",
+  "microros_component": {
+    "version": "22.0.0",
+    "commit_sha": "4ddd8c26e721662319ed8af981cb7cdc9ae05382"
+  },
+  "middleware": "microxrcedds",
+  "app_colcon_meta_sha256": "94e1b9f158b082a9adc0f6542ea9803db597c1850a697a86fd2df82a63acccaf",
+  "built_on": "darwin",
+  "built_at": "2026-08-26",
+  "artifacts": [
+    "libmicroros.a",
+    "include/",
+    "include_override/"
+  ]
+}
