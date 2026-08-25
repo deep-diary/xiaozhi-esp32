@@ -2,6 +2,45 @@
 
 > **配置入口**：硬件脚与引出脚模式见 [`config.h`](./config.h)；功能组合见 [`board_features.h`](./board_features.h)；剖面表见 [`FEATURE_FLAGS.md`](./FEATURE_FLAGS.md)。
 
+## 克隆后快速配置与编译
+
+deep-dog 基于 **ESP32-S3 + 16MB Flash**，板型与分区等 Kconfig **以 [`config.json`](config.json) 为准**（勿沿用仓库根目录默认的 `partitions/v2/16m.csv`）。
+
+**克隆后额外依赖**：
+
+- `components/esp-wifi-connect`、`components/human_face_recognition` **已纳入本仓库跟踪**（clone 后即有，无需再拉）。前者含 deep-dog N03 配网页 MQTT Broker 补丁（`show_mqtt_broker_config`，默认关闭，其它板不受影响）。
+- Bluepad32（可选手柄 BT）：见 [`handle/sources/README.md`](./handle/sources/README.md)。
+
+| 项 | 值 |
+|----|-----|
+| 芯片 | `esp32s3` |
+| 板型 Kconfig | `CONFIG_BOARD_TYPE_DEEP_DOG=y` |
+| 分区表 | [`partitions/v2/16m_deep_dog.csv`](../../../partitions/v2/16m_deep_dog.csv)（OTA 双槽 + 人脸模型 `human_face_feat` + `facedb` + `assets`） |
+| Flash 大小 | 16MB（`sdkconfig.defaults.esp32s3` 已默认） |
+
+**推荐（与 CI/发版一致）**：`release.py` 会 `set-target`、把 `config.json` 的 `sdkconfig_append` 写入 `sdkconfig` 并编译：
+
+```bash
+get_idf55          # 或加载 ESP-IDF v5.5.x 环境
+idf.py set-target esp32s3   # 首次或换芯片时
+python scripts/release.py deep-dog
+```
+
+日常增量开发（`sdkconfig` 已按上面对齐后）：
+
+```bash
+idf.py build
+idf.py -p <串口> flash monitor
+```
+
+**手工对齐 `sdkconfig`**（不想跑 release 时）：在 `sdkconfig` 末尾追加 `CONFIG_BOARD_TYPE_DEEP_DOG=y`，以及 `config.json` → `builds[0].sdkconfig_append` 中的各行（含 `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME` / `CONFIG_PARTITION_TABLE_FILENAME` 指向 `16m_deep_dog.csv`），再 `idf.py build`。
+
+> **分区表变更**：从其他板型或旧表切到 `16m_deep_dog.csv` 时，需 **全量擦除 Flash 后重刷**（`idf.py erase-flash flash`），否则 OTA / 人脸分区可能异常。详见分区表文件头注释。
+
+摄像头等传感器选项说明见 [`CAMERA_SENSOR.md`](./CAMERA_SENSOR.md)。
+
+---
+
 ## 功能需求
 
 通过**语音**控制机器狗完成：

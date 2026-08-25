@@ -1,10 +1,15 @@
 tmp/
-# 忽略本地组件目录，但跟踪 vendored 的 human_face_recognition（S04）
+# 忽略本地组件目录，但跟踪 vendored：
+# - human_face_recognition（S04 人脸特征，与 esp-dl/detect 版本对齐）
+# - esp-wifi-connect（deep-dog N03：配网页 MQTT broker；补丁默认关闭）
 components/*
 !components/human_face_recognition/
 !components/human_face_recognition/**
+!components/esp-wifi-connect/
+!components/esp-wifi-connect/**
 managed_components/
 build/
+*.log
 dist/
 .vscode/
 .devcontainer/
