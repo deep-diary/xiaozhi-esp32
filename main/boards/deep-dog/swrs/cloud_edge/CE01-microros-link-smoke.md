@@ -41,7 +41,9 @@ L1_joint, L2_joint, L3_joint, L4_joint, L5_joint, L6_joint, L7_joint
 - Session 已建立后**禁止**再调无 options 的 `rmw_uros_ping_agent()`：它仍走 libmicroros 默认 `127.0.0.1`，会在 Agent 实际在线时误拆 session。保活改为连续 `rcl_publish` 失败再重连；Agent 重启后由外层 `ping_agent_options` 重建。
 - `/joint_states` @ 50 Hz 与轨迹订阅均用 **BEST_EFFORT**。JointState 默认 RELIABLE 会打满 XRCE 输出历史；轨迹若 RELIABLE，实验室 `ros2 topic pub` 能在 DDS 图上匹配到 `deep_dog_microros`，但 XRCE inbound 常无回调（与 `motor_protocol_node` 的 BE 订阅不一致）。
 - 轨迹 `micro_ros_utilities` 容量：string ≥64、sequence ≥16，避免 7 关节名 + 嵌套 `positions` 反序列化失败而静默丢包。
-- 实验室 `quadruped_controller_node` 也在同话题发轨迹（常见 ~100 Hz、**12** 关节）。固件回调必须节流日志；验收看到 `traj points=` 即通过。用 7 关节测试帧时看 `joint_names=7` / `pos0=0.5`，不要被 12 关节流量淹没误判为失败。
+- 实验室 `quadruped_controller_node` 也在同话题发轨迹（CHAMP `loop_rate`，默认 200 Hz、12 关节；CE01 联调已改为 **50 Hz**）。日志 `traj n` 每 500 ms +N：N=100 → 200 Hz，N=25 → 50 Hz。阶段 A 入站 **drain 全量、业务处理限 50 Hz**；7 关节测试帧不限。
+- 关 `VISION_HUB`/`FACE_AI` 时跳过 `InitializeCamera()`，**不得**把板级 MQTT 构造绑在该函数里（否则 `board_mqtt_` 为空，broker 无客户端）。
+- 固件回调必须节流日志；验收看到 `traj n=` 即通过。用 7 关节测试帧时看 `joint_names=7` / `pos0=0.5`。
 
 ## 边界（阶段 A 不做）
 
@@ -49,7 +51,19 @@ CAN 发送、200 Hz 插值、断连 disable 电机、gate、软限位、急停 G
 
 ## 联调剖面建议
 
-开启 `DEEP_DOG_MICROROS_ENABLE=1` 时建议关闭 `FACE_AI` / `VISION_HUB` / `HTTP_SERVER` 以省 internal SRAM；MQTT 可关可留。
+开启 `DEEP_DOG_MICROROS_ENABLE=1` 时用 **单电机剖面** 并关掉视觉，给 XRCE 腾 internal SRAM：
+
+| 宏 | 值 |
+|----|-----|
+| `EXT_PIN_MODE` | `CAN`（GPIO38 TX / 48 RX） |
+| `CAN_ENABLE` / `MOTOR_ENABLE` | 1 |
+| `DOG` / `GIMBAL` | 0 |
+| `FACE_AI` / `VISION_HUB` / `TRACK_MQTT` / `HTTP_SERVER` | 0 |
+| MQTT | 可留（电机联调需要） |
+
+CE01 阶段 A **仍不**把轨迹转发到 CAN（见边界）。本剖面只是 MOT-01 硬件 + 关视觉，与 CE01 冒烟并存。
+
+视觉关时跳过 `InitializeCamera()`（无摄像头的板子还会少两次 SCCB 失败重试）。
 
 ## 验收
 
@@ -66,4 +80,4 @@ CAN 发送、200 Hz 插值、断连 disable 电机、gate、软限位、急停 G
 |----|------|
 | 文档 | 本轮 |
 | 固件 | 本轮（阶段 A） |
-| 真机联调勾选 | STA `192.168.3.111` · Agent `192.168.3.78:8888` session 稳定 · 轨迹回调已通（实验室 12 关节 ~100 Hz） |
+| 真机联调勾选 | STA `192.168.3.111` · Agent session 稳定 · 实验室 CHAMP `loop_rate=50` · 关视觉后 MQTT 须独立于 Camera 构造 |

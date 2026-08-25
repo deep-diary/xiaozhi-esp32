@@ -138,9 +138,9 @@
 #if DEEP_DOG_MQTT_ENABLE
 #include "mqtt/deep_dog_mqtt.h"
 #include "pairing/pairing_mcp.h"
+#include "board_diagnostics_mcp.h"
 #if DEEP_DOG_FACE_AI_ENABLE
 #include "face_mcp.h"
-#include "board_diagnostics_mcp.h"
 #endif
 #endif
 
@@ -688,6 +688,10 @@ private:
         http_server_->SetVisionHub(vision_hub_.get());
 #endif
 #endif
+    }
+
+    /** 板级 MQTT 不依赖摄像头；关 VISION/FACE 跳过 InitializeCamera 时仍须构造。 */
+    void InitializeBoardMqtt() {
 #if DEEP_DOG_MQTT_ENABLE
         board_mqtt_ = std::make_unique<DeepDogMqtt>();
         board_mqtt_->SetTouchHub(&touch_hub_);
@@ -842,7 +846,10 @@ public:
 #if DEEP_DOG_HANDLE_ENABLE
         InitializeHandle();
 #endif
+#if DEEP_DOG_VISION_HUB_ENABLE || DEEP_DOG_FACE_AI_ENABLE
         InitializeCamera();
+#endif
+        InitializeBoardMqtt();
         InitializeExtPinModules();
 #if DEEP_DOG_MQTT_ENABLE && DEEP_DOG_LED_ENABLE
         if (board_mqtt_) {

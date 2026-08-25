@@ -11,7 +11,7 @@
 | 默认 | OFF（日常 MQTT/视觉构建不编 `libmicroros`） |
 | 组件 | 不进默认 `idf_component.yml`；联调前执行 `scripts/deep_dog/deep_dog_fetch_microros.sh`（Humble `>=22.0.0,<23.0.0`） |
 
-联调剖面建议：关 `FACE_AI` / `VISION_HUB` / `HTTP_SERVER` 省 SRAM。
+联调剖面建议：`EXT_PIN=CAN` + `CAN`/`MOTOR`，关 `FACE_AI` / `VISION_HUB` / `TRACK_MQTT` / `HTTP_SERVER` 省 SRAM。板级 MQTT 仍开；构造不能放在 `InitializeCamera()` 里。实验室 CHAMP `loop_rate` 联调 50 Hz。
 
 ## 编译环境
 

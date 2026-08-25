@@ -99,6 +99,7 @@ static void TrajectoryCallback(const void* msgin) {
         return;
     }
     static uint32_t s_traj_n = 0;
+    static TickType_t s_last_handle = 0;
     s_traj_n++;
     const unsigned nnames = (unsigned)msg->joint_names.size;
     const unsigned npts = (unsigned)msg->points.size;
@@ -114,6 +115,11 @@ static void TrajectoryCallback(const void* msgin) {
         ESP_LOGI(TAG, "traj n=%u points=%u joint_names=%u pos0=%.3f (npos=%u)", s_traj_n, npts, nnames,
                  pos0, npos);
     }
+    const TickType_t now = xTaskGetTickCount();
+    if (!test_like && (now - s_last_handle) < pdMS_TO_TICKS(DEEP_DOG_MICROROS_TRAJ_HANDLE_PERIOD_MS)) {
+        return;
+    }
+    s_last_handle = now;
     UpdateMockFromTrajectory(msg);
 }
 

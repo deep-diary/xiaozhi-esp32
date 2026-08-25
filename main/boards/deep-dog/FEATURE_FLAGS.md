@@ -63,12 +63,12 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 
 | 剖面 | EXT_PIN | CAN | MOTOR | DOG | ARM | SERVO/GIMBAL | 说明 |
 |------|---------|-----|-------|-----|-----|--------------|------|
-| **云台（当前默认）** | `PWM` | 0 | 0 | 0 | 0 | **0/1** | 产品 pan/tilt MQTT + 手柄 keymap；GPIO38/48 |
+| **云台** | `PWM` | 0 | 0 | 0 | 0 | **0/1** | 产品 pan/tilt MQTT + 手柄 keymap；GPIO38/48 |
 | 舵机调试 | `PWM` | 0 | 0 | 0 | 0 | **1/0** | 2 路裸舵机 MQTT/MCP（与云台互斥） |
 | 灯带联调 | `LED` | 0 | 0 | 0 | 0 | 0 | `LED_ENABLE=1`；DIN=`gpio_a`(38) |
 | 前端壳 | `NONE` | 0 | 0 | 0 | 0 | 0 | MQTT 设备页联调 |
 | 瘦剖面 | `LED` | 0 | 0 | 0 | 0 | 0 | **240²** 采集/人脸/RTSP；§9 640 代码保留 |
-| 单电机 | `CAN` | 1 | 1 | 0 | 0 | 0 | TWAI + DeepMotor + can/motor MQTT + handle motor/轴 |
+| **单电机（当前 CE01 联调）** | `CAN` | 1 | 1 | 0 | 0 | 0 | TWAI + DeepMotor；关 `FACE_AI`/`VISION_HUB`/`TRACK_MQTT` |
 | 四足狗 | `CAN` | 1 | 1 | 1 | 0 | 0 | 完整运控 |
 | 机械臂 | `CAN` | 1 | 1 | 0 | 1 | 0 | 占位，实现后启用 |
 | UART | `UART` | 0 | 0 | 0 | 0 | 0 | `UART_ENABLE=1` |
@@ -94,7 +94,7 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 "capabilities": { "can", "motor", "dog", "arm", "uart", "servo", "gimbal", "led", ... }
 ```
 
-前端：`ext_pins.mode` 选总线类页面；`capabilities.motor` vs `dog` 区分电机调试与四足。当前默认 `config.h` 为 **`EXT_PIN=PWM`** + `GIMBAL_ENABLE=1`（云台联调）。MQTT 联调默认 broker 见 [infra.md](./swrs/vision/infra.md)（`192.168.3.73:1883（本机 EMQX；见 infra.md）`）。
+前端：`ext_pins.mode` 选总线类页面；`capabilities.motor` vs `dog` 区分电机调试与四足。当前默认 `config.h` 为 **`EXT_PIN=CAN`** + `CAN`/`MOTOR`（CE01 单电机联调；云台改回 `PWM` + `GIMBAL_ENABLE`）。MQTT 联调默认 broker 见 [infra.md](./swrs/vision/infra.md)（`192.168.3.73:1883（本机 EMQX；见 infra.md）`）。
 
 ## 目录与依赖
 

@@ -26,6 +26,9 @@
 #define DEEP_DOG_MICROROS_TASK_STACK 16384
 #define DEEP_DOG_MICROROS_TASK_PRIO 5
 
+/** 入站轨迹业务处理上限（实验室 CHAMP loop_rate 联调 50 Hz；XRCE 仍 drain） */
+#define DEEP_DOG_MICROROS_TRAJ_HANDLE_PERIOD_MS 20
+
 /** Agent ping / 重连间隔 */
 #define DEEP_DOG_MICROROS_PING_TIMEOUT_MS 1000
 #define DEEP_DOG_MICROROS_PING_ATTEMPTS 3

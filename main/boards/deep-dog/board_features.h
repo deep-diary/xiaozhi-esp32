@@ -18,10 +18,10 @@
 
 /* -------- 引出脚外设（须 config.h EXT_PIN_MODE 匹配；A/B 默认 38/48） -------- */
 #ifndef DEEP_DOG_CAN_ENABLE
-#define DEEP_DOG_CAN_ENABLE 0
+#define DEEP_DOG_CAN_ENABLE 1
 #endif
 #ifndef DEEP_DOG_MOTOR_ENABLE
-#define DEEP_DOG_MOTOR_ENABLE 0
+#define DEEP_DOG_MOTOR_ENABLE 1
 #endif
 #ifndef DEEP_DOG_UART_ENABLE
 #define DEEP_DOG_UART_ENABLE 0
@@ -54,7 +54,7 @@
 #define DEEP_DOG_SERVO_ENABLE 0
 #endif
 #ifndef DEEP_DOG_GIMBAL_ENABLE
-#define DEEP_DOG_GIMBAL_ENABLE 1
+#define DEEP_DOG_GIMBAL_ENABLE 0
 #endif
 
 /* -------- 与 38/48 引出脚无关 -------- */
@@ -62,13 +62,13 @@
 #define DEEP_DOG_MQTT_ENABLE 1
 #endif
 #ifndef DEEP_DOG_TRACK_MQTT_ENABLE
-#define DEEP_DOG_TRACK_MQTT_ENABLE 1
+#define DEEP_DOG_TRACK_MQTT_ENABLE 0
 #endif
 #ifndef DEEP_DOG_VISION_HUB_ENABLE
-#define DEEP_DOG_VISION_HUB_ENABLE 1
+#define DEEP_DOG_VISION_HUB_ENABLE 0
 #endif
 #ifndef DEEP_DOG_FACE_AI_ENABLE
-#define DEEP_DOG_FACE_AI_ENABLE 1
+#define DEEP_DOG_FACE_AI_ENABLE 0
 #endif
 #ifndef DEEP_DOG_IMU_ENABLE
 #define DEEP_DOG_IMU_ENABLE 1

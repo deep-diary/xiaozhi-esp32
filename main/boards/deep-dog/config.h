@@ -24,9 +24,9 @@
 
 typedef int deep_dog_ext_pin_mode_t;
 
-/** 联调默认 PWM 云台；灯带改 _LED，单电机改 _CAN，前端壳 _NONE */
+/** 联调默认 CAN 单电机（CE01）；云台改 _PWM，灯带改 _LED，前端壳 _NONE */
 #ifndef DEEP_DOG_EXT_PIN_MODE
-#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_PWM
+#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_CAN
 #endif
 
 #define DEEP_DOG_EXT_PIN_A_GPIO GPIO_NUM_38

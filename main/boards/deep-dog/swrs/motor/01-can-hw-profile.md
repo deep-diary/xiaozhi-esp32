@@ -30,7 +30,7 @@ CAN_ENABLE=1 → MOTOR_ENABLE=1 → DOG_ENABLE=0（本剖面）
                               ↘ ARM_ENABLE=0（占位）
 ```
 
-本分支默认剖面（单电机）：
+本分支默认剖面（**CE01 联调：单电机 + 关视觉**）：
 
 | 宏 | 值 |
 |----|-----|
@@ -38,6 +38,8 @@ CAN_ENABLE=1 → MOTOR_ENABLE=1 → DOG_ENABLE=0（本剖面）
 | `DEEP_DOG_MOTOR_ENABLE` | 1 |
 | `DEEP_DOG_DOG_ENABLE` | 0 |
 | `DEEP_DOG_GIMBAL_ENABLE` / `SERVO` | 0（由 PWM 不可用钳位） |
+| `DEEP_DOG_FACE_AI_ENABLE` / `VISION_HUB` / `TRACK_MQTT` | 0（给 micro-ROS 腾 SRAM） |
+| `DEEP_DOG_MQTT_ENABLE` | 1（电机联调；构造不得绑在 `InitializeCamera`） |
 
 板级初始化：`InitializeCan` → `DeepMotor` + RX 任务。波特率 **1 Mbps**（见 `can/README`）。
 
