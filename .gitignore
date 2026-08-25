@@ -7,6 +7,9 @@ components/*
 !components/human_face_recognition/**
 !components/esp-wifi-connect/
 !components/esp-wifi-connect/**
+# registry 下载残留（path vendor 不需要；且补丁后 CHECKSUMS 会过时）
+components/esp-wifi-connect/.component_hash
+components/esp-wifi-connect/CHECKSUMS.json
 managed_components/
 build/
 *.log
