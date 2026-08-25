@@ -44,6 +44,7 @@ static rcl_node_t s_node;
 static sensor_msgs__msg__JointState s_js_msg;
 static trajectory_msgs__msg__JointTrajectory s_traj_msg;
 static bool s_entities_ok = false;
+static int s_pub_fail_streak = 0;
 
 #define RCCHECK(fn)                                                                                    \
     do {                                                                                               \
@@ -97,11 +98,21 @@ static void TrajectoryCallback(const void* msgin) {
     if (msg == nullptr) {
         return;
     }
-    ESP_LOGI(TAG, "traj points=%u joint_names=%u", (unsigned)msg->points.size,
-             (unsigned)msg->joint_names.size);
-    if (msg->points.size > 0 && msg->points.data[0].positions.size > 0) {
-        ESP_LOGI(TAG, "traj[0] pos0=%.3f (n=%u)", msg->points.data[0].positions.data[0],
-                 (unsigned)msg->points.data[0].positions.size);
+    static uint32_t s_traj_n = 0;
+    s_traj_n++;
+    const unsigned nnames = (unsigned)msg->joint_names.size;
+    const unsigned npts = (unsigned)msg->points.size;
+    double pos0 = 0.0;
+    unsigned npos = 0;
+    if (npts > 0 && msg->points.data[0].positions.size > 0) {
+        pos0 = msg->points.data[0].positions.data[0];
+        npos = (unsigned)msg->points.data[0].positions.size;
+    }
+    const bool test_like = (nnames == DEEP_DOG_MICROROS_JOINT_COUNT);
+    const bool interesting = test_like || (pos0 > 0.05) || (pos0 < -0.05);
+    if (s_traj_n == 1 || (s_traj_n % 100) == 0 || interesting) {
+        ESP_LOGI(TAG, "traj n=%u points=%u joint_names=%u pos0=%.3f (npos=%u)", s_traj_n, npts, nnames,
+                 pos0, npos);
     }
     UpdateMockFromTrajectory(msg);
 }
@@ -122,12 +133,24 @@ static void JointStateTimerCallback(rcl_timer_t* timer, int64_t /*last_call_time
     s_js_msg.effort.size = DEEP_DOG_MICROROS_JOINT_COUNT;
     s_js_msg.name.size = DEEP_DOG_MICROROS_JOINT_COUNT;
 
-    int64_t nanos = 0;
-    (void)rmw_uros_epoch_nanos(&nanos);
+    // Humble rmw_microxrcedds: rmw_uros_epoch_nanos() returns ns (no out-param).
+    const int64_t nanos = rmw_uros_epoch_nanos();
     s_js_msg.header.stamp.sec = (int32_t)(nanos / 1000000000LL);
     s_js_msg.header.stamp.nanosec = (uint32_t)(nanos % 1000000000LL);
 
-    RCSOFTCHECK(rcl_publish(&s_js_pub, &s_js_msg, nullptr));
+    rcl_ret_t pub_rc = rcl_publish(&s_js_pub, &s_js_msg, nullptr);
+    if (pub_rc != RCL_RET_OK) {
+        s_pub_fail_streak++;
+        if (s_pub_fail_streak == 1 || (s_pub_fail_streak % 50) == 0) {
+            ESP_LOGW(TAG, "publish fail rc=%d streak=%d", (int)pub_rc, s_pub_fail_streak);
+        }
+        if (s_pub_fail_streak >= 50) {
+            ESP_LOGW(TAG, "publish fail streak; reconnect");
+            s_entities_ok = false;
+        }
+    } else {
+        s_pub_fail_streak = 0;
+    }
 }
 
 static bool InitMessageMemory() {
@@ -156,7 +179,7 @@ static bool InitMessageMemory() {
     micro_ros_utilities_memory_conf_t tconf = {};
     tconf.max_string_capacity = DEEP_DOG_MICROROS_STRING_CAPACITY;
     tconf.max_ros2_type_sequence_capacity = DEEP_DOG_MICROROS_TRAJ_MAX_POINTS;
-    tconf.max_basic_type_sequence_capacity = DEEP_DOG_MICROROS_JOINT_COUNT;
+    tconf.max_basic_type_sequence_capacity = DEEP_DOG_MICROROS_JOINT_COUNT * 2;
     if (!micro_ros_utilities_create_message_memory(
             ROSIDL_GET_MSG_TYPE_SUPPORT(trajectory_msgs, msg, JointTrajectory), &s_traj_msg, tconf)) {
         ESP_LOGE(TAG, "JointTrajectory memory alloc failed");
@@ -178,6 +201,34 @@ static void FiniEntities() {
     (void)rcl_node_fini(&s_node);
     (void)rclc_support_fini(&s_support);
     ESP_LOGW(TAG, "XRCE entities torn down");
+}
+
+/** Ping Agent using menuconfig IP/port. Bare rmw_uros_ping_agent() hits 127.0.0.1. */
+static bool PingAgentWithConfiguredAddress(int timeout_ms, uint8_t attempts) {
+#ifndef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
+    (void)timeout_ms;
+    (void)attempts;
+    ESP_LOGE(TAG, "XRCE-DDS middleware not selected in menuconfig");
+    return false;
+#else
+    rcl_allocator_t allocator = rcl_get_default_allocator();
+    rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
+    if (rcl_init_options_init(&init_options, allocator) != RCL_RET_OK) {
+        ESP_LOGE(TAG, "ping: rcl_init_options_init failed");
+        return false;
+    }
+    rmw_init_options_t* rmw_options = rcl_init_options_get_rmw_init_options(&init_options);
+    rmw_ret_t rc = rmw_uros_options_set_udp_address(CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT,
+                                                    rmw_options);
+    if (rc != RMW_RET_OK) {
+        ESP_LOGE(TAG, "ping: set_udp_address failed rc=%d", (int)rc);
+        (void)rcl_init_options_fini(&init_options);
+        return false;
+    }
+    rc = rmw_uros_ping_agent_options(timeout_ms, attempts, rmw_options);
+    (void)rcl_init_options_fini(&init_options);
+    return rc == RMW_RET_OK;
+#endif
 }
 
 static bool CreateEntities() {
@@ -206,11 +257,11 @@ static bool CreateEntities() {
 
     RCCHECK(rclc_node_init_default(&s_node, DEEP_DOG_MICROROS_NODE_NAME, "", &s_support));
 
-    RCCHECK(rclc_publisher_init_default(
+    RCCHECK(rclc_publisher_init_best_effort(
         &s_js_pub, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, JointState),
         DEEP_DOG_MICROROS_JOINT_STATE_TOPIC));
 
-    RCCHECK(rclc_subscription_init_default(
+    RCCHECK(rclc_subscription_init_best_effort(
         &s_traj_sub, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(trajectory_msgs, msg, JointTrajectory),
         DEEP_DOG_MICROROS_TRAJECTORY_TOPIC));
 
@@ -224,6 +275,7 @@ static bool CreateEntities() {
     RCCHECK(rclc_executor_add_timer(&s_executor, &s_js_timer));
 
     s_entities_ok = true;
+    s_pub_fail_streak = 0;
     ESP_LOGI(TAG, "session ready: pub %s @ %d Hz, sub %s", DEEP_DOG_MICROROS_JOINT_STATE_TOPIC,
              DEEP_DOG_MICROROS_JOINT_STATE_HZ, DEEP_DOG_MICROROS_TRAJECTORY_TOPIC);
     return true;
@@ -231,6 +283,9 @@ static bool CreateEntities() {
 
 static void MicrorosTask(void* /*arg*/) {
     ESP_LOGI(TAG, "task start (reuse WifiBoard STA; no uros_network_interface_initialize)");
+#ifdef CONFIG_MICRO_ROS_ESP_XRCE_DDS_MIDDLEWARE
+    ESP_LOGI(TAG, "ping Agent %s:%s", CONFIG_MICRO_ROS_AGENT_IP, CONFIG_MICRO_ROS_AGENT_PORT);
+#endif
 
     if (s_pos_mu == nullptr) {
         s_pos_mu = xSemaphoreCreateMutex();
@@ -244,8 +299,9 @@ static void MicrorosTask(void* /*arg*/) {
 
     for (;;) {
         ESP_LOGI(TAG, "waiting for Agent ping...");
-        while (rmw_uros_ping_agent(DEEP_DOG_MICROROS_PING_TIMEOUT_MS, DEEP_DOG_MICROROS_PING_ATTEMPTS) !=
-               RMW_RET_OK) {
+        while (!PingAgentWithConfiguredAddress(DEEP_DOG_MICROROS_PING_TIMEOUT_MS,
+                                               DEEP_DOG_MICROROS_PING_ATTEMPTS)) {
+            ESP_LOGW(TAG, "Agent ping failed; retry in %d ms", DEEP_DOG_MICROROS_RECONNECT_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_MICROROS_RECONNECT_DELAY_MS));
         }
         ESP_LOGI(TAG, "Agent reachable, creating session");
@@ -256,17 +312,14 @@ static void MicrorosTask(void* /*arg*/) {
             continue;
         }
 
-        TickType_t last_ping = xTaskGetTickCount();
+        TickType_t last_hb = xTaskGetTickCount();
         while (s_entities_ok) {
-            rclc_executor_spin_some(&s_executor, RCL_MS_TO_NS(50));
-            if ((xTaskGetTickCount() - last_ping) >= pdMS_TO_TICKS(2000)) {
-                last_ping = xTaskGetTickCount();
-                if (rmw_uros_ping_agent(500, 1) != RMW_RET_OK) {
-                    ESP_LOGW(TAG, "Agent ping lost; reconnect");
-                    break;
-                }
+            rclc_executor_spin_some(&s_executor, RCL_MS_TO_NS(20));
+            if ((xTaskGetTickCount() - last_hb) >= pdMS_TO_TICKS(5000)) {
+                last_hb = xTaskGetTickCount();
+                ESP_LOGI(TAG, "session up (executor spinning)");
             }
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(pdMS_TO_TICKS(2));
         }
         FiniEntities();
         vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_MICROROS_RECONNECT_DELAY_MS));

@@ -22,6 +22,15 @@ if(DEEP_DOG_MICROROS)
     endif()
     # Keep component out of main/idf_component.yml so default builds skip libmicroros.
     # Component Manager still places it under managed_components after add-dependency.
+    # EXTRA_COMPONENT_DIRS parent so IDF finds it without a yml entry (else ENABLE=1 but no rcl headers).
+    set(_DD_UROS_EXTRA "${CMAKE_CURRENT_LIST_DIR}/main/boards/deep-dog/microros/idf_extra")
+    file(MAKE_DIRECTORY "${_DD_UROS_EXTRA}")
+    if(NOT EXISTS "${_DD_UROS_EXTRA}/micro-ros__micro_ros_espidf_component")
+        file(CREATE_LINK "${DEEP_DOG_MICROROS_COMP}"
+            "${_DD_UROS_EXTRA}/micro-ros__micro_ros_espidf_component"
+            SYMBOLIC)
+    endif()
+    list(APPEND EXTRA_COMPONENT_DIRS "${_DD_UROS_EXTRA}")
     message(STATUS "[deep-dog] micro-ROS component at ${DEEP_DOG_MICROROS_COMP}")
 endif()
 if(DEEP_DOG_HANDLE_BT)
@@ -29,7 +38,11 @@ if(DEEP_DOG_HANDLE_BT)
         set(BLUEPAD32_ROOT "${DEEP_DOG_BLUEPAD32_ROOT}")
         set(BTSTACK_ROOT "${BLUEPAD32_ROOT}/external/btstack")
         # Must be set() (not only APPEND) before include(project.cmake)
-        set(EXTRA_COMPONENT_DIRS "${BLUEPAD32_ROOT}/src/components")
+        if(EXTRA_COMPONENT_DIRS)
+            list(APPEND EXTRA_COMPONENT_DIRS "${BLUEPAD32_ROOT}/src/components")
+        else()
+            set(EXTRA_COMPONENT_DIRS "${BLUEPAD32_ROOT}/src/components")
+        endif()
         message(STATUS "[deep-dog] Bluepad32 EXTRA_COMPONENT_DIRS=${EXTRA_COMPONENT_DIRS}")
     else()
         message(FATAL_ERROR

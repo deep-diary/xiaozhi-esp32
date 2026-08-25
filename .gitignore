@@ -36,3 +36,6 @@ components/bluepad32
 components/btstack
 components/cmd_nvs
 components/cmd_system
+
+# deep-dog CE01: cmake-generated symlink to managed_components/micro-ros__*
+main/boards/deep-dog/microros/idf_extra/

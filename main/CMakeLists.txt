@@ -1199,14 +1199,24 @@ if(BOARD_TYPE STREQUAL "deep-dog" AND DEEP_DOG_HANDLE_BT)
 endif()
 
 # [deep-dog] 合入说明: CMake -DDEEP_DOG_MICROROS=ON 时强制 DEEP_DOG_MICROROS_ENABLE=1
-# 背景: board_features.h 默认关；联调靠 CMake 开关同步编译宏与链接
+# 背景: board_features.h 默认关；WHOLE_ARCHIVE 会丢掉 PRIV_REQUIRES 头文件，须显式 include + 链 libmicroros.a
 if(BOARD_TYPE STREQUAL "deep-dog" AND DEEP_DOG_MICROROS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEEP_DOG_MICROROS_ENABLE=1)
-    # Component Manager 可能注册为 micro-ros__micro_ros_espidf_component
+    set(_DD_UROS_ROOT "${PROJECT_DIR}/managed_components/micro-ros__micro_ros_espidf_component")
     if(TARGET idf::micro_ros_espidf_component)
         target_link_libraries(${COMPONENT_LIB} PUBLIC idf::micro_ros_espidf_component)
     elseif(TARGET idf::micro-ros__micro_ros_espidf_component)
         target_link_libraries(${COMPONENT_LIB} PUBLIC idf::micro-ros__micro_ros_espidf_component)
+    endif()
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${_DD_UROS_ROOT}/include")
+    file(GLOB _DD_UROS_PKGS LIST_DIRECTORIES true "${_DD_UROS_ROOT}/include/*")
+    foreach(_dd_pkg ${_DD_UROS_PKGS})
+        if(IS_DIRECTORY "${_dd_pkg}")
+            target_include_directories(${COMPONENT_LIB} PRIVATE "${_dd_pkg}")
+        endif()
+    endforeach()
+    if(EXISTS "${_DD_UROS_ROOT}/libmicroros.a")
+        target_link_libraries(${COMPONENT_LIB} PUBLIC "${_DD_UROS_ROOT}/libmicroros.a")
     endif()
 endif()
 

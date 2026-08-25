@@ -71,6 +71,8 @@ idf.py -DDEEP_DOG_MICROROS=ON menuconfig
 
 组件里的 **WiFi SSID/Password** 对本板**无效**：WiFi 走板级配网页 / NVS（`WifiBoard`），密钥不入库。勿调用 `uros_network_interface_initialize`。
 
+建链探测须用 `rmw_uros_ping_agent_options` + 上表 Agent IP；裸 `rmw_uros_ping_agent()` 会 ping libmicroros 默认 `127.0.0.1`。Session 建立后不要再用无 options 的 ping 做保活。
+
 ## 烧录与监控
 
 ```bash
@@ -104,8 +106,8 @@ idf.py -DDEEP_DOG_MICROROS=ON -p COMx flash monitor
    - `idf.py -DDEEP_DOG_MICROROS=ON menuconfig` 设 Agent IP/端口
    - `idf.py -DDEEP_DOG_MICROROS=ON build flash monitor`
 5. 验收：
-   - Agent 日志可见 session
-   - `ros2 topic hz /joint_states` ≈ 50 Hz
+   - Agent 日志可见 session（`session established`，地址为板 STA IP）
+   - `ros2 topic info -v /joint_states` 含节点 `deep_dog_microros`（实验室机械狗也发同话题时，`topic hz` 会是 ~200 Hz 而非 50）
    - 发测试轨迹后固件日志出现 `traj points=...`：
 
 ```bash
