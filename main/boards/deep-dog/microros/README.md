@@ -11,7 +11,7 @@
 | 默认 | OFF（日常 MQTT/视觉构建不编 `libmicroros`） |
 | 组件 | 不进默认 `idf_component.yml`；联调前执行 `scripts/deep_dog/deep_dog_fetch_microros.sh`（Humble `>=22.0.0,<23.0.0`） |
 
-联调剖面建议：`EXT_PIN=CAN` + `CAN`/`MOTOR`，关 `FACE_AI` / `VISION_HUB` / `TRACK_MQTT` / `HTTP_SERVER` 省 SRAM。板级 MQTT 仍开；构造不能放在 `InitializeCamera()` 里。实验室 CHAMP `loop_rate` 联调 50 Hz。
+联调剖面建议：`EXT_PIN=CAN` + `CAN`/`MOTOR`，关 `FACE_AI` / `VISION_HUB` / `TRACK_MQTT` / `HTTP_SERVER` 省 SRAM。板级 MQTT 仍开；构造不能放在 `InitializeCamera()` 里。契约为 **a3 机械臂** 7 关节；阶段 A 轨迹业务处理限 50 Hz。
 
 ## 编译环境
 
@@ -107,8 +107,8 @@ idf.py -DDEEP_DOG_MICROROS=ON -p COMx flash monitor
    - `idf.py -DDEEP_DOG_MICROROS=ON build flash monitor`
 5. 验收：
    - Agent 日志可见 session（`session established`，地址为板 STA IP）
-   - `ros2 topic info -v /joint_states` 含节点 `deep_dog_microros`（实验室机械狗也发同话题时，`topic hz` 会是 ~200 Hz 而非 50）
-   - 发测试轨迹后固件日志出现 `traj points=...`：
+   - `ros2 topic info -v /joint_states` 含节点 `deep_dog_microros`（独占时应 ≈ 50 Hz；有其它节点同发时勿用混合 `topic hz`）
+   - 发 **7 关节**测试轨迹后固件日志出现 `traj n=... joint_names=7`：
 
 ```bash
 ros2 topic pub --once /joint_group_effort_controller/joint_trajectory \

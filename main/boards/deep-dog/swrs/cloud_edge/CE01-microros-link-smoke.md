@@ -41,7 +41,8 @@ L1_joint, L2_joint, L3_joint, L4_joint, L5_joint, L6_joint, L7_joint
 - Session 已建立后**禁止**再调无 options 的 `rmw_uros_ping_agent()`：它仍走 libmicroros 默认 `127.0.0.1`，会在 Agent 实际在线时误拆 session。保活改为连续 `rcl_publish` 失败再重连；Agent 重启后由外层 `ping_agent_options` 重建。
 - `/joint_states` @ 50 Hz 与轨迹订阅均用 **BEST_EFFORT**。JointState 默认 RELIABLE 会打满 XRCE 输出历史；轨迹若 RELIABLE，实验室 `ros2 topic pub` 能在 DDS 图上匹配到 `deep_dog_microros`，但 XRCE inbound 常无回调（与 `motor_protocol_node` 的 BE 订阅不一致）。
 - 轨迹 `micro_ros_utilities` 容量：string ≥64、sequence ≥16，避免 7 关节名 + 嵌套 `positions` 反序列化失败而静默丢包。
-- 实验室 `quadruped_controller_node` 也在同话题发轨迹（CHAMP `loop_rate`，默认 200 Hz、12 关节；CE01 联调已改为 **50 Hz**）。日志 `traj n` 每 500 ms +N：N=100 → 200 Hz，N=25 → 50 Hz。阶段 A 入站 **drain 全量、业务处理限 50 Hz**；7 关节测试帧不限。
+- **产品侧为 a3 机械臂**（`a3_arm_ws`，7 关节 `L1_joint`…`L7_joint`）。阶段 A 入站 **drain 全量、业务处理限 50 Hz**（`DEEP_DOG_MICROROS_TRAJ_HANDLE_PERIOD_MS`）；7 关节测试帧不限流。
+- 冒烟前停掉会抢同话题的杂节点（如 `microros_mock_client`）；勿再按四足/`trotbot`/`CHAMP` 联调假设验收。
 - 关 `VISION_HUB`/`FACE_AI` 时跳过 `InitializeCamera()`，**不得**把板级 MQTT 构造绑在该函数里（否则 `board_mqtt_` 为空，broker 无客户端）。
 - 固件回调必须节流日志；验收看到 `traj n=` 即通过。用 7 关节测试帧时看 `joint_names=7` / `pos0=0.5`。
 
@@ -68,8 +69,8 @@ CE01 阶段 A **仍不**把轨迹转发到 CAN（见边界）。本剖面只是 
 ## 验收
 
 1. 服务器 `ros2 launch a3_cloud_edge micro_ros_agent.launch.py port:=8888` 运行中，Agent 日志可见 session
-2. 图上可见节点 `deep_dog_microros` 发布 `/joint_states`（允许 mock position）。独占该话题时应 ≈ 50 Hz；实验室机械狗同时发布时以 `ros2 topic info` 为准，勿用混合 `topic hz`。
-3. 服务器发布测试 `JointTrajectory` 后，固件日志/回调确认收到 `points`
+2. 图上可见节点 `deep_dog_microros` 发布 `/joint_states`（允许 mock position）。独占该话题时应 ≈ 50 Hz；有其它节点同发时以 `ros2 topic info -v` 为准，勿用混合 `topic hz`
+3. 服务器发布 **7 关节**测试 `JointTrajectory` 后，固件日志/回调确认收到 `points`（`joint_names=7`）
 4. 重启 Client 或 Agent 后可再次建立 session，无需改代码
 
 联调步骤见 [`microros/README.md`](../../microros/README.md)（含「请回填 a3 QUICKSTART」文案）。
@@ -80,4 +81,4 @@ CE01 阶段 A **仍不**把轨迹转发到 CAN（见边界）。本剖面只是 
 |----|------|
 | 文档 | 本轮 |
 | 固件 | 本轮（阶段 A） |
-| 真机联调勾选 | STA `192.168.3.111` · Agent session 稳定 · 实验室 CHAMP `loop_rate=50` · 关视觉后 MQTT 须独立于 Camera 构造 |
+| 真机联调勾选 | STA `192.168.3.111` · Agent session 稳定 · a3 臂 7 关节契约 · 轨迹业务处理限 50 Hz · 关视觉后 MQTT 须独立于 Camera 构造 |
