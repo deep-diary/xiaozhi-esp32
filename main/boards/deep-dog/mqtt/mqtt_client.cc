@@ -5,6 +5,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <freertos/semphr.h>
 
 #include <atomic>
 #include <cstring>
@@ -15,12 +16,15 @@ namespace {
 
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kErrorBit = BIT1;
-constexpr int kConnectTimeoutMs = 12000;
+/** 须覆盖 network.timeout_ms，避免应用先超时、mqtt 任务仍在连时被并发 destroy */
+constexpr int kNetworkTimeoutMs = 20000;
+constexpr int kConnectTimeoutMs = kNetworkTimeoutMs + 5000;
 /** 断连后尽快重连；过长会导致手柄/云台长时间失控 */
 constexpr int kReconnectIntervalUs = 3 * 1000 * 1000;
 constexpr int kMaxReconnect = 0;  // 0 = unlimited
-constexpr int kNetworkTimeoutMs = 20000;
 constexpr int kMqttBufferSize = 4096;
+constexpr uint32_t kReconnectTaskStack = 6144;
+constexpr UBaseType_t kReconnectTaskPrio = 5;
 
 }  // namespace
 
@@ -28,20 +32,26 @@ struct DeepDogMqttClient::Impl {
     esp_mqtt_client_handle_t handle = nullptr;
     EventGroupHandle_t events = nullptr;
     esp_timer_handle_t reconnect_timer = nullptr;
+    SemaphoreHandle_t mutex = nullptr;
     std::atomic<bool> connected{false};
     std::atomic<bool> stopping{false};
+    std::atomic<bool> connect_in_progress{false};
+    std::atomic<bool> reconnect_task_running{false};
     int retry_count = 0;
     DeepDogMqttClient* owner = nullptr;
 
     static void OnMqttEvent(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
     static void OnReconnectTimer(void* arg);
+    static void ReconnectTask(void* arg);
     void ScheduleReconnect();
     bool DoConnect();
+    void DestroyHandleUnlocked();
 };
 
 DeepDogMqttClient::DeepDogMqttClient() : impl_(std::make_unique<Impl>()) {
     impl_->owner = this;
     impl_->events = xEventGroupCreate();
+    impl_->mutex = xSemaphoreCreateMutex();
     esp_timer_create_args_t targs = {
         .callback = &Impl::OnReconnectTimer,
         .arg = impl_.get(),
@@ -63,6 +73,10 @@ DeepDogMqttClient::~DeepDogMqttClient() {
         vEventGroupDelete(impl_->events);
         impl_->events = nullptr;
     }
+    if (impl_->mutex) {
+        vSemaphoreDelete(impl_->mutex);
+        impl_->mutex = nullptr;
+    }
 }
 
 std::string DeepDogMqttClient::Topic(const std::string& relative) const {
@@ -79,12 +93,32 @@ bool DeepDogMqttClient::IsConnected() const {
     return impl_ && impl_->connected.load(std::memory_order_acquire);
 }
 
-bool DeepDogMqttClient::Impl::DoConnect() {
-    if (handle) {
-        esp_mqtt_client_stop(handle);
-        esp_mqtt_client_destroy(handle);
-        handle = nullptr;
+void DeepDogMqttClient::Impl::DestroyHandleUnlocked() {
+    if (!handle) {
+        return;
     }
+    esp_mqtt_client_handle_t h = handle;
+    handle = nullptr;
+    // stop 在 run==true 时会等到 mqtt 任务退出；run==false 时仅告警，仍须 destroy
+    esp_mqtt_client_stop(h);
+    esp_mqtt_client_destroy(h);
+}
+
+bool DeepDogMqttClient::Impl::DoConnect() {
+    if (stopping.load(std::memory_order_acquire) || !mutex) {
+        return false;
+    }
+    if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+
+    if (stopping.load(std::memory_order_acquire)) {
+        xSemaphoreGive(mutex);
+        return false;
+    }
+
+    connect_in_progress.store(true, std::memory_order_release);
+    DestroyHandleUnlocked();
     connected.store(false, std::memory_order_release);
 
     const auto& s = owner->settings_;
@@ -109,37 +143,42 @@ bool DeepDogMqttClient::Impl::DoConnect() {
     handle = esp_mqtt_client_init(&cfg);
     if (!handle) {
         ESP_LOGE(TAG, "esp_mqtt_client_init failed");
+        connect_in_progress.store(false, std::memory_order_release);
+        xSemaphoreGive(mutex);
         return false;
     }
     esp_mqtt_client_register_event(handle, MQTT_EVENT_ANY, &Impl::OnMqttEvent, this);
     xEventGroupClearBits(events, kConnectedBit | kErrorBit);
     if (esp_mqtt_client_start(handle) != ESP_OK) {
         ESP_LOGE(TAG, "esp_mqtt_client_start failed");
-        esp_mqtt_client_destroy(handle);
-        handle = nullptr;
+        DestroyHandleUnlocked();
+        connect_in_progress.store(false, std::memory_order_release);
+        xSemaphoreGive(mutex);
         return false;
     }
+
     EventBits_t bits = xEventGroupWaitBits(events, kConnectedBit | kErrorBit, pdTRUE, pdFALSE,
                                            pdMS_TO_TICKS(kConnectTimeoutMs));
-    if ((bits & kConnectedBit) != 0) {
-        return true;
+    bool ok = (bits & kConnectedBit) != 0;
+    if (!ok) {
+        ESP_LOGW(TAG, "connect wait failed (bits=0x%lx)", (unsigned long)bits);
+        if (reconnect_timer) {
+            esp_timer_stop(reconnect_timer);
+        }
+        DestroyHandleUnlocked();
+        connected.store(false, std::memory_order_release);
     }
-    ESP_LOGW(TAG, "connect wait failed (bits=0x%lx)", (unsigned long)bits);
-    // 失败路径先停重连定时器，再销毁，避免与 mqtt 任务/定时器并发
-    if (reconnect_timer) {
-        esp_timer_stop(reconnect_timer);
-    }
-    if (handle) {
-        esp_mqtt_client_stop(handle);
-        esp_mqtt_client_destroy(handle);
-        handle = nullptr;
-    }
-    connected.store(false, std::memory_order_release);
-    return false;
+
+    connect_in_progress.store(false, std::memory_order_release);
+    xSemaphoreGive(mutex);
+    return ok;
 }
 
 void DeepDogMqttClient::Impl::ScheduleReconnect() {
     if (stopping.load(std::memory_order_acquire) || !reconnect_timer) {
+        return;
+    }
+    if (connect_in_progress.load(std::memory_order_acquire)) {
         return;
     }
     if (kMaxReconnect > 0 && retry_count >= kMaxReconnect) {
@@ -152,18 +191,49 @@ void DeepDogMqttClient::Impl::ScheduleReconnect() {
     esp_timer_start_once(reconnect_timer, kReconnectIntervalUs);
 }
 
-void DeepDogMqttClient::Impl::OnReconnectTimer(void* arg) {
+void DeepDogMqttClient::Impl::ReconnectTask(void* arg) {
     auto* self = static_cast<Impl*>(arg);
-    if (!self || !self->owner || self->stopping.load(std::memory_order_acquire)) {
+    if (!self || !self->owner) {
+        if (self) {
+            self->reconnect_task_running.store(false, std::memory_order_release);
+        }
+        vTaskDelete(nullptr);
         return;
     }
+
     ESP_LOGI(TAG, "reconnecting...");
     if (self->DoConnect()) {
         self->retry_count = 0;
         if (self->owner->connection_cb_) {
             self->owner->connection_cb_(true);
         }
-    } else {
+    } else if (!self->stopping.load(std::memory_order_acquire)) {
+        self->ScheduleReconnect();
+    }
+
+    self->reconnect_task_running.store(false, std::memory_order_release);
+    vTaskDelete(nullptr);
+}
+
+void DeepDogMqttClient::Impl::OnReconnectTimer(void* arg) {
+    auto* self = static_cast<Impl*>(arg);
+    if (!self || !self->owner || self->stopping.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (self->connect_in_progress.load(std::memory_order_acquire)) {
+        // 连接仍在进行：稍后再试，避免与 DoConnect 重叠
+        self->ScheduleReconnect();
+        return;
+    }
+    bool expected = false;
+    if (!self->reconnect_task_running.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    BaseType_t ok = xTaskCreate(&Impl::ReconnectTask, "dog_mqtt_re", kReconnectTaskStack, self,
+                                kReconnectTaskPrio, nullptr);
+    if (ok != pdPASS) {
+        self->reconnect_task_running.store(false, std::memory_order_release);
+        ESP_LOGE(TAG, "reconnect task create failed");
         self->ScheduleReconnect();
     }
 }
@@ -193,7 +263,9 @@ void DeepDogMqttClient::Impl::OnMqttEvent(void* handler_args, esp_event_base_t b
                 }
             }
             xEventGroupSetBits(self->events, kErrorBit);
-            if (!self->stopping.load(std::memory_order_acquire)) {
+            // DoConnect 等待期间由 WaitBits 收口，禁止再投递重连（避免 stop/destroy 竞态）
+            if (!self->stopping.load(std::memory_order_acquire) &&
+                !self->connect_in_progress.load(std::memory_order_acquire)) {
                 self->ScheduleReconnect();
             }
             break;
@@ -209,6 +281,10 @@ void DeepDogMqttClient::Impl::OnMqttEvent(void* handler_args, esp_event_base_t b
         case MQTT_EVENT_ERROR:
             ESP_LOGW(TAG, "mqtt error");
             xEventGroupSetBits(self->events, kErrorBit);
+            if (!self->stopping.load(std::memory_order_acquire) &&
+                !self->connect_in_progress.load(std::memory_order_acquire)) {
+                self->ScheduleReconnect();
+            }
             break;
         default:
             break;
@@ -241,10 +317,9 @@ void DeepDogMqttClient::Stop() {
     if (impl_->reconnect_timer) {
         esp_timer_stop(impl_->reconnect_timer);
     }
-    if (impl_->handle) {
-        esp_mqtt_client_stop(impl_->handle);
-        esp_mqtt_client_destroy(impl_->handle);
-        impl_->handle = nullptr;
+    if (impl_->mutex && xSemaphoreTake(impl_->mutex, portMAX_DELAY) == pdTRUE) {
+        impl_->DestroyHandleUnlocked();
+        xSemaphoreGive(impl_->mutex);
     }
     impl_->connected.store(false, std::memory_order_release);
 }

@@ -211,7 +211,12 @@ public:
                         gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
                         gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk = true)
         : Es8311AudioCodec(i2c_master_handle, i2c_port, input_sample_rate, output_sample_rate,
-                             mclk,  bclk,  ws,  dout,  din,pa_pin,  es8311_addr,  use_mclk = true) {}
+                             mclk,  bclk,  ws,  dout,  din,pa_pin,  es8311_addr,  use_mclk = true) {
+        // deep-dog 办公室默认 20%，写入 NVS 以便 AudioCodec::Start 加载后仍生效
+        output_volume_ = 20;
+        Settings settings("audio", true);
+        settings.SetInt("output_volume", 20);
+    }
 
     void EnableOutput(bool enable) override {
         if (enable == output_enabled_) {
