@@ -81,6 +81,7 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 - **`DEEP_DOG_VISION_PUSH_AT_BOOT`**（`vision_config.h`，**默认 0**：不开自动推流）
 - `DEEP_DOG_HTTP_SERVER_ENABLE`（默认 0）
 - `DEEP_DOG_HANDLE_ENABLE`（云台剖面默认 1；瘦剖面可关）
+- **`DEEP_DOG_MICROROS_ENABLE`**（默认 0；CloudEdge CE01。联调：`idf.py -DDEEP_DOG_MICROROS=ON build`，见 [`microros/README.md`](./microros/README.md) / [swrs/cloud_edge/CE01](./swrs/cloud_edge/CE01-microros-link-smoke.md)）
 
 引出脚外设 ENABLE 见上表（`CAN`/`UART`/`IO`/`LED` 等）；**灯带只用 `LED_ENABLE`，不用 `IO_ENABLE`**。
 
@@ -107,5 +108,6 @@ config.h / board_features.h
     ├─ servo/ gimbal/ ← PWM 模式
     ├─ led/          ← LED_ENABLE（EXT_PIN=LED；非 IO 栈）
     ├─ mqtt/ vision/ face_ai/ sensor/ http-server/ …
+    ├─ microros/     ← MICROROS_ENABLE（CE01；CMake -DDEEP_DOG_MICROROS=ON）
     └─ esp_sparkbot_board.cc 编排
 ```

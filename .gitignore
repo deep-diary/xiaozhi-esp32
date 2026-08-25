@@ -11,6 +11,8 @@ managed_components/
 build/
 *.log
 dist/
+tools/gnumake/
+tools/microros_component_stash/
 .vscode/
 .devcontainer/
 sdkconfig.old

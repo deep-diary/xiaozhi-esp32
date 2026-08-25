@@ -33,6 +33,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | [vision/](./vision/) | HTTP / Immich / MediaMTX / Kiosk |
 | [vision/infra.md](./vision/infra.md) | MediaMTX、EMQX、Immich（无明文密钥） |
 | [net/](./net/) | SNTP（N01）· STA DHCP 寻址（N02）· 配网页 MQTT Broker（N03） |
+| [cloud_edge/](./cloud_edge/) | A3 CloudEdge micro-ROS（CE01 阶段 A；契约在 a3_arm_ws） |
 
 ## 交付序号（摘要）
 
@@ -48,6 +49,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | V-C03 | 推流 MQTT | [modules/02-stream](./mqtt/modules/02-stream.md) 待办 |
 | V-C04 | 云台 MQTT | [modules/09-gimbal](./mqtt/modules/09-gimbal.md) 本轮联调 |
 | V-P01 | Kiosk | 更后 |
+| **CE01** | micro-ROS 链路冒烟 | [cloud_edge/CE01](./cloud_edge/CE01-microros-link-smoke.md) 本轮 |
 
 ## 约定
 

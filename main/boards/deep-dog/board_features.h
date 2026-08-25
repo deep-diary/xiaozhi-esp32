@@ -79,6 +79,10 @@
 #ifndef DEEP_DOG_HANDLE_ENABLE
 #define DEEP_DOG_HANDLE_ENABLE 1
 #endif
+/** CloudEdge micro-ROS Client（CE01）；默认关。联调：CMake -DDEEP_DOG_MICROROS=ON（覆盖本宏为 1） */
+#ifndef DEEP_DOG_MICROROS_ENABLE
+#define DEEP_DOG_MICROROS_ENABLE 0
+#endif
 
 /* -------- 依赖钳位（*_AVAILABLE 必须已由 config.h 定义；未定义时不钳位） -------- */
 #if defined(DEEP_DOG_CAN_AVAILABLE) && !DEEP_DOG_CAN_AVAILABLE

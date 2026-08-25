@@ -1151,6 +1151,14 @@ if(BOARD_TYPE STREQUAL "deep-dog")
     else()
         message(STATUS "[deep-dog] Bluepad32 not linked (DEEP_DOG_HANDLE_BT=${DEEP_DOG_HANDLE_BT})")
     endif()
+    # [deep-dog] 合入说明: CloudEdge CE01 需链接 micro_ros_espidf_component
+    # 背景: 仅 -DDEEP_DOG_MICROROS=ON 时引入；默认构建不链 libmicroros
+    if(DEEP_DOG_MICROROS)
+        message(STATUS "[deep-dog] PRIV_REQUIRES += micro-ros__micro_ros_espidf_component (DEEP_DOG_MICROROS=ON)")
+        list(APPEND MAIN_PRIV_REQUIRES_EXTRA micro-ros__micro_ros_espidf_component)
+    else()
+        message(STATUS "[deep-dog] micro-ROS not linked (DEEP_DOG_MICROROS=OFF)")
+    endif()
 endif()
 
 idf_component_register(SRCS ${SOURCES}
@@ -1188,6 +1196,18 @@ idf_component_register(SRCS ${SOURCES}
 if(BOARD_TYPE STREQUAL "deep-dog" AND DEEP_DOG_HANDLE_BT)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEEP_DOG_HANDLE_BT_ENABLE=1)
     target_link_libraries(${COMPONENT_LIB} PUBLIC idf::bluepad32 idf::btstack)
+endif()
+
+# [deep-dog] 合入说明: CMake -DDEEP_DOG_MICROROS=ON 时强制 DEEP_DOG_MICROROS_ENABLE=1
+# 背景: board_features.h 默认关；联调靠 CMake 开关同步编译宏与链接
+if(BOARD_TYPE STREQUAL "deep-dog" AND DEEP_DOG_MICROROS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE DEEP_DOG_MICROROS_ENABLE=1)
+    # Component Manager 可能注册为 micro-ros__micro_ros_espidf_component
+    if(TARGET idf::micro_ros_espidf_component)
+        target_link_libraries(${COMPONENT_LIB} PUBLIC idf::micro_ros_espidf_component)
+    elseif(TARGET idf::micro-ros__micro_ros_espidf_component)
+        target_link_libraries(${COMPONENT_LIB} PUBLIC idf::micro-ros__micro_ros_espidf_component)
+    endif()
 endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

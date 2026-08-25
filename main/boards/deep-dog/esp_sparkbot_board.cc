@@ -7,6 +7,7 @@
 #include "config.h"
 #include "net/net_config.h"
 #include "net/deep_dog_sntp.h"
+#include "microros/microros_client.h"
 #include "mcp_server.h"
 #include "ws-mcp/ws_mcp_config.h"
 #if DEEP_DOG_WS_MCP_ENABLE
@@ -963,6 +964,9 @@ public:
                 }
             }
         }
+#if DEEP_DOG_MICROROS_ENABLE
+        DeepDogMicrorosStart();
+#endif
 #if DEEP_DOG_IMU_ENABLE
         InitializeImu();
 #endif

@@ -46,6 +46,7 @@
 | **MOT-03** | 电机 MQTT | [motor/03](./motor/03-motor-mqtt.md) · [14-motor](./mqtt/modules/14-motor.md) | MOT-01、M01 | 本轮落地 |
 | **MOT-04/05** | motor catalog + 轴样例 | [motor/04](./motor/04-handle-motor-catalog.md) · [05](./motor/05-analog-axis-sample.md) | I08b、MOT-03 | 本轮落地 |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |
+| **CE01** | micro-ROS 链路冒烟 | [cloud_edge/CE01](./cloud_edge/CE01-microros-link-smoke.md) · [`microros/`](../microros/) | WiFi STA；a3 E1/E9/E4 | **本轮**（阶段 A；默认关） |
 
 ## 依赖关系
 
@@ -58,6 +59,7 @@ M01 + modules/ ─────────────────────�
 M01 + input/ ────────────────────────────→ I-HANDLE（bt / wifi 双源；固件 planned）
 S05 ─────────────────────────────────────→ P01
 D9 (BMI270) ─────────────────────────────→ imu/status (modules/03-imu)
+WiFi STA ────────────────────────────────→ CE01 (micro-ROS Client；阶段 A)
 ```
 
 ## 视觉轨验收速查
