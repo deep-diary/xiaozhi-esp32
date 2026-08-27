@@ -29,9 +29,12 @@
 /** 入站轨迹业务处理上限（a3 臂阶段 A：50 Hz；XRCE 仍 drain 全量） */
 #define DEEP_DOG_MICROROS_TRAJ_HANDLE_PERIOD_MS 20
 
-/** Agent ping / 重连间隔 */
+/** Agent ping 参数 */
 #define DEEP_DOG_MICROROS_PING_TIMEOUT_MS 1000
 #define DEEP_DOG_MICROROS_PING_ATTEMPTS 3
+/** Agent 不可达时 ping 失败重试静默间隔（避免日志刷屏） */
+#define DEEP_DOG_MICROROS_PING_RETRY_DELAY_MS 20000
+/** session 建立失败 / 断开后的重连间隔 */
 #define DEEP_DOG_MICROROS_RECONNECT_DELAY_MS 2000
 
 #endif  // DEEP_DOG_MICROROS_CONFIG_H_

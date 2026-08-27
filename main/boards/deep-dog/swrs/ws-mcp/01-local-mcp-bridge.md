@@ -23,6 +23,8 @@
 - 开关：`DEEP_DOG_WS_MCP_ENABLE`（单电机剖面默认 **1**）
 - 默认：`8080` + `/ws`（`DEEP_DOG_HTTP_SERVER_ENABLE=0` 时不冲突）
 - MCP 响应：`RegisterMcpBroadcastCallback` → `BroadcastMessage` 到所有 WS 客户端
+- httpd 任务栈 **4096 → 3072**：重剖面（face / vision / track / microros 全开）下 internal SRAM 最大连续块可能 <4096，`httpd_start` 会报 `ESP_ERR_HTTPD_TASK` 启动失败；减栈后若仍不足，需关闭非必要重型功能释放 internal（见 [S09](../vision/server/S09-internal-sram-optimization.md)）
+- **客户端生命周期**：`clients_`（`std::map<int, httpd_req_t*>`）不依赖 WS `CLOSE` 帧清理。异常断开（浏览器关 tab / 刷新 / HMR 直丢 socket、RST / 半开、握手中断）时 httpd 内部删 session 且**不回调** ws handler，`CLOSE` 分支覆盖不到，会产生「`clients_` 还记着、底层 socket 已失效」的僵尸 fd。故注册 `HTTP_SERVER_EVENT_DISCONNECTED` 事件（覆盖全部 session 终止路径，事件数据为 `int fd`，派发发生在 httpd `close(fd)` 之后）在源头 `clients_.erase(fd)`；`clients_` 由 `std::mutex` 保护（`BroadcastMessage` 在 MCP 回调线程、`Add/RemoveClient` 在 httpd 任务、`OnDisconnected` 在 esp_event 任务，三方并发）。`WsBroadcastSendJob` 的 `send failed` 仅 `ESP_ERR_NO_MEM` 等真错误用 `ESP_LOGW`；`ESP_ERR_INVALID_ARG`（fd 已不在 session 表，属正常竞态）降为 `ESP_LOGD`，避免刷屏。
 
 ## 入站协议
 
@@ -53,6 +55,8 @@
 - [x] `tools/list` / `tools/call` → `self.get_device_status` 经 WS 往返
 - [x] `self.camera.take_photo` 可达 MCP（摄像头未就绪时返回 error，仍证明链路）
 - [x] `self.board.get_ip` 返回当前 STA IP 与 `ws_url`（语音口述 / 手动填 Web）
+- [x] internal SRAM 不足时 httpd 栈减至 3072 仍可启动（`dog_ws_mcp` 无 `ESP_ERR_HTTPD_TASK`）
+- [ ] 浏览器进入 MCP 页后立即退出 / 刷新，异常断开不再出现 `broadcast send failed fd=xx err=258` 刷屏，`client disconnected` 与 `client connected` 计数对称
 - [ ] deep-trace 前端 WS 连接模式（Device 模块页 PoC 面板）
 
 ## 非目标（PoC）

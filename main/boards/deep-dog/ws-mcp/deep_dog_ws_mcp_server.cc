@@ -7,6 +7,7 @@
 
 #include <cJSON.h>
 #include <esp_heap_caps.h>
+#include <esp_event.h>
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 static const char* TAG = "dog_ws_mcp";
 
@@ -88,6 +90,8 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
     config.server_port = port_;
     config.max_open_sockets = 7;
     config.ctrl_port = 32770;
+    // 默认栈 4096 在重剖面 internal 紧张时（最大连续块 <4096）会 ESP_ERR_HTTPD_TASK；减至 3072
+    config.stack_size = 3072;
 
     httpd_uri_t ws_uri = {
         .uri = DEEP_DOG_WS_MCP_PATH,
@@ -123,6 +127,13 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
         return false;
     }
 
+    // 注册断连事件：覆盖异常断开（RST/半开/握手中断）等 ws handler 收不到 CLOSE 帧的路径，
+    // 从源头清理 clients_ 里的僵尸 fd（见 swrs/ws-mcp/01-local-mcp-bridge.md §客户端生命周期）。
+    if (esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_DISCONNECTED,
+                                   &DeepDogWsMcpServer::OnDisconnected, this) != ESP_OK) {
+        ESP_LOGW(TAG, "register HTTP_SERVER_EVENT_DISCONNECTED failed");
+    }
+
     {
         const std::string ip = WifiManager::GetInstance().GetIpAddress();
         ESP_LOGI(TAG, "WS MCP bridge ws://%s:%u%s (generic McpServer::ParseMessage)",
@@ -134,9 +145,14 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
 
 void DeepDogWsMcpServer::Stop() {
     if (server_handle_) {
+        esp_event_handler_unregister(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_DISCONNECTED,
+                                     &DeepDogWsMcpServer::OnDisconnected);
         httpd_stop(server_handle_);
         server_handle_ = nullptr;
-        clients_.clear();
+        {
+            std::lock_guard<std::mutex> lock(clients_mu_);
+            clients_.clear();
+        }
         ESP_LOGI(TAG, "WS MCP server stopped");
     }
 }
@@ -190,19 +206,37 @@ void DeepDogWsMcpServer::HandleMessage(httpd_req_t* req, const char* data, size_
 
 void DeepDogWsMcpServer::AddClient(httpd_req_t* req) {
     const int sock_fd = httpd_req_to_sockfd(req);
+    std::lock_guard<std::mutex> lock(clients_mu_);
     if (clients_.find(sock_fd) == clients_.end()) {
         clients_[sock_fd] = req;
-        ESP_LOGI(TAG, "client connected fd=%d total=%zu", sock_fd, clients_.size());
+        ESP_LOGI(TAG, "client connected fd=%d total=%u", sock_fd, (unsigned)clients_.size());
     }
 }
 
 void DeepDogWsMcpServer::RemoveClient(httpd_req_t* req) {
     const int sock_fd = httpd_req_to_sockfd(req);
-    clients_.erase(sock_fd);
-    ESP_LOGI(TAG, "client disconnected fd=%d total=%zu", sock_fd, clients_.size());
+    RemoveClientByFd(sock_fd);
+}
+
+void DeepDogWsMcpServer::RemoveClientByFd(int sock_fd) {
+    std::lock_guard<std::mutex> lock(clients_mu_);
+    if (clients_.erase(sock_fd) > 0) {
+        ESP_LOGI(TAG, "client disconnected fd=%d total=%u", sock_fd, (unsigned)clients_.size());
+    }
+}
+
+void DeepDogWsMcpServer::OnDisconnected(void* arg, esp_event_base_t base, int32_t id, void* data) {
+    (void)base;
+    (void)id;
+    auto* self = static_cast<DeepDogWsMcpServer*>(arg);
+    if (self == nullptr || data == nullptr) {
+        return;
+    }
+    self->RemoveClientByFd(*static_cast<int*>(data));
 }
 
 size_t DeepDogWsMcpServer::GetClientCount() const {
+    std::lock_guard<std::mutex> lock(clients_mu_);
     return clients_.size();
 }
 
@@ -223,19 +257,37 @@ static void WsBroadcastSendJob(void* arg) {
 
     const esp_err_t ret = httpd_ws_send_frame_async(job->server, job->fd, &ws_pkt);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "broadcast send failed fd=%d err=%d", job->fd, ret);
+        // ESP_ERR_INVALID_ARG = fd 已不在 httpd session 表（客户端刚断开，属正常竞态），降级不刷屏；
+        // 其余（如 ESP_ERR_NO_MEM）才值得告警。
+        if (ret == ESP_ERR_INVALID_ARG) {
+            ESP_LOGD(TAG, "broadcast skip fd=%d (client gone)", job->fd);
+        } else {
+            ESP_LOGW(TAG, "broadcast send failed fd=%d err=%d", job->fd, ret);
+        }
     }
     free(job->payload);
     free(job);
 }
 
 void DeepDogWsMcpServer::BroadcastMessage(const std::string& message) {
-    if (!server_handle_ || clients_.empty()) {
+    if (!server_handle_) {
         return;
     }
 
-    for (const auto& [fd, _req] : clients_) {
-        (void)_req;
+    std::vector<int> fds;
+    {
+        std::lock_guard<std::mutex> lock(clients_mu_);
+        if (clients_.empty()) {
+            return;
+        }
+        fds.reserve(clients_.size());
+        for (const auto& [fd, _req] : clients_) {
+            (void)_req;
+            fds.push_back(fd);
+        }
+    }
+
+    for (int fd : fds) {
         WsBroadcastJob* job = static_cast<WsBroadcastJob*>(malloc(sizeof(WsBroadcastJob)));
         if (!job) {
             continue;

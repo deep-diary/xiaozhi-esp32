@@ -2,6 +2,7 @@
 
 #include "face_ai_config.h"
 #include "vision/vision_config.h"
+#include "microros/microros_config.h"
 
 #include <cJSON.h>
 #include <esp_heap_caps.h>
@@ -57,6 +58,7 @@ const StackHint* LookupStackHint(const char* name) {
         {"mqtt_task", 6144, "internal"},
         {"touch_btn_task", 4096, "internal"},
         {"esp_timer", 4096, "internal"},
+        {"uros_ce01", DEEP_DOG_MICROROS_TASK_STACK, "psram"},
     };
     for (const auto& h : hints) {
         if (strcmp(h.name, name) == 0) {

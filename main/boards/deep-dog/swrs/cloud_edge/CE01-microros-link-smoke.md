@@ -37,6 +37,7 @@ L1_joint, L2_joint, L3_joint, L4_joint, L5_joint, L6_joint, L7_joint
 ## 实现约束
 
 - 建链前探测 Agent **必须**用 `rmw_uros_ping_agent_options`，并把 menuconfig 的 Agent IP/端口写入 `rmw_init_options`。裸 `rmw_uros_ping_agent()` 会打到 libmicroros 编译期默认 **`127.0.0.1:8888`**，真机永远连不上实验室 Agent。
+- **Agent 不可达时的 ping 重试静默间隔**：`DEEP_DOG_MICROROS_PING_RETRY_DELAY_MS` 默认 **20000ms**（ping 3 次共 ~3s 后静默 20s 再试）。避免 Agent 长期离线时 `Agent ping failed` 日志刷屏；`DEEP_DOG_MICROROS_RECONNECT_DELAY_MS`（2000ms）仅用于 session 建立失败 / 断开后的快速重试，二者语义分离。
 - 勿调用 `uros_network_interface_initialize()`（会另起一套 STA，与板级 WifiBoard / NVS 配网冲突）。STA 已获 IP 后再 `DeepDogMicrorosStart()`。
 - Session 已建立后**禁止**再调无 options 的 `rmw_uros_ping_agent()`：它仍走 libmicroros 默认 `127.0.0.1`，会在 Agent 实际在线时误拆 session。保活改为连续 `rcl_publish` 失败再重连；Agent 重启后由外层 `ping_agent_options` 重建。
 - `/joint_states` @ 50 Hz 与轨迹订阅均用 **BEST_EFFORT**。JointState 默认 RELIABLE 会打满 XRCE 输出历史；轨迹若 RELIABLE，实验室 `ros2 topic pub` 能在 DDS 图上匹配到 `deep_dog_microros`，但 XRCE inbound 常无回调（与 `motor_protocol_node` 的 BE 订阅不一致）。
@@ -45,6 +46,7 @@ L1_joint, L2_joint, L3_joint, L4_joint, L5_joint, L6_joint, L7_joint
 - 冒烟前停掉会抢同话题的杂节点（如 `microros_mock_client`）；勿再按四足/`trotbot`/`CHAMP` 联调假设验收。
 - 关 `VISION_HUB`/`FACE_AI` 时跳过 `InitializeCamera()`，**不得**把板级 MQTT 构造绑在该函数里（否则 `board_mqtt_` 为空，broker 无客户端）。
 - 固件回调必须节流日志；验收看到 `traj n=` 即通过。用 7 关节测试帧时看 `joint_names=7` / `pos0=0.5`。
+- **任务栈放 PSRAM**：`uros_ce01`（16KB）用 `xTaskCreateStaticPinnedToCore` + `heap_caps_malloc(MALLOC_CAP_SPIRAM)` 栈 + internal TCB，不再占 internal SRAM（micro-ROS 路径仅 UDP + XRCE 序列化，无 flash 写，PSRAM 栈安全）。PSRAM 分配失败时回退 internal 动态栈。
 
 ## 边界（阶段 A 不做）
 

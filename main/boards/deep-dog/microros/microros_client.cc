@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -31,6 +32,8 @@ static const char* kJointNames[DEEP_DOG_MICROROS_JOINT_COUNT] = {
 };
 
 static TaskHandle_t s_task = nullptr;
+static StackType_t* s_task_stack = nullptr;
+static StaticTask_t* s_task_tcb = nullptr;
 static SemaphoreHandle_t s_pos_mu = nullptr;
 static double s_mock_pos[DEEP_DOG_MICROROS_JOINT_COUNT] = {};
 
@@ -307,8 +310,8 @@ static void MicrorosTask(void* /*arg*/) {
         ESP_LOGI(TAG, "waiting for Agent ping...");
         while (!PingAgentWithConfiguredAddress(DEEP_DOG_MICROROS_PING_TIMEOUT_MS,
                                                DEEP_DOG_MICROROS_PING_ATTEMPTS)) {
-            ESP_LOGW(TAG, "Agent ping failed; retry in %d ms", DEEP_DOG_MICROROS_RECONNECT_DELAY_MS);
-            vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_MICROROS_RECONNECT_DELAY_MS));
+            ESP_LOGW(TAG, "Agent ping failed; retry in %d ms", DEEP_DOG_MICROROS_PING_RETRY_DELAY_MS);
+            vTaskDelay(pdMS_TO_TICKS(DEEP_DOG_MICROROS_PING_RETRY_DELAY_MS));
         }
         ESP_LOGI(TAG, "Agent reachable, creating session");
 
@@ -336,13 +339,51 @@ void DeepDogMicrorosStart(void) {
     if (s_task != nullptr) {
         return;
     }
+
+#if defined(CONFIG_SPIRAM)
+    // 栈放 PSRAM、TCB 放 internal：16KB 栈不再占 internal（重剖面下 internal 紧张，见 CE01 §联调剖面）。
+    // micro-ROS 路径仅 UDP + XRCE 序列化，无 flash 写，PSRAM 栈安全。失败回退 internal 动态栈。
+    if (s_task_stack == nullptr) {
+        s_task_stack = static_cast<StackType_t*>(
+            heap_caps_malloc(DEEP_DOG_MICROROS_TASK_STACK, MALLOC_CAP_SPIRAM));
+    }
+    if (s_task_tcb == nullptr) {
+        s_task_tcb = static_cast<StaticTask_t*>(
+            heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL));
+    }
+    if (s_task_stack != nullptr && s_task_tcb != nullptr) {
+        s_task = xTaskCreateStaticPinnedToCore(MicrorosTask, "uros_ce01", DEEP_DOG_MICROROS_TASK_STACK,
+                                               nullptr, DEEP_DOG_MICROROS_TASK_PRIO,
+                                               s_task_stack, s_task_tcb, 1);
+        if (s_task != nullptr) {
+            ESP_LOGI(TAG, "uros task created (PSRAM stack)");
+            return;
+        }
+        ESP_LOGW(TAG, "xTaskCreateStaticPinnedToCore failed; fallback internal");
+        heap_caps_free(s_task_stack);
+        s_task_stack = nullptr;
+        heap_caps_free(s_task_tcb);
+        s_task_tcb = nullptr;
+    } else {
+        if (s_task_stack != nullptr) {
+            heap_caps_free(s_task_stack);
+            s_task_stack = nullptr;
+        }
+        if (s_task_tcb != nullptr) {
+            heap_caps_free(s_task_tcb);
+            s_task_tcb = nullptr;
+        }
+        ESP_LOGW(TAG, "PSRAM static task alloc failed; fallback internal");
+    }
+#endif
+
     BaseType_t ok = xTaskCreatePinnedToCore(MicrorosTask, "uros_ce01", DEEP_DOG_MICROROS_TASK_STACK,
                                             nullptr, DEEP_DOG_MICROROS_TASK_PRIO, &s_task, 1);
     if (ok != pdPASS) {
         ESP_LOGE(TAG, "xTaskCreate failed");
         s_task = nullptr;
     } else {
-        ESP_LOGI(TAG, "uros task created");
+        ESP_LOGI(TAG, "uros task created (internal fallback)");
     }
 }
 

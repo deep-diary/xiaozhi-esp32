@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <map>
+#include <mutex>
 #include <string>
 
 /**
@@ -32,14 +33,17 @@ public:
 
 private:
     static esp_err_t WsHandler(httpd_req_t* req);
+    static void OnDisconnected(void* arg, esp_event_base_t base, int32_t id, void* data);
 
     void HandleMessage(httpd_req_t* req, const char* data, size_t len);
     void AddClient(httpd_req_t* req);
     void RemoveClient(httpd_req_t* req);
+    void RemoveClientByFd(int sock_fd);
 
     httpd_handle_t server_handle_ = nullptr;
     uint16_t port_ = DEEP_DOG_WS_MCP_PORT;
     std::map<int, httpd_req_t*> clients_;
+    mutable std::mutex clients_mu_;
 
     static DeepDogWsMcpServer* instance_;
 };
