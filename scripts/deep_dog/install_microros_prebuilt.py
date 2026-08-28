@@ -24,11 +24,14 @@ ARTIFACTS = ("libmicroros.a", "include", "include_override")
 
 
 def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    """Hash a text file after normalizing line endings (CRLF/CR -> LF).
+
+    The prebuilt MANIFEST records the LF-form sha256 produced on Mac/Linux;
+    Windows checkouts with core.autocrlf=true expand to CRLF, so raw-hash
+    would mismatch for an otherwise identical file.
+    """
+    raw = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def load_manifest(profile_dir: Path) -> dict:

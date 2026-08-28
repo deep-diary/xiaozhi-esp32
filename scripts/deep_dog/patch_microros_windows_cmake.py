@@ -50,7 +50,7 @@ endif()"""
 
 new_exec = """# [deep-dog] Windows: build libmicroros via WSL (native Gnu make path breaks).
 # See scripts/deep_dog/wsl_build_libmicroros.sh — re-run this patch after component manager update.
-if(WIN32)
+if(CMAKE_HOST_WIN32)
     set(_UROS_LIB "${COMPONENT_DIR}/libmicroros.a")
     if(NOT EXISTS "${_UROS_LIB}")
         message(STATUS "[deep-dog] libmicroros.a missing; invoking WSL build (first run is long)")

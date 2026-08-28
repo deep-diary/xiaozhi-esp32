@@ -1,6 +1,6 @@
 # deep-dog CE01: on Windows, build libmicroros via WSL if missing (native make path breaks).
 # Upstream: managed_components/micro-ros__micro_ros_espidf_component/CMakeLists.txt
-if(WIN32)
+if(CMAKE_HOST_WIN32)
     set(_UROS_LIB "${COMPONENT_DIR}/libmicroros.a")
     if(NOT EXISTS "${_UROS_LIB}")
         message(STATUS "[deep-dog] libmicroros.a missing; invoking WSL build script (first run is long)")

@@ -20,17 +20,9 @@ if(DEEP_DOG_MICROROS)
             "Run: idf.py add-dependency \"micro-ros/micro_ros_espidf_component>=22.0.0,<23.0.0\" "
             "(or scripts/deep_dog/deep_dog_fetch_microros.sh). See main/boards/deep-dog/microros/README.md")
     endif()
-    # Keep component out of main/idf_component.yml so default builds skip libmicroros.
-    # Component Manager still places it under managed_components after add-dependency.
-    # EXTRA_COMPONENT_DIRS parent so IDF finds it without a yml entry (else ENABLE=1 but no rcl headers).
-    set(_DD_UROS_EXTRA "${CMAKE_CURRENT_LIST_DIR}/main/boards/deep-dog/microros/idf_extra")
-    file(MAKE_DIRECTORY "${_DD_UROS_EXTRA}")
-    if(NOT EXISTS "${_DD_UROS_EXTRA}/micro-ros__micro_ros_espidf_component")
-        file(CREATE_LINK "${DEEP_DOG_MICROROS_COMP}"
-            "${_DD_UROS_EXTRA}/micro-ros__micro_ros_espidf_component"
-            SYMBOLIC)
-    endif()
-    list(APPEND EXTRA_COMPONENT_DIRS "${_DD_UROS_EXTRA}")
+    # 组件由 main/idf_component.yml（idf.py add-dependency）纳入 Component Manager，
+    # 会自动加入 build components；此处不再用 EXTRA_COMPONENT_DIRS + 符号链接发现它。
+    # （Windows 无管理员权限建 SYMBOLIC 链接会失败，且与 yml 声明重复。）
     message(STATUS "[deep-dog] micro-ROS component at ${DEEP_DOG_MICROROS_COMP}")
 endif()
 if(DEEP_DOG_HANDLE_BT)
