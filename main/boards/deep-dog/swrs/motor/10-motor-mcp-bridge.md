@@ -9,7 +9,9 @@
 
 ## 目标
 
-电机调试页可列出并执行 `self.motor.*` / `self.can.*` MCP 工具（含参数），无需语音通道。
+电机调试页可列出并执行 `self.motor.*` MCP 工具（含参数），无需语音通道。
+
+> MOT-14 起电机语义工具统一为 `self.motor.*`（原 `self.can.*` 5 个工具已改名，见 [MOT-14](./14-motor-mcp-tools.md)）；mcp_call 白名单同步收窄为仅 `self.motor.*`。
 
 ## Topic
 
@@ -28,6 +30,6 @@
 
 ## 验收
 
-- [ ] 连 broker 后 retain 收到 `motor/tools`，含 `self.motor.initialize` 等
-- [ ] `motor/cmd` 发 `mcp_call` 后收到 `motor/mcp_result`
+- [ ] 连 broker 后 retain 收到 `motor/tools`，含 `self.motor.initialize` 等，不含 `self.can.*`
+- [ ] `motor/cmd` 发 `mcp_call` 后收到 `motor/mcp_result`；旧名 `self.can.*` 返回 not allowed
 - [ ] 与 `motor/status` 位置点动不冲突

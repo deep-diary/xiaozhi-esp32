@@ -860,7 +860,7 @@ public:
         InitializeCan();
 #endif
 #if DEEP_DOG_MOTOR_ENABLE
-        deep_motor_ = new DeepMotor(nullptr);
+        deep_motor_ = new DeepMotor();
         DeepDogMotorSet(deep_motor_);
 #if DEEP_DOG_MQTT_ENABLE
         if (board_mqtt_) {

@@ -41,7 +41,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `motor_id` | int | 是 | 1～255 |
+| `motor_id` | int | 否 | 1～255；**缺省或 0 = 当前活跃电机**（MOT-14 粘性默认电机，无活跃电机时该 cmd 被忽略）；显式 >0 注册成功后置为活跃电机 |
 | `enable` | bool | 否 | `true`→initialize/enable；`false`→reset |
 | `reset` | bool | 否 | `true`→resetMotor |
 | `position_rad` | float | 否 | 位置参考，钳位 ±12.57 |
@@ -57,7 +57,7 @@
 | `play_time_scale` | float | 否 | 时间轴缩放，默认 1.0（2.0=两倍慢） |
 | `play_use_timeline` | bool | 否 | 是否按录制 `t_ms` 播放，默认 true |
 | `play_kp` / `play_kd` / `play_tau_ff` | float | 否 | MIT 增益，默认 1/1/0 |
-| `mcp_call` | object | 否 | `{ name, arguments }` 执行 `self.motor.*` / `self.can.*` 工具（MOT-10） |
+| `mcp_call` | object | 否 | `{ name, arguments }` 执行 `self.motor.*` 工具（MOT-10；MOT-14 起白名单仅 `self.motor.*`，工具清单见 [MOT-14](../../motor/14-motor-mcp-tools.md)） |
 | `ts` | int | 否 | Unix 秒 |
 
 ### `motor/status`
@@ -65,11 +65,12 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `ok` | bool | 栈就绪 |
+| `active_id` | int | 当前活跃（默认）电机 ID，-1 = 无（MOT-14 粘性默认电机） |
 | `motors` | array | 已注册电机快照 |
 | `motors[].id` | int | motor_id |
 | `motors[].can_id` | int | CAN 总线地址（同 `id`） |
 | `motors[].init_state` | string | `none` / `initializing` / `ready` / `failed`（MOT-09） |
-| `motors[].motor_enabled` | bool | 固件侧 enable/reset 意图（`self.can.enable_motor` 仅 CAN 使能，**不切换** `run_mode`；init 成功后也为 true） |
+| `motors[].motor_enabled` | bool | 固件侧 enable/reset 意图（`self.motor.enable` 仅 CAN 使能，**不切换** `run_mode`；init 成功后也为 true） |
 | `motors[].run_mode` | string | `mit` / `position` / `speed` / `current`（下发后更新） |
 | `motors[].drive_state` | string | 反馈帧驱动状态：`reset` / `calibrate` / `run` |
 | `motors[].teaching_recording` | bool | 该电机是否正在示教录制（详情见 `motor/teaching/status`） |
@@ -111,6 +112,7 @@ stop 录制后发布：`motor_id`, `point_count`, `duration_ms`, `sample_period_
 ```json
 {
   "ok": true,
+  "active_id": 1,
   "motors": [
     {
       "id": 1,
@@ -143,3 +145,4 @@ stop 录制后发布：`motor_id`, `point_count`, `duration_ms`, `sample_period_
 - [ ] 无 capability 隐藏入口卡
 - [ ] 使能后 status 有反馈（或超时仍可发位置）
 - [ ] 与 can 透传页并存不冲突
+- [ ] 显式 `motor_id` 控制后 `status.active_id` 跟随；省略/0 的 cmd 作用于活跃电机（MOT-14）

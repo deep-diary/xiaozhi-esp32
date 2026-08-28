@@ -321,8 +321,7 @@ bool DeepDogMotorMqtt::PublishTools() {
     cJSON* root = cJSON_CreateObject();
     cJSON* tools = cJSON_AddArrayToObject(root, "tools");
     auto& mcp = McpServer::GetInstance();
-    mcp.AppendToolsToJsonArray(tools, "self.motor.");
-    mcp.AppendToolsToJsonArray(tools, "self.can.");
+    mcp.AppendToolsToJsonArray(tools, "self.motor.");  // MOT-14：电机工具统一 self.motor.*
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
     char* s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -380,6 +379,8 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
     DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", motor != nullptr);
+    // MOT-14：粘性默认电机（-1 = 无活跃电机）
+    cJSON_AddNumberToObject(root, "active_id", motor ? motor->getActiveMotorId() : -1);
     cJSON* arr = cJSON_AddArrayToObject(root, "motors");
     if (motor) {
         int8_t ids[MAX_MOTOR_COUNT];
@@ -486,14 +487,13 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
         if (cJSON_IsString(name_j)) {
             const char* tool_name = name_j->valuestring;
             const cJSON* tool_args = cJSON_IsObject(args_j) ? args_j : nullptr;
-            if (tool_name && (strncmp(tool_name, "self.motor.", 11) == 0 ||
-                              strncmp(tool_name, "self.can.", 9) == 0)) {
+            if (tool_name && strncmp(tool_name, "self.motor.", 11) == 0) {
                 auto result = McpServer::GetInstance().InvokeToolSync(tool_name, tool_args);
                 PublishMcpResult(tool_name, result.ok, result.result_json.c_str(),
                                  result.error_message.c_str());
                 ESP_LOGI(TAG, "mcp_call %s ok=%d", tool_name, result.ok ? 1 : 0);
             } else {
-                PublishMcpResult(tool_name ? tool_name : "", false, nullptr, "tool not allowed (motor/can only)");
+                PublishMcpResult(tool_name ? tool_name : "", false, nullptr, "tool not allowed (motor only)");
             }
         }
         cJSON_Delete(root);
@@ -501,17 +501,22 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
         return;
     }
 
+    // MOT-14 粘性默认电机：motor_id 缺省/0 = 当前活跃电机；显式 >0 注册后置为活跃
     const cJSON* id_j = cJSON_GetObjectItem(root, "motor_id");
-    if (!cJSON_IsNumber(id_j)) {
-        cJSON_Delete(root);
-        return;
+    uint8_t motor_id = 0;
+    if (cJSON_IsNumber(id_j) && id_j->valueint > 0) {
+        motor_id = static_cast<uint8_t>(id_j->valueint);
+        EnsureMotorRegistered(motor, motor_id);
+        (void)motor->setActiveMotorId(motor_id);
+    } else {
+        const int8_t active = motor->getActiveMotorId();
+        if (active <= 0) {
+            ESP_LOGW(TAG, "motor/cmd 无 motor_id 且当前无活跃电机，忽略");
+            cJSON_Delete(root);
+            return;
+        }
+        motor_id = static_cast<uint8_t>(active);
     }
-    const uint8_t motor_id = static_cast<uint8_t>(id_j->valueint);
-    if (motor_id == 0) {
-        cJSON_Delete(root);
-        return;
-    }
-    EnsureMotorRegistered(motor, motor_id);
 
     const cJSON* reset = cJSON_GetObjectItem(root, "reset");
     if (cJSON_IsTrue(reset)) {

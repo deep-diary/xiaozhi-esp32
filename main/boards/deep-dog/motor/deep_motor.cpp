@@ -91,9 +91,9 @@ static inline bool motorNearlyEqual(float a, float b, float eps) {
     return fabsf(a - b) <= eps;
 }
 
-DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registered_count_(0),
+DeepMotor::DeepMotor() : active_motor_id_(-1), registered_count_(0),
                          teaching_(this),
-                         init_status_task_handle_(nullptr), led_state_manager_(nullptr) {
+                         init_status_task_handle_(nullptr) {
     // 初始化所有电机ID为未注册状态
     for (int i = 0; i < MAX_MOTOR_COUNT; i++) {
         registered_motor_ids_[i] = MOTOR_ID_UNREGISTERED;
@@ -119,21 +119,7 @@ DeepMotor::DeepMotor(CircularStrip* led_strip) : active_motor_id_(-1), registere
     discovery_user_data_ = nullptr;
     status_notify_callback_ = nullptr;
     status_notify_user_data_ = nullptr;
-    
-    // 初始化LED状态管理器
-    if (led_strip != nullptr) {
-        led_state_manager_ = new DeepMotorLedState(led_strip, this);
-        ESP_LOGI(TAG, "LED状态管理器初始化完成");
-        
-        // 自动启用所有电机的角度指示器（默认启用）
-        for (uint8_t motor_id = 1; motor_id <= 6; motor_id++) {
-            led_state_manager_->EnableAngleIndicator(motor_id, true);
-        }
-        ESP_LOGI(TAG, "已自动启用所有电机角度指示器（电机ID: 1-6）");
-    } else {
-        ESP_LOGI(TAG, "LED功能未启用（led_strip为nullptr）");
-    }
-    
+
     ESP_LOGI(TAG, "深度电机管理器初始化完成，最大支持 %d 个电机；init_async=%d",
              MAX_MOTOR_COUNT, DEEP_DOG_MOTOR_INIT_ASYNC);
 }
@@ -153,13 +139,7 @@ DeepMotor::~DeepMotor() {
         }
         active_report_refcount_[i] = 0;
     }
-    
-    // 清理LED状态管理器
-    if (led_state_manager_ != nullptr) {
-        delete led_state_manager_;
-        led_state_manager_ = nullptr;
-    }
-    
+
     ESP_LOGI(TAG, "深度电机管理器析构");
 }
 
@@ -195,9 +175,6 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
             }
             motor_index = findMotorIndex(motor_id);
             ESP_LOGI(TAG, "扫描发现电机 ID=%d，当前已注册 %d 个电机", motor_id, registered_count_);
-            if (led_state_manager_) {
-                led_state_manager_->EnableAngleIndicator(motor_id, true);
-            }
         }
 
         motor_statuses_[motor_index].mcu_uid = parsed.mcu_uid;
@@ -233,19 +210,12 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
         }
         motor_index = findMotorIndex(motor_id);
         ESP_LOGI(TAG, "新注册电机ID: %d，当前已注册 %d 个电机", motor_id, registered_count_);
-        
-        // 新电机注册时自动启用角度指示器
-        if (led_state_manager_) {
-            led_state_manager_->EnableAngleIndicator(motor_id, true);
-            ESP_LOGI(TAG, "自动启用新注册电机%d的角度指示器", motor_id);
-        }
     }
-    
-    
+
     // 解析电机状态数据
     MotorProtocol::parseMotorData(can_frame, &motor_statuses_[motor_index]);
 
-    // 状态帧（类型 2 / 24）更新反馈计数与 LED 等（版本应答 00 C4 56 除外）
+    // 状态帧（类型 2 / 24）更新反馈计数等（版本应答 00 C4 56 除外）
     const bool is_status_frame =
         (cmd_type == MOTOR_CMD_FEEDBACK || cmd_type == MOTOR_CMD_ACTIVE_REPORT) &&
         !MotorProtocol::isSoftwareVersionResponse(can_frame);
@@ -275,30 +245,11 @@ bool DeepMotor::processCanFrame(const CanFrame& can_frame) {
             }
         }
 
-        // 更新活跃电机ID为当前收到数据的电机
-        active_motor_id_ = motor_id;
-        
         // 示教录制：存 (t, pos, vel)
         if (teaching_.isTeachingMode()) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
             teaching_.onFeedback(motor_id, motor_statuses_[motor_index].current_angle,
                                  motor_statuses_[motor_index].current_speed, now_ms);
-        }
-        
-        // 更新LED状态显示
-        if (led_state_manager_) {
-            DeepMotorLedState::MotorAngleState led_state;
-            led_state.current_angle = motor_statuses_[motor_index].current_angle;
-            led_state.target_angle = motor_target_angles_[motor_index]; // 使用真实的目标位置
-            led_state.is_moving = (motor_statuses_[motor_index].current_speed != 0.0f);
-            led_state.is_error = (motor_statuses_[motor_index].error_status != 0);
-            led_state.valid_range = {0.0f, 0.0f, false}; // 默认无效范围
-            
-            ESP_LOGD(TAG, "更新电机%d LED状态: 角度=%.3f rad (%.1f°), 移动=%s, 错误=%s", motor_id,
-                     led_state.current_angle, led_state.current_angle * 180.0f / 3.14159f,
-                     led_state.is_moving ? "是" : "否", led_state.is_error ? "是" : "否");
-            
-            led_state_manager_->SetMotorAngleState(motor_id, led_state);
         }
 
         pollAsyncInitCompletion(motor_index, motor_id);
@@ -797,130 +748,6 @@ void DeepMotor::setMotorDataCallback(MotorDataCallback callback, void* user_data
     data_callback_ = callback;
     callback_user_data_ = user_data;
     ESP_LOGI(TAG, "电机数据回调函数设置完成");
-}
-
-// ========== LED控制接口实现 ==========
-
-bool DeepMotor::enableAngleIndicator(uint8_t motor_id, bool enabled) {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return false;
-    }
-    
-    if (!isMotorRegistered(motor_id)) {
-        ESP_LOGW(TAG, "电机ID %d 未注册", motor_id);
-        return false;
-    }
-    
-    led_state_manager_->EnableAngleIndicator(motor_id, enabled);
-    ESP_LOGI(TAG, "%s电机%d角度指示器", enabled ? "启用" : "禁用", motor_id);
-    return true;
-}
-
-bool DeepMotor::disableAngleIndicator(uint8_t motor_id) {
-    return enableAngleIndicator(motor_id, false);
-}
-
-bool DeepMotor::setAngleRange(uint8_t motor_id, float min_angle, float max_angle) {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return false;
-    }
-    
-    if (!isMotorRegistered(motor_id)) {
-        ESP_LOGW(TAG, "电机ID %d 未注册", motor_id);
-        return false;
-    }
-    
-    led_state_manager_->SetAngleRange(motor_id, min_angle, max_angle);
-    ESP_LOGI(TAG, "设置电机%d角度范围: [%.2f, %.2f] rad", motor_id, min_angle, max_angle);
-    return true;
-}
-
-DeepMotorLedState::MotorAngleState DeepMotor::getAngleStatus(uint8_t motor_id) const {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return {0.0f, 0.0f, false, false, {0.0f, 0.0f, false}};
-    }
-    
-    return led_state_manager_->GetMotorAngleState(motor_id);
-}
-
-DeepMotorLedState::AngleRange DeepMotor::getAngleRange(uint8_t motor_id) const {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return {0.0f, 0.0f, false};
-    }
-    
-    return led_state_manager_->GetAngleRange(motor_id);
-}
-
-bool DeepMotor::isAngleIndicatorEnabled(uint8_t motor_id) const {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return false;
-    }
-    
-    return led_state_manager_->IsAngleIndicatorEnabled(motor_id);
-}
-
-void DeepMotor::stopAllAngleIndicators() {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return;
-    }
-    
-    led_state_manager_->StopCurrentEffect();
-    ESP_LOGI(TAG, "停止所有角度指示器");
-}
-
-DeepMotorLedState* DeepMotor::getLedStateManager() const {
-    return led_state_manager_;
-}
-
-// ========== 呼吸灯控制接口实现 ==========
-
-bool DeepMotor::enableBreatheEffect(uint8_t motor_id, uint8_t red, uint8_t green, uint8_t blue) {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return false;
-    }
-    
-    StripColor color = {red, green, blue};
-    bool result = led_state_manager_->EnableBreatheEffect(motor_id, color);
-    
-    if (result) {
-        ESP_LOGI(TAG, "启用电机%d呼吸灯效果成功", motor_id);
-    } else {
-        ESP_LOGW(TAG, "启用电机%d呼吸灯效果失败", motor_id);
-    }
-    
-    return result;
-}
-
-bool DeepMotor::disableBreatheEffect(uint8_t motor_id) {
-    if (!led_state_manager_) {
-        ESP_LOGW(TAG, "LED状态管理器未初始化");
-        return false;
-    }
-    
-    bool result = led_state_manager_->DisableBreatheEffect(motor_id);
-    
-    if (result) {
-        ESP_LOGI(TAG, "禁用电机%d呼吸灯效果成功", motor_id);
-    } else {
-        ESP_LOGW(TAG, "禁用电机%d呼吸灯效果失败", motor_id);
-    }
-    
-    return result;
-}
-
-bool DeepMotor::isBreatheEffectEnabled(uint8_t motor_id) const {
-    if (!led_state_manager_) {
-        return false;
-    }
-    
-    return led_state_manager_->IsBreatheEffectEnabled(motor_id);
 }
 
 // ========== 软件版本查询接口实现 ==========

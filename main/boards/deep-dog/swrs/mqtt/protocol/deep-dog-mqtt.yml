@@ -3,7 +3,7 @@
 
 protocol:
   id: deep-dog-mqtt
-  version: "0.1.2"
+  version: "0.1.3"  # MOT-14: motor MCP tools unified to self.motor.*, sticky active motor, angle-LED indicator removed
   product: deep-dog
   description: >
     Modular full-feature board MQTT contract. Topics are split by module;
@@ -1136,9 +1136,9 @@ topics:
     qos: 1
     retain: false
     sparse: true
-    note: "Enable/position/MIT for one motor_id; see modules/14-motor"
+    note: "Enable/position/MIT for one motor_id; see modules/14-motor. motor_id 0/omitted = active motor (MOT-14)"
     payload:
-      motor_id: { type: int, range: [1, 255] }
+      motor_id: { type: int, range: [0, 255], optional: true, note: "0 or omitted = current active (sticky) motor; explicit id becomes active after register" }
       enable: { type: bool, optional: true }
       reset: { type: bool, optional: true }
       position_rad: { type: float, optional: true, note: "clamp ±12.57" }
@@ -1172,7 +1172,7 @@ topics:
       mcp_call:
         type: object
         optional: true
-        note: "Invoke self.motor.* / self.can.* MCP tool (MOT-10)"
+        note: "Invoke self.motor.* MCP tool (MOT-10; whitelist self.motor.* only since MOT-14)"
         fields:
           name: { type: string }
           arguments: { type: object, optional: true }
@@ -1210,6 +1210,7 @@ topics:
     note: "Registered motors feedback snapshot"
     payload:
       ok: { type: bool }
+      active_id: { type: int, optional: true, note: "sticky active motor id, -1 = none (MOT-14)" }
       motors:
         type: array
         item:

@@ -45,6 +45,7 @@
 | **MOT-02** | CAN MQTT 透传 | [motor/02](./motor/02-can-mqtt.md) · [12-can](./mqtt/modules/12-can.md) | MOT-01、M01 | 本轮落地 |
 | **MOT-03** | 电机 MQTT | [motor/03](./motor/03-motor-mqtt.md) · [14-motor](./mqtt/modules/14-motor.md) | MOT-01、M01 | 本轮落地 |
 | **MOT-04/05** | motor catalog + 轴样例 | [motor/04](./motor/04-handle-motor-catalog.md) · [05](./motor/05-analog-axis-sample.md) | I08b、MOT-03 | 本轮落地 |
+| **MOT-14** | 电机 MCP 工具收敛 + 粘性默认电机 | [motor/14](./motor/14-motor-mcp-tools.md) | MOT-03、MOT-10 | 本轮落地 |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |
 | **CE01** | micro-ROS 链路冒烟 | [cloud_edge/CE01](./cloud_edge/CE01-microros-link-smoke.md) · [`microros/`](../microros/) | WiFi STA；a3 E1/E9/E4 | **本轮**（阶段 A；默认关） |
 

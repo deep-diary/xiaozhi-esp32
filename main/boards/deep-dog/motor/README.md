@@ -5,7 +5,7 @@
 本模块提供 **小米无刷关节电机** 的 CAN 协议封装与 **`DeepMotor` 多电机管理**：
 
 - **`MotorProtocol`**：静态方法组帧/发帧（位置、限速、电流、模式、使能等），解析反馈帧。
-- **`DeepMotor`**：电机注册、反馈状态缓存、**目标量与「上次成功下发」缓存**（可去重跳过相同 CAN）、录制/播放、LED 状态（可选）、与 MCP 工具对接（见 `deep_motor_control.cc`）。
+- **`DeepMotor`**：电机注册、反馈状态缓存、**目标量与「上次成功下发」缓存**（可去重跳过相同 CAN）、录制/播放、粘性默认电机（活跃 ID）、与 MCP 工具对接（见 `deep_motor_control.cc`）。
 - **不直接**在业务层操作 `ESP32Can`，统一经 `MotorProtocol::sendCanFrame` → `ESP32Can.writeFrame`。
 - 核对报文：`config.h` 中 **`DEEP_DOG_CAN_HEX_LOG`** 为 1 时，`MotorProtocol::sendCanFrame` 与板级 `CanRxTask` 以 **INFO** 打印 **CAN TX/RX** 的扩展 id、dlc、8 字节 HEX；调完改为 0。
 
@@ -17,8 +17,7 @@
 |------|------|
 | `protocol_motor.h` / `protocol_motor.cpp` | 29 位扩展帧 ID、参数索引、`initializeMotor`、`setPosition`/`setSpeed`/`controlMotor`、反馈解析 `parseMotorData`；**`setActiveReportSwitch`**（T24 主动上报）；**`sendRunModeForStatusQuery`**（旧式 RUN_MODE 触发反馈，保留兼容） |
 | `deep_motor.h` / `deep_motor.cpp` | 多电机注册表、`motor_status_t[]` 反馈、`MotorCommandCache` 下发去重、`processCanFrame`、位置/限速/IQ 下发封装 |
-| `deep_motor_control.cc` / `deep_motor_control.h` | MCP 工具注册（`self.can.*`、`self.motor.*`），供语音/调试 |
-| `deep_motor_led_state.*` | 角度 LED 指示（需灯带） |
+| `deep_motor_control.cc` / `deep_motor_control.h` | MCP 工具注册（统一 `self.motor.*`，含粘性默认电机），供语音/调试 |
 
 ---
 
@@ -51,7 +50,7 @@
 
 ### 软件目标位置
 
-- `motor_target_angles_[i]`：期望目标角（rad），用于 LED 等；`setMotorTargetAngle` / 各 `setMotor*` 会更新。
+- `motor_target_angles_[i]`：期望目标角（rad），`motor/status.target_rad` 上报用；`setMotorTargetAngle` / 各 `setMotor*` 会更新。
 
 ### 上次成功下发的指令（用于去重）
 
@@ -103,7 +102,7 @@ deep_motor->invalidateMotorCommandCache(motor_id);
 ### MCP 单电机 MIT（`deep_motor_control.cc`）
 
 - `self.motor.initialize`：`motor_id`、`max_speed`（整数 ÷10 = rad/s，默认 10 → 1 rad/s，上限 50 rad/s）→ `MotorProtocol::initializeMotor`（按编译配置初始化 MIT/位置模式），并 `registerMotor`。
-- `self.can.control_motor`：`position_x10`、`velocity_x10`、`kp_x10`、`kd_x10`、`tau_ff_x10` 均为 **整数÷10** 得 rad、rad/s、kp、kd、τ → `DeepMotor::setMotorMitCommand`（会先注册）。默认除扭矩外 **物理量 1.0**（对应 `_x10` 均为 10，`tau_ff_x10` 默认 0）。
+- `self.motor.control_mit`：`position_x10`、`velocity_x10`、`kp_x10`、`kd_x10`、`tau_ff_x10` 均为 **整数÷10** 得 rad、rad/s、kp、kd、τ → `DeepMotor::setMotorMitCommand`（会先注册）。默认除扭矩外 **物理量 1.0**（对应 `_x10` 均为 10，`tau_ff_x10` 默认 0）。
 
 底层仍可直接调 `MotorProtocol::initializeMotor`、`resetMotor` 等（如 `LegControl::init`）；建议与 `invalidateMotorCommandCache` 策略保持一致。
 
@@ -119,14 +118,23 @@ deep_motor->invalidateMotorCommandCache(motor_id);
 
 ## MCP 工具（`deep_motor_control.cc`）
 
-板级 `esp_sparkbot_board.cc` 的 `InitializeTools()` 中，**电机级 MCP 默认注释掉**（避免 MCP 工具数量过多），需要单电机调试时可取消 `RegisterMotorMcpTools(mcp_server, deep_motor_)` 的注释。
+电机 MCP 工具经 `RegisterMotorMcpTools(mcp_server, deep_motor_)` 注册，统一 **`self.motor.*`** 前缀（MOT-14 起 `self.can.*` 前缀不再用于电机语义工具；CAN 原始帧仍走 MQTT `can/cmd`）。
 
-当前文件中注册的工具包括但不限于（以代码为准）：
+**粘性默认电机**：单电机工具的 `motor_id` 默认 0、范围 [0,255]；`motor_id=0`（或 LLM 省略）= 当前活跃电机，无活跃电机时返回"请先指定电机编号"；显式 `motor_id>0` 注册成功后自动置为活跃电机。`set_active` 为显式切换入口。
 
-| 前缀 | 示例工具名 |
-|------|------------|
-| `self.can.*` | `send_motor_position`、`enable_motor`、`reset_motor` |
-| `self.motor.*` | `get_status`、`set_position_mode`、`set_zero_position`、`initialize`、`start_status_task`、`stop_status_task`、录制/播放、正弦、角度 LED、版本号等 |
+分组（以代码为准）：
+
+| 组 | 工具 |
+|----|------|
+| 总线/注册/发现 | `scan_bus`、`list`、`set_active`、`get_software_version` |
+| 状态查询 | `get_status`、`print_all`、`start_status_task`、`stop_status_task` |
+| 初始化/使能 | `initialize`、`enable`、`reset` |
+| 模式切换 | `set_control_mode`、`set_position_mode`、`set_speed_mode`、`set_current_mode`、`set_zero_position` |
+| 运动控制 | `control_mit`、`set_position`、`set_speed` |
+| 示教录制 | `start_recording`、`stop_recording`、`play_recording`、`get_recording_status` |
+| 调试信号 | `start_sin_signal`、`stop_sin_signal` |
+
+详见 [swrs/motor/14-motor-mcp-tools.md](../swrs/motor/14-motor-mcp-tools.md)。
 
 ---
 

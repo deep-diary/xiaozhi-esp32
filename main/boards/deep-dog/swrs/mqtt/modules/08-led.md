@@ -130,7 +130,7 @@ MQTT 与 MCP **共用** `LedStripControl` 快照；任一路改灯，retain `led
 | MCP | `RegisterLedMcpTools`：`self.led_strip.*` → 同一控制 API → 同步 status |
 | 应用 | `led/apps/led_app_dog`：mode=5 时默认绿呼吸 |
 
-`motor/deep_motor_led_state` 仍直接持有 `CircularStrip*`；后续应经控制层（本次未改）。
+> MOT-14 起电机角度 LED 指示器（原 `motor/deep_motor_led_state.*`）已删除：电机语义不再耦合灯带，所有灯效统一经本模块控制层。
 
 ## 验收
 

@@ -8,8 +8,6 @@
 #include "deep_motor_teaching.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "led/circular_strip.h"
-#include "deep_motor_led_state.h"
 
 /**
  * @brief 深度电机管理类 - 用于管理多个电机的状态和ID
@@ -50,7 +48,7 @@ private:
     // 电机状态数组，索引对应registered_motor_ids_中的位置
     motor_status_t motor_statuses_[MAX_MOTOR_COUNT];
     
-    // 电机目标位置（软件侧期望/用于 LED 等），索引与 registered_motor_ids_ 对齐
+    // 电机目标位置（软件侧期望，motor/status.target_rad 上报用），索引与 registered_motor_ids_ 对齐
     float motor_target_angles_[MAX_MOTOR_COUNT];
 
     // 仅在该电机初始化成功后才允许统计 max_abs_torque / collision，避免把初始化前脏反馈记入峰值
@@ -120,16 +118,9 @@ private:
     void* status_notify_user_data_;
     
     void invokeStatusNotify(uint8_t motor_id);
-    
-    // LED状态管理器
-    DeepMotorLedState* led_state_manager_;
 
 public:
-    /**
-     * @brief 构造函数
-     * @param led_strip LED灯带控制器指针，如果为nullptr则不启用LED功能
-     */
-    DeepMotor(CircularStrip* led_strip = nullptr);
+    DeepMotor();
     
     /**
      * @brief 析构函数
@@ -144,13 +135,13 @@ public:
     bool processCanFrame(const CanFrame& can_frame);
     
     /**
-     * @brief 获取当前活跃电机ID
+     * @brief 获取当前活跃（默认）电机ID（MOT-14 粘性默认电机）
      * @return 活跃电机ID，-1表示无活跃电机
      */
     int8_t getActiveMotorId() const;
-    
+
     /**
-     * @brief 设置当前活跃电机ID
+     * @brief 设置当前活跃（默认）电机ID；命令驱动，反馈帧不再隐式覆盖
      * @param motor_id 电机ID
      * @return true 成功, false 失败（电机未注册）
      */
@@ -375,90 +366,6 @@ public:
      */
     void setMotorDataCallback(MotorDataCallback callback, void* user_data = nullptr);
     
-    // ========== LED控制接口 ==========
-    
-    /**
-     * @brief 启用电机角度LED指示器
-     * @param motor_id 电机ID
-     * @param enabled 是否启用
-     * @return true 成功, false 失败
-     */
-    bool enableAngleIndicator(uint8_t motor_id, bool enabled = true);
-    
-    /**
-     * @brief 禁用电机角度LED指示器
-     * @param motor_id 电机ID
-     * @return true 成功, false 失败
-     */
-    bool disableAngleIndicator(uint8_t motor_id);
-    
-    /**
-     * @brief 设置电机角度范围
-     * @param motor_id 电机ID
-     * @param min_angle 最小角度（弧度）
-     * @param max_angle 最大角度（弧度）
-     * @return true 成功, false 失败
-     */
-    bool setAngleRange(uint8_t motor_id, float min_angle, float max_angle);
-    
-    /**
-     * @brief 获取电机角度状态
-     * @param motor_id 电机ID
-     * @return 电机角度状态
-     */
-    DeepMotorLedState::MotorAngleState getAngleStatus(uint8_t motor_id) const;
-    
-    /**
-     * @brief 获取角度范围
-     * @param motor_id 电机ID
-     * @return 角度范围
-     */
-    DeepMotorLedState::AngleRange getAngleRange(uint8_t motor_id) const;
-    
-    /**
-     * @brief 检查角度指示器是否启用
-     * @param motor_id 电机ID
-     * @return true 启用, false 未启用
-     */
-    bool isAngleIndicatorEnabled(uint8_t motor_id) const;
-    
-    /**
-     * @brief 停止所有角度指示器
-     */
-    void stopAllAngleIndicators();
-    
-    /**
-     * @brief 获取LED状态管理器指针（用于高级控制）
-     * @return LED状态管理器指针，如果未初始化则返回nullptr
-     */
-    DeepMotorLedState* getLedStateManager() const;
-
-    // ========== 呼吸灯控制接口 ==========
-    
-    /**
-     * @brief 启用电机呼吸灯效果（正弦信号时使用）
-     * @param motor_id 电机ID
-     * @param red 红色分量 (0-255)
-     * @param green 绿色分量 (0-255)
-     * @param blue 蓝色分量 (0-255)
-     * @return true 成功, false 失败
-     */
-    bool enableBreatheEffect(uint8_t motor_id, uint8_t red, uint8_t green, uint8_t blue);
-    
-    /**
-     * @brief 禁用电机呼吸灯效果
-     * @param motor_id 电机ID
-     * @return true 成功, false 失败
-     */
-    bool disableBreatheEffect(uint8_t motor_id);
-    
-    /**
-     * @brief 检查电机是否在呼吸灯模式
-     * @param motor_id 电机ID
-     * @return true 在呼吸灯模式, false 不在
-     */
-    bool isBreatheEffectEnabled(uint8_t motor_id) const;
-
     // ========== 软件版本查询接口 ==========
     
     /**

@@ -34,7 +34,7 @@ MQTT `face/cmd` 字段映射到 FaceControl；[`face_mcp.cc`](../../face_ai/face
 }
 ```
 
-白名单：`self.motor.*`、`self.can.*`。结果经 `motor/status`（或模块 status）回传。
+白名单：`self.motor.*`（MOT-14 起电机语义工具统一此前缀，`self.can.*` 不再注册电机工具；CAN 原始帧仍走 `can/cmd`）。结果经 `motor/mcp_result` 回传。
 
 ## 3. 扩展 face / stream（规划，未改 Topic 语义）
 
