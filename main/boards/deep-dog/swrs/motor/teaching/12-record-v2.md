@@ -31,6 +31,19 @@ struct TeachingSample {
 `startTeaching`：写 `PARAM_EPScan_time=0x7026` → n=9（50ms）→ `requestActiveReport`。  
 `stopTeaching`：恢复 n=1（10ms 默认）。
 
+### 2.1 MIT 查询帧兜底（老电机无 T24）
+
+老版电机固件**无 T24 主动上报**指令（`MOTOR_CMD_ACTIVE_REPORT`），仅靠 `requestActiveReport` 无法获取采样反馈。录制任务在运行期间，对每个 recording 电机每 `TEACHING_SAMPLE_RATE_MS`（50ms）发一帧 `controlMotor(id, 0, 0, 0, 0, 0)`（MIT 全 0：目标角/角速 0、kp=kd=τ=0），触发电机回一帧 `0x02` 状态反馈（角/速/矩/温）。该帧失能 + 零增益，不产生输出力矩，仅作状态查询。
+
+- 新电机：T24 主动上报与 MIT 查询帧并存，反馈可能多路到达；时间轴按 `t_ms` 插值，混叠无害。
+- 旧式 `sendRunModeForStatusQuery`（写 `PARAM_RUN_MODE` 的 SET_PARAM 帧）**不用于**示教采样。
+
+### 2.2 前导毛刺剔除
+
+`beginRecordSession` 先 `resetMotor`（失能）再 `recording=true`。失能/上电后首帧反馈 `raw_a≈0`，解码为 `P_MIN(-12.57)`，会被记入 `samples[0]`，导致播放 Phase A（当前角 → 首点插值）把电机拉到量程下限。
+
+`stopTeaching` / `endRecordSession` 结束时，按「开头若干点贴量程下限（`≤ -12.0`）+ 首个离开点跳变 `> 3.0 rad`」判定并剔除前导毛刺点，`t_ms` 重新对齐；真实停在量程下限附近不受影响。
+
 ## 3. 播放 · 真实时间轴
 
 | 参数 | 默认 | 说明 |
@@ -84,3 +97,5 @@ MQTT `motor/cmd` 增：`play_time_scale`、`sample_period_ms`（start 时可选�
 - [ ] 播放按真实时间轴 × time_scale
 - [ ] stop 后 EPScan 恢复；MQTT snapshot 可解析
 - [ ] 6 轴 start/stop/play multi
+- [ ] 老电机（无 T24）可完整录制出轨迹（MIT 查询帧兜底）
+- [ ] 录制首点不是量程下限值（前导毛刺已剔除）

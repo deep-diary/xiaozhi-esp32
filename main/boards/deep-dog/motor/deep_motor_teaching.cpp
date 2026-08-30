@@ -159,6 +159,34 @@ void appendSamplesToJson(cJSON* root, const TeachingTrack& track) {
     cJSON_AddItemToObject(root, "samples", arr);
 }
 
+// 剔除录制起始的量程下限钳位毛刺点：reset/失能后首帧反馈 raw≈0 解码为 P_MIN(-12.57)。
+// 仅当开头若干点贴下限、且随后出现非物理大跳变时剔除；电机真实停在下限附近不受影响。
+void stripLeadingGlitchSamples(TeachingTrack& tr) {
+    if (tr.count < 2) {
+        return;
+    }
+    constexpr float kGlitchNearLimit = -12.0f;
+    constexpr float kGlitchJumpRad = 3.0f;
+    uint16_t first_valid = 0;
+    while (first_valid < tr.count && tr.samples[first_valid].position_rad <= kGlitchNearLimit) {
+        ++first_valid;
+    }
+    if (first_valid == 0 || first_valid >= tr.count) {
+        return;
+    }
+    const float jump = fabsf(tr.samples[first_valid].position_rad - tr.samples[0].position_rad);
+    if (jump < kGlitchJumpRad) {
+        return;
+    }
+    const uint32_t t0 = tr.samples[first_valid].t_ms;
+    for (uint16_t i = 0; i + first_valid < tr.count; ++i) {
+        tr.samples[i] = tr.samples[i + first_valid];
+        tr.samples[i].t_ms -= t0;
+    }
+    tr.count -= first_valid;
+    ESP_LOGI(TAG, "剔除前导毛刺 %u 点", (unsigned)first_valid);
+}
+
 }  // namespace
 
 MotorTeachingManager::MotorTeachingManager(DeepMotor* owner)
@@ -294,7 +322,21 @@ void MotorTeachingManager::endRecordSession(int slot, bool restore_epscan) {
         }
     }
     if (tr.count > 0) {
+        stripLeadingGlitchSamples(tr);
         tr.data_ready = true;
+    }
+
+    if (tr.count > 0) {
+        const TeachingSample& first = tr.samples[0];
+        const TeachingSample& last = tr.samples[tr.count - 1];
+        ESP_LOGI(TAG, "录制完成 motor=%u 点数=%u 首点(t=%ums,pos=%.3f) 末点(t=%ums,pos=%.3f)",
+                 (unsigned)tr.motor_id, (unsigned)tr.count, (unsigned)first.t_ms, (double)first.position_rad,
+                 (unsigned)last.t_ms, (double)last.position_rad);
+        const uint16_t show = tr.count < 3 ? tr.count : 3;
+        for (uint16_t i = 0; i < show; ++i) {
+            ESP_LOGI(TAG, "  前3点[%u] t=%ums pos=%.3f vel=%.3f", (unsigned)i, (unsigned)tr.samples[i].t_ms,
+                     (double)tr.samples[i].position_rad, (double)tr.samples[i].velocity_rad_s);
+        }
     }
 }
 
@@ -396,8 +438,15 @@ void MotorTeachingManager::onFeedback(uint8_t motor_id, float position_rad, floa
 
 void MotorTeachingManager::recordingTask(void* param) {
     auto* mgr = static_cast<MotorTeachingManager*>(param);
-    ESP_LOGI(TAG, "录制任务运行（T24 + EPScan）");
+    ESP_LOGI(TAG, "录制任务运行（T24 + MIT 查询帧兜底）");
     while (mgr->anyRecording()) {
+        for (int i = 0; i < MAX_MOTOR_COUNT; ++i) {
+            const TeachingTrack& tr = mgr->tracks_[i];
+            if (tr.recording) {
+                // 老电机无 T24：MIT 全 0 帧（失能 + kp=kd=tau=0）触发 0x02 反馈，不产生力矩
+                (void)MotorProtocol::controlMotor(tr.motor_id, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            }
+        }
         vTaskDelay(pdMS_TO_TICKS(TEACHING_SAMPLE_RATE_MS));
     }
     ESP_LOGI(TAG, "录制任务结束");
@@ -585,6 +634,17 @@ bool MotorTeachingManager::executeTeachingMulti(const uint8_t* motor_ids, uint8_
     play_motor_count_ = count;
     memcpy(play_motor_ids_, motor_ids, count);
     owner_->setActiveMotorId(motor_ids[0]);
+
+    for (uint8_t i = 0; i < count; ++i) {
+        const TeachingTrack* tr = getTrack(motor_ids[i]);
+        if (tr != nullptr && tr->count > 0) {
+            const TeachingSample& first = tr->samples[0];
+            const TeachingSample& last = tr->samples[tr->count - 1];
+            ESP_LOGI(TAG, "播放轨迹 motor=%u 点数=%u 首点(t=%ums,pos=%.3f) 末点(t=%ums,pos=%.3f) blend=%ums",
+                     (unsigned)motor_ids[i], (unsigned)tr->count, (unsigned)first.t_ms, (double)first.position_rad,
+                     (unsigned)last.t_ms, (double)last.position_rad, (unsigned)play_config_.blend_ms);
+        }
+    }
 
     BaseType_t ret = xTaskCreate(playTask, "teaching_play", 4096, this, 5, &execute_task_handle_);
     if (ret != pdPASS) {
