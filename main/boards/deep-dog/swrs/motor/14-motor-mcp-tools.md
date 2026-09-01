@@ -30,7 +30,7 @@
 
 | 组 | 工具 |
 |----|------|
-| ① 总线/注册/发现 | `scan_bus`、`list`、`set_active`、`get_software_version` |
+| ① 总线/注册/发现 | `scan_bus`、`list`、`set_active`、`set_can_id`、`get_software_version` |
 | ② 状态查询 | `get_status`、`print_all`、`start_status_task`、`stop_status_task` |
 | ③ 初始化/使能 | `initialize`、`enable`、`reset` |
 | ④ 模式切换 | `set_control_mode`、`set_position_mode`、`set_speed_mode`、`set_current_mode`、`set_zero_position` |

@@ -96,6 +96,32 @@ static void RegisterMotorMcpToolsImpl(McpServer& mcp_server, DeepMotor* deep_mot
                           "，后续省略编号的指令将作用于该电机");
     });
 
+    // 设置电机 CAN_ID（通信类型 7，立即生效；改后旧 ID 失效，需重新 scan_bus 发现）
+    mcp_server.AddTool("self.motor.set_can_id",
+        "设置电机 CAN_ID（通信类型 7，立即生效）。motor_id=当前 CAN ID（0 或省略=当前活跃电机），"
+        "new_id=目标 CAN ID（1~127）。改后旧 ID 失效，请重新扫描总线发现。",
+        PropertyList(std::vector<Property>{
+        Property("motor_id", kPropertyTypeInteger, 0, 0, 255),
+        Property("new_id", kPropertyTypeInteger, 1, 1, 127)
+    }), [deep_motor, resolve_motor_id](const PropertyList& properties) -> ReturnValue {
+        std::string err;
+        const int motor_id = resolve_motor_id(properties["motor_id"].value<int>(), err);
+        if (motor_id < 0) {
+            return err;
+        }
+        const int new_id = properties["new_id"].value<int>();
+        if (new_id < 1 || new_id > 127) {
+            return std::string("目标 CAN ID 须在 1~127 之间");
+        }
+        if (!MotorProtocol::setCanId(static_cast<uint8_t>(motor_id), static_cast<uint8_t>(new_id))) {
+            ESP_LOGE(TAG, "设置电机 CAN ID 失败: %d -> %d", motor_id, new_id);
+            return std::string("设置电机 CAN ID 失败: " + std::to_string(motor_id) + " -> " + std::to_string(new_id));
+        }
+        ESP_LOGI(TAG, "设置电机 CAN ID 成功: %d -> %d", motor_id, new_id);
+        return std::string("设置电机 CAN ID 成功: " + std::to_string(motor_id) + " -> " + std::to_string(new_id) +
+                          "，旧 ID 已失效，请重新扫描总线发现");
+    });
+
     // ========== 运动控制（MIT / 位置 / 速度） ==========
 
     // 位置模式：position 整数 ÷100 = rad

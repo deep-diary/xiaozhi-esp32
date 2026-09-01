@@ -92,6 +92,7 @@ typedef enum {
     MOTOR_CMD_ENABLE = 3,      // 使能
     MOTOR_CMD_RESET = 4,       // 停止
     MOTOR_CMD_SET_ZERO = 6,    // 设置零点
+    MOTOR_CMD_SET_CAN_ID = 7,  // 设置电机 CAN_ID（通信类型 7，立即生效）
     MOTOR_CMD_CONTROL = 1,     // 运控模式
     MOTOR_CMD_SET_PARAM = 18,  // 设置参数
     MOTOR_CMD_VERSION = 0x17,  // 获取软件版本号
@@ -345,6 +346,14 @@ public:
      * @return true 发送成功
      */
     static bool sendGetDeviceIdProbe(uint8_t motor_id);
+
+    /**
+     * @brief 设置电机 CAN_ID（通信类型 7，立即生效），只发不等。
+     * @param current_motor_id 目标电机当前 CAN_ID（1～127）
+     * @param new_motor_id 预设置的新 CAN_ID（1～127）
+     * @return true 发送成功
+     */
+    static bool setCanId(uint8_t current_motor_id, uint8_t new_motor_id);
 
     /**
      * @brief 通信类型 4 + data 00 C4：读取软件版本（应答为类型 2，data 00 C4 56 + 版本号）

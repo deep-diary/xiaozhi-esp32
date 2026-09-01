@@ -589,6 +589,24 @@ bool MotorProtocol::sendGetDeviceIdProbe(uint8_t motor_id) {
     return sendCanFrame(query);
 }
 
+bool MotorProtocol::setCanId(uint8_t current_motor_id, uint8_t new_motor_id) {
+    if (current_motor_id == 0 || current_motor_id > 127 || new_motor_id == 0 || new_motor_id > 127) {
+        return false;
+    }
+    CanFrame frame {};
+    // 通信类型 7：bit28–24=0x07；bit23–16=预设置 CAN_ID；bit15–8=主站 ID；bit7–0=目标电机当前 CAN_ID
+    frame.identifier = ((uint32_t)MOTOR_CMD_SET_CAN_ID << 24) |
+                       ((uint32_t)new_motor_id << 16) |
+                       ((uint32_t)MOTOR_MASTER_ID << 8) |
+                       (uint32_t)current_motor_id;
+    frame.extd = 1;
+    frame.data_length_code = 8;
+    memset(frame.data, 0, sizeof(frame.data));
+    ESP_LOGI(TAG, "设置电机 CAN ID: %u -> %u (ext id=0x%08lX)",
+             (unsigned)current_motor_id, (unsigned)new_motor_id, (unsigned long)frame.identifier);
+    return sendCanFrame(frame);
+}
+
 uint8_t MotorProtocol::sendGetDeviceIdProbes(uint8_t id_min, uint8_t id_max) {
     if (id_min == 0) {
         id_min = 1;

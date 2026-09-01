@@ -22,6 +22,7 @@ Deep-Dog **单电机调试与 CAN 总线**需求入口。四足整机运控仍�
 | [10-motor-mcp-bridge](./10-motor-mcp-bridge.md) | 电机页 MCP 工具 MQTT 桥 |
 | [11-teaching-playback-mit](./11-teaching-playback-mit.md) | 示教录制 MIT 轨迹播放（索引 → [teaching/](./teaching/README.md)） |
 | [14-motor-mcp-tools](./14-motor-mcp-tools.md) | MCP 工具集收敛（self.motor.* 统一、去重、角度 LED 下线）+ 粘性默认电机 |
+| [15-set-can-id](./15-set-can-id.md) | 设置电机 CAN ID（通信类型 7，立即生效） |
 | [teaching/](./teaching/README.md) | **示教子域** MOT-11/12/13 |
 | [VERIFY](./VERIFY.md) | 实机验收清单 |
 
