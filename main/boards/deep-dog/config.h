@@ -151,7 +151,8 @@ typedef int deep_dog_ext_pin_mode_t;
 
 #define SPARKBOT_CAMERA_PWDN      (GPIO_NUM_NC)
 #define SPARKBOT_CAMERA_RESET     (GPIO_NUM_NC)
-#define SPARKBOT_CAMERA_XCLK_FREQ (16000000)
+/* OV3660：驱动各 DVP 格式均要求 20MHz 输入时钟（OV2640 为 16MHz） */
+#define SPARKBOT_CAMERA_XCLK_FREQ (20000000)
 #ifndef DEEP_DOG_CAMERA_INIT_DELAY_MS
 #define DEEP_DOG_CAMERA_INIT_DELAY_MS 200
 #endif
