@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>宏观架构 — Deep-Dog</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="mermaid-init.js"></script>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="home" href="index.html">主页</a><span class="sep">|</span>
+  <a href="overview.html">宏观架构</a>
+  <a href="detail.html">微观架构</a>
+  <a href="components.html">组件关系</a>
+  <a href="control_flow.html">控制流</a>
+  <a href="signal_flow.html">事件流</a>
+  <a href="data.html">数据架构</a>
+  <a href="mechanisms.html">工作机制</a>
+</div></nav>
+
+<header class="main">
+  <h1>LEVEL 1 · 宏观架构</h1>
+  <p>五层总览 · 价值流 · 硬原则 · 联调剖面 · 控制面 vs 遥测面 —— 以 Mermaid 流程图为主</p>
+</header>
+
+<div class="wrap">
+
+<section>
+  <h2>系统五层总览（含数据流）</h2>
+  <div class="sub">自上而下依赖；实线 = 控制/调用，虚线 = 遥测/帧回写。MCP 为控制汇聚点。</div>
+  <div class="legend-inline">
+    <span class="lg-stat"><i></i>外部</span>
+    <span class="lg-ui"><i></i>控制面</span>
+    <span class="lg-eng"><i></i>领域</span>
+    <span class="lg-io"><i></i>驱动</span>
+    <span class="lg-cfg"><i></i>配置/HAL</span>
+    <span class="lg-data"><i></i>数据面</span>
+  </div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  subgraph Ext["External 外部"]
+    direction LR
+    EMQX["EMQX"]
+    MTX["MediaMTX"]
+    Immich["Immich"]
+    Voice["小智语音 MCP"]
+    PCBridge["PC 手柄桥"]
+  end
+
+  subgraph Ctrl["Control Plane 控制面"]
+    direction LR
+    MQTT["MQTT modules"]
+    WSMCP["WS-MCP"]
+    VoiceMCP["语音 MCP 工具"]
+    Apps["Touch / Handle Apps"]
+  end
+
+  subgraph Dom["Domain 领域"]
+    direction LR
+    Dog["DogControl"]
+    Face["FaceControl"]
+    VHub["VisionFrameHub"]
+    LedG["Led / Gimbal"]
+    MqttOrch["DeepDogMqtt 编排"]
+  end
+
+  subgraph Drv["Drivers 驱动"]
+    direction LR
+    Motor["DeepMotor"]
+    Can["TWAI CAN"]
+    Cam["EspVideo"]
+    Imu["BMI270"]
+    Servo["Servo PWM"]
+  end
+
+  subgraph Hal["HAL / Config"]
+    direction LR
+    Pins["config.h EXT_PIN"]
+    Feat["board_features.h"]
+  end
+
+  Voice --> VoiceMCP
+  Voice --> WSMCP
+  EMQX --> MQTT
+  PCBridge --> MQTT
+  MQTT --> Dom
+  WSMCP --> Dom
+  VoiceMCP --> Dom
+  Apps --> Dom
+  Dog --> Motor
+  Motor --> Can
+  Can --> Pins
+  Cam --> VHub
+  VHub --> Face
+  VHub -.->|RTSP| MTX
+  Face -.->|真名| Immich
+  Dom -.->|status retain| MQTT
+  MQTT -.-> EMQX
+  Feat -.-> Dom
+  Feat -.-> Drv
+  Pins --- Feat
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  classDef data fill:#538f53,stroke:#2e5a2e,color:#fff
+  classDef stat fill:#b06a8f,stroke:#7a3a5a,color:#fff
+  class MQTT,WSMCP,VoiceMCP,Apps ui
+  class Dog,Face,VHub,LedG,MqttOrch eng
+  class Motor,Can,Cam,Imu,Servo io
+  class Pins,Feat cfg
+  class EMQX,MTX,Immich,Voice,PCBridge stat
+</pre>
+  </div>
+  <div class="hub-bar"><b>原则：</b>能力可裁剪；控制尽量汇聚 <code>McpServer</code>；Touch/Handle 只产快照；运控垂直 Dog→Leg→Motor→CAN；视觉并行 Face ∥ 推流。</div>
+</section>
+
+<section>
+  <h2>端到端价值流</h2>
+  <div class="sub">四条主业务流水线（可按剖面裁剪）</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart LR
+  subgraph VoiceDog["语音控狗"]
+    V1["语音识别"] --> V2["MCP self.chassis.*"]
+    V2 --> V3["DogControl"]
+    V3 --> V4["Motor + CAN"]
+  end
+
+  subgraph Stream["推流"]
+    S1["Camera"] --> S2["VisionFrameHub"]
+    S2 --> S3["RTSP H264"]
+    S3 --> S4["MediaMTX"]
+  end
+
+  subgraph FacePipe["人脸"]
+    F1["VisionFrameHub"] --> F2["FaceControl"]
+    F2 --> F3["Immich / MQTT face"]
+  end
+
+  subgraph HandlePipe["手柄"]
+    H1["BT / MQTT input"] --> H2["Handle Apps"]
+    H2 --> H3["Dog / Servo / Motor"]
+  end
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef stat fill:#b06a8f,stroke:#7a3a5a,color:#fff
+  class V1,V2,H1,H2 ui
+  class V3,S2,F2,H3 eng
+  class V4,S1,S3 io
+  class S4,F3 stat
+</pre>
+  </div>
+</section>
+
+<section>
+  <h2>硬原则</h2>
+  <div class="grid2">
+    <div class="item">
+      <h3>能力可裁剪</h3>
+      <ul>
+        <li><code>EXT_PIN_MODE</code> + <code>DEEP_DOG_*_ENABLE</code></li>
+        <li>实现 TU 整文件 <code>#if</code> 门控</li>
+        <li><code>device/info.capabilities</code> 反映前端入口</li>
+      </ul>
+    </div>
+    <div class="item">
+      <h3>控制汇聚 MCP</h3>
+      <ul>
+        <li>语音 / WS-MCP / MQTT <code>mcp_call</code> → 同一 <code>self.*</code></li>
+        <li>status / retain 仍走 MQTT 遥测面</li>
+      </ul>
+    </div>
+    <div class="item">
+      <h3>输入与业务解耦</h3>
+      <ul>
+        <li>Touch / Handle Hub 只产事件快照</li>
+        <li>语义在 Apps（dog / servo / log / pairing）</li>
+      </ul>
+    </div>
+    <div class="item">
+      <h3>运控垂直 · 视觉并行</h3>
+      <ul>
+        <li>Dog → Leg → Trajectory? → Motor → CAN</li>
+        <li>Camera → Hub → Face（永驻）∥ Stream（按需）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>联调剖面（简图）</h2>
+  <div class="sub">同硬件改 <code>config.h</code> / <code>board_features.h</code> 切换形态；默认多为瘦剖面（LED + 视觉）</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  P0["瘦剖面 EXT=LED<br/>视觉 / 人脸 / MQTT"]
+  P1["单电机 EXT=CAN<br/>CAN+MOTOR"]
+  P2["四足狗 EXT=CAN<br/>CAN+MOTOR+DOG"]
+  P3["云台 EXT=PWM<br/>GIMBAL"]
+  P4["前端壳 EXT=NONE<br/>MQTT 设备页联调"]
+
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  class P0,P4 cfg
+  class P1,P2 io
+  class P3 eng
+</pre>
+  </div>
+  <div class="note">剖面细节与依赖钳位见 <code>FEATURE_FLAGS.md</code> 与 <a href="mechanisms.html">工作机制</a>。</div>
+</section>
+
+<section>
+  <h2>控制面 vs 遥测面</h2>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart LR
+  subgraph Control["控制面 Control"]
+    C1["语音 MCP"]
+    C2["WS-MCP 局域网"]
+    C3["MQTT cmd / mcp_call"]
+    C4["Touch / Handle Apps"]
+  end
+  Hub["McpServer + Domain API"]
+  subgraph Telemetry["遥测面 Telemetry"]
+    T1["MQTT status / retain"]
+    T2["device/info capabilities"]
+    T3["CAN 反馈 / IMU"]
+    T4["RTSP / face events"]
+  end
+  Control --> Hub
+  Hub --> Telemetry
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef data fill:#538f53,stroke:#2e5a2e,color:#fff
+  class C1,C2,C3,C4 ui
+  class Hub eng
+  class T1,T2,T3,T4 data
+</pre>
+  </div>
+  <div class="note info">远程运维走 EMQX；本地全量 tools/list|call 走 WS-MCP，无需为每个能力补 Topic。</div>
+</section>
+
+</div>
+<footer>Deep-Dog 架构 · 继续阅读 <a href="detail.html">微观架构</a></footer>
+</body>
+</html>

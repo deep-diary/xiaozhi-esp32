@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作机制 — Deep-Dog</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="mermaid-init.js"></script>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="home" href="index.html">主页</a><span class="sep">|</span>
+  <a href="overview.html">宏观架构</a>
+  <a href="detail.html">微观架构</a>
+  <a href="components.html">组件关系</a>
+  <a href="control_flow.html">控制流</a>
+  <a href="signal_flow.html">事件流</a>
+  <a href="data.html">数据架构</a>
+  <a href="mechanisms.html">工作机制</a>
+</div></nav>
+
+<header class="main">
+  <h1>LEVEL 4 · 工作机制</h1>
+  <p>EXT_PIN · ENABLE 钳位 · mcp_call · Boot defer · 双控制面</p>
+</header>
+
+<div class="wrap layout">
+<aside class="toc">
+  <h4>本页目录</h4>
+  <a href="#extpin">EXT_PIN 互斥</a>
+  <a href="#enable">ENABLE 钳位</a>
+  <a href="#mcpcall">mcp_call</a>
+  <a href="#defer">Boot defer</a>
+  <a href="#dual">双控制面</a>
+</aside>
+
+<div class="content">
+
+<section id="extpin">
+  <h2>EXT_PIN 互斥模式</h2>
+  <div class="sub">引出脚 A/B（默认 38/48）成对模式；IO 与 LED 不会同时 AVAILABLE</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  Mode["DEEP_DOG_EXT_PIN_MODE"]
+  Mode --> NONE["NONE 前端壳"]
+  Mode --> CAN["CAN TWAI"]
+  Mode --> UART["UART"]
+  Mode --> RS485["RS485 占位"]
+  Mode --> PWM["PWM 舵机/云台"]
+  Mode --> IO["IO 纯 GPIO"]
+  Mode --> AD["AD 占位"]
+  Mode --> LED["LED WS2812"]
+
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  class Mode cfg
+  class NONE,UART,RS485,AD cfg
+  class CAN,PWM,IO,LED io
+</pre>
+  </div>
+</section>
+
+<section id="enable">
+  <h2>ENABLE 依赖钳位</h2>
+  <div class="sub"><code>board_features.h</code> 缺依赖时强制下层为 0</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  Avail["EXT_PIN=CAN → CAN_AVAILABLE"]
+  Avail --> CE["CAN_ENABLE"]
+  CE --> ME["MOTOR_ENABLE"]
+  ME --> DE["DOG_ENABLE"]
+  ME --> AE["ARM_ENABLE 占位"]
+  PWM["EXT_PIN=PWM"] --> SE["SERVO_ENABLE"]
+  PWM --> GE["GIMBAL_ENABLE"]
+  SE -.->|互斥 云台优先| GE
+
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  class Avail,PWM cfg
+  class CE,ME,SE,GE io
+  class DE,AE eng
+</pre>
+  </div>
+  <div class="note">实现 TU 整文件 <code>#if DEEP_DOG_*_ENABLE</code>；调用侧同步门控。改开关后普通重编即可。</div>
+</section>
+
+<section id="mcpcall">
+  <h2>M02 mcp_call 统一控制面</h2>
+  <div class="sub">MQTT 适配层可走域 API，或统一调用 <code>McpServer::InvokeToolSync</code></div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart LR
+  Cmd["MQTT …/cmd"] --> Adapt["模块 *_mqtt"]
+  Adapt -->|直调| API["Domain API"]
+  Adapt -->|mcp_call| MCP["InvokeToolSync"]
+  MCP --> Tools["self.* 工具"]
+  Tools --> API
+  API --> Stat["MQTT …/status"]
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef data fill:#538f53,stroke:#2e5a2e,color:#fff
+  class Cmd,Adapt,MCP,Tools ui
+  class API eng
+  class Stat data
+</pre>
+  </div>
+  <div class="note info">详见 <code>swrs/mqtt/M02-mcp-call-control-plane.md</code>（motor 等已落地）。</div>
+</section>
+
+<section id="defer">
+  <h2>Boot defer 重服务</h2>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TD
+  Boot["构造 + StartNetwork"] --> Flag{"DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION"}
+  Flag -->|0| Now["立即 StartPostActivationServices"]
+  Flag -->|1| Wait["OnActivationComplete"]
+  Wait --> Now
+  Now --> Svc["MQTT / HTTP / WS-MCP / Face / VisionHub"]
+
+  classDef ctrl fill:#c0392b,stroke:#8a2010,color:#fff
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  class Boot,Flag,Wait ctrl
+  class Now,Svc ui
+</pre>
+  </div>
+</section>
+
+<section id="dual">
+  <h2>双控制面分工</h2>
+  <table>
+    <thead>
+      <tr><th>面</th><th>通道</th><th>适用</th><th>不替代</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>远程</td>
+        <td>EMQX MQTT cmd/status</td>
+        <td>设备页、脚本、跨网运维</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td>局域网</td>
+        <td>WS-MCP <code>ws://ip:8080/ws</code></td>
+        <td>全量 tools/list|call、电机联调</td>
+        <td>不替代 MQTT 遥测</td>
+      </tr>
+      <tr>
+        <td>语音</td>
+        <td>主项目云端/本地 MCP</td>
+        <td>自然语言控狗</td>
+        <td>与上两者共享工具表</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  Remote["MQTT 远程"] --> Dom["Domain + MCP"]
+  Local["WS-MCP 本地"] --> Dom
+  Voice["语音 MCP"] --> Dom
+  Dom --> Tele["MQTT status / RTSP / 日志"]
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef data fill:#538f53,stroke:#2e5a2e,color:#fff
+  class Remote,Local,Voice ui
+  class Dom eng
+  class Tele data
+</pre>
+  </div>
+</section>
+
+</div>
+</div>
+<footer>Deep-Dog 架构 · 返回 <a href="index.html">主页</a></footer>
+</body>
+</html>

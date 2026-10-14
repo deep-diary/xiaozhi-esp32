@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deep-Dog 板卡架构 — 主页</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="mermaid-init.js"></script>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="home" href="index.html">架构主页</a><span class="sep">|</span>
+  <a href="overview.html">宏观架构</a>
+  <a href="detail.html">微观架构</a>
+  <a href="components.html">组件关系</a>
+  <a href="control_flow.html">控制流</a>
+  <a href="signal_flow.html">事件流</a>
+  <a href="data.html">数据架构</a>
+  <a href="mechanisms.html">工作机制</a>
+  <span class="sep">|</span>
+  <a href="../README.md" style="color:#ffd666">SWRS 入口</a>
+</div></nav>
+
+<header class="main">
+  <h1>Deep-Dog — 板卡软件架构图集</h1>
+  <p>ESP32-S3 · 可裁剪全功能模块板 · CAN 运控 · 视觉推流 · MQTT / WS-MCP 双控制面<br>
+  以 <b>Mermaid 流程图</b> 展示宏观/微观架构、控制流与 MQTT·事件流<br>
+  需联网加载 CDN（jsdelivr）· 契约真源见 <code>swrs/mqtt/</code> · 开关见 <code>FEATURE_FLAGS.md</code></p>
+</header>
+
+<div class="wrap">
+<section>
+  <h2>导航 — 按粒度选择</h2>
+  <div class="sub">建议：宏观 → 微观 → 组件 → 控制流 / 事件流 → 数据 → 机制</div>
+  <div class="grid2">
+    <a class="navcard" href="overview.html"><span class="tagline">LEVEL 1 · 系统级</span>
+      <h3>宏观架构</h3>
+      <p>五层总览、价值流、硬原则、联调剖面、控制面 vs 遥测面。</p></a>
+    <a class="navcard" href="detail.html" style="border-left-color:#7b4fb6"><span class="tagline">LEVEL 2 · 模块级</span>
+      <h3>微观架构</h3>
+      <p>启动编排、运控栈、视觉栈、输入 Hub、MQTT 模块注入。</p></a>
+    <a class="navcard" href="components.html" style="border-left-color:#2e74b5"><span class="tagline">LEVEL 3 · 组件级</span>
+      <h3>组件与关系</h3>
+      <p>目录依赖、MCP Hub-Spoke、「改哪里」决策、组件档案。</p></a>
+    <a class="navcard" href="control_flow.html" style="border-left-color:#c0392b"><span class="tagline">LEVEL 4 · 控制</span>
+      <h3>控制流</h3>
+      <p>Boot / 激活后服务、MCP 调用链、手柄 → 动作时序。</p></a>
+    <a class="navcard" href="signal_flow.html" style="border-left-color:#1a7a6d"><span class="tagline">LEVEL 4 · 事件</span>
+      <h3>事件流</h3>
+      <p>MQTT Topic 拓扑、Touch/Handle 扇出、FrameHub 订阅、cmd→status。</p></a>
+    <a class="navcard" href="data.html" style="border-left-color:#538f53"><span class="tagline">LEVEL 3 · 数据</span>
+      <h3>数据架构</h3>
+      <p>NVS、device/info retain、capabilities、FrameHub 缓冲、CAN 反馈。</p></a>
+    <a class="navcard" href="mechanisms.html" style="border-left-color:#e08a3c"><span class="tagline">LEVEL 4 · 机制</span>
+      <h3>工作机制</h3>
+      <p>EXT_PIN、ENABLE 钳位、mcp_call、Boot defer、双控制面分工。</p></a>
+  </div>
+</section>
+
+<section>
+  <h2>一句话主路径</h2>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart LR
+  A["语音 / MQTT / WS-MCP"] --> B["McpServer<br/>self.*"]
+  B --> C["Domain<br/>Dog · Face · Led · Gimbal"]
+  C --> D["Motor / CAN"]
+  C --> E["VisionFrameHub"]
+  E --> F["MediaMTX / Immich"]
+  C -.->|status retain| G["EMQX"]
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef data fill:#538f53,stroke:#2e5a2e,color:#fff
+  classDef stat fill:#b06a8f,stroke:#7a3a5a,color:#fff
+  class A,B ui
+  class C eng
+  class D io
+  class E data
+  class F,G stat
+</pre>
+  </div>
+</section>
+
+<section>
+  <h2>图例</h2>
+  <div class="legend-inline">
+    <span class="lg-ui"><i></i>控制面</span>
+    <span class="lg-cfg"><i></i>配置</span>
+    <span class="lg-eng"><i></i>领域</span>
+    <span class="lg-io"><i></i>驱动</span>
+    <span class="lg-data"><i></i>数据面</span>
+    <span class="lg-stat"><i></i>外部</span>
+    <span class="lg-ctrl"><i></i>控制流</span>
+    <span class="lg-sig"><i></i>事件流</span>
+  </div>
+  <div class="note info">图中实线多为调用/依赖，虚线多为 MQTT status、帧订阅或间接回写。离线环境若 CDN 无法加载，流程图将显示为源码文本。</div>
+</section>
+</div>
+<footer>Deep-Dog 多层级架构文档 · Mermaid 流程图版 · 从 <a href="overview.html">宏观架构</a> 开始</footer>
+</body>
+</html>

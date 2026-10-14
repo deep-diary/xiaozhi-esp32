@@ -7,6 +7,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | 硬件 | 四足 + OV3660 等（见板级 `config.h`）；可裁剪为非狗全功能模块板 |
 | 代码 | 优先 `main/boards/deep-dog/` |
 | **权威顺序** | [ROADMAP.md](./ROADMAP.md) |
+| **架构图集** | [architecture/](./architecture/index.html)（HTML + Mermaid；宏观→机制） |
 | **MQTT** | [mqtt/](./mqtt/)（M01 总览 + modules 前端详情页 + YAML） |
 | **控制输入** | [input/](./input/)（手柄双源；I-HANDLE；I08b 轴映射） |
 | **电机 / CAN** | [motor/](./motor/)（单电机联调；MOT） |
@@ -26,6 +27,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | 路径 | 内容 |
 |------|------|
 | [ROADMAP.md](./ROADMAP.md) | 可追溯总表 |
+| [architecture/](./architecture/index.html) | 板卡系统架构图集（Mermaid） |
 | [mqtt/](./mqtt/) | MQTT：M01、frontend、modules、YAML |
 | [input/](./input/) | 控制输入（手柄双源：Bluepad32 / PC MQTT 桥） |
 | [motor/](./motor/) | CAN / 单电机调试（MOT；手柄 catalog 见 04） |

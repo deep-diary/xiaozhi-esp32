@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>控制流 — Deep-Dog</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="mermaid-init.js"></script>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="home" href="index.html">主页</a><span class="sep">|</span>
+  <a href="overview.html">宏观架构</a>
+  <a href="detail.html">微观架构</a>
+  <a href="components.html">组件关系</a>
+  <a href="control_flow.html">控制流</a>
+  <a href="signal_flow.html">事件流</a>
+  <a href="data.html">数据架构</a>
+  <a href="mechanisms.html">工作机制</a>
+</div></nav>
+
+<header class="main">
+  <h1>LEVEL 4 · 控制流</h1>
+  <p>Boot 同步调用链 · MCP 调用 · 手柄动作 —— flowchart + sequenceDiagram</p>
+</header>
+
+<div class="wrap">
+
+<section>
+  <h2>Boot 控制流</h2>
+  <div class="sub">构造阶段偏硬件；网络后启 IMU 与重服务（可 defer）</div>
+  <div class="legend-inline">
+    <span class="lg-ctrl"><i></i>控制流</span>
+    <span class="lg-io"><i></i>硬件</span>
+    <span class="lg-ui"><i></i>控制面</span>
+  </div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TD
+  Start(["板级构造 DeepDog"]) --> I2C["I2C0 共享总线"]
+  I2C --> Disp["SPI Display 尽早背光"]
+  Disp --> Inp["Buttons + Touch + Handle 构造"]
+  Inp --> Cam["Camera + VisionHub + DeepDogMqtt 构造"]
+  Cam --> Ext["EXT 模块: UART/LED/Gimbal…"]
+  Ext --> CanInit["CAN + DeepMotor + CanRxTask"]
+  CanInit --> Reg["Register MCP tools"]
+  Reg --> Net["StartNetwork"]
+  Net --> WaitIP["等待 STA IP"]
+  WaitIP --> Imu["IMU 初始化"]
+  Imu --> Defer{"DEFER_HEAVY?"}
+  Defer -->|否| Heavy["启动 MQTT / WS-MCP / Face / Hub"]
+  Defer -->|是| Act["等待激活"] --> Heavy
+  Heavy --> Ready(["就绪"])
+
+  classDef ctrl fill:#c0392b,stroke:#8a2010,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  class Start,Reg,Net,WaitIP,Defer,Act,Ready ctrl
+  class I2C,Disp,Inp,Cam,Ext,CanInit,Imu io
+  class Heavy ui
+</pre>
+  </div>
+</section>
+
+<section>
+  <h2>MCP 调用时序</h2>
+  <div class="sub">语音 / WS-MCP / MQTT mcp_call → InvokeToolSync → Domain</div>
+  <div class="mmd">
+<pre class="mermaid">
+sequenceDiagram
+  participant Voice as 语音或客户端
+  participant WS as WS-MCP / MQTT
+  participant MCP as McpServer
+  participant Dom as DogControl / DeepMotor
+  participant Bus as CAN
+
+  Voice->>WS: tools/call 或 mcp_call
+  WS->>MCP: ParseMessage / InvokeToolSync
+  MCP->>Dom: self.chassis.go_forward 等
+  Dom->>Bus: 关节目标经 Motor 发帧
+  Bus-->>Dom: 反馈帧 processCanFrame
+  Dom-->>MCP: 工具结果
+  MCP-->>WS: JSON-RPC 响应
+  WS-->>Voice: 成功/失败
+</pre>
+  </div>
+</section>
+
+<section>
+  <h2>手柄 → 动作时序</h2>
+  <div class="sub">BT 或 PC MQTT 桥注入快照；App 解释后调 Domain</div>
+  <div class="mmd">
+<pre class="mermaid">
+sequenceDiagram
+  participant Src as BT / MQTT handle/input
+  participant Hub as HandleEventHub
+  participant Disp as HandleAppDispatcher
+  participant App as HandleAppDog
+  participant Dog as DogControl
+
+  Src->>Hub: 轴/按键快照
+  Hub->>Disp: 分发事件
+  Disp->>App: keymap 匹配
+  App->>Dog: 前进/转向/站立等
+  Dog-->>App: 状态可选回写
+</pre>
+  </div>
+  <div class="note info">Touch 路径同构：TouchEventHub → Dispatcher → TouchAppDog / Servo。</div>
+</section>
+
+<section>
+  <h2>步态下发同步链</h2>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart LR
+  A["DogControl 指令"] --> B["GaitPlanner / 状态机"]
+  B --> C["LegControl ×4"]
+  C --> D["关节角目标"]
+  D --> E["DeepMotor 位置/速度"]
+  E --> F["TWAI 扩展帧"]
+
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  class A,B,C,D eng
+  class E,F io
+</pre>
+  </div>
+</section>
+
+</div>
+<footer>Deep-Dog 架构 · 继续阅读 <a href="signal_flow.html">事件流</a></footer>
+</body>
+</html>
