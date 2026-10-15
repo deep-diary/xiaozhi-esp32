@@ -38,7 +38,7 @@
 
 ## 需求文档
 
-[swrs/ws-mcp/01-local-mcp-bridge.md](../swrs/ws-mcp/01-local-mcp-bridge.md)
+[docs/requirements/ws-mcp/01-local-mcp-bridge.md](../docs/requirements/ws-mcp/01-local-mcp-bridge.md)
 
 ## 与 MQTT
 

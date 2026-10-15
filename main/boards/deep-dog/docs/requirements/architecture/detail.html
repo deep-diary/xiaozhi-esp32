@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>微观架构 — Deep-Dog</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="mermaid-init.js"></script>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="home" href="index.html">主页</a><span class="sep">|</span>
+  <a href="overview.html">宏观架构</a>
+  <a href="detail.html">微观架构</a>
+  <a href="components.html">组件关系</a>
+  <a href="control_flow.html">控制流</a>
+  <a href="signal_flow.html">事件流</a>
+  <a href="data.html">数据架构</a>
+  <a href="mechanisms.html">工作机制</a>
+</div></nav>
+
+<header class="main">
+  <h1>LEVEL 2 · 微观架构</h1>
+  <p>启动编排 · 运控栈 · 视觉栈 · 输入 Hub · MQTT 注入 —— 模块内部结构</p>
+</header>
+
+<div class="wrap layout">
+<aside class="toc">
+  <h4>本页目录</h4>
+  <a href="#boot">板级启动编排</a>
+  <a href="#motion">运控栈</a>
+  <a href="#vision">视觉栈</a>
+  <a href="#input">输入 Hub</a>
+  <a href="#mqtt">MQTT 编排</a>
+</aside>
+
+<div class="content">
+
+<section id="boot">
+  <h2>板级启动编排</h2>
+  <div class="sub"><code>DeepDog</code>（<code>esp_sparkbot_board.cc</code>）构造同步硬件；网络就绪后再启 IMU / 重服务</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  CTOR["DeepDog 构造"]
+  I2C["InitializeI2c"]
+  SPI["InitializeSpi + Display"]
+  BTN["Buttons + Touch"]
+  HDL["Handle Hub 构造"]
+  CAM["Camera + VisionHub"]
+  MQTTC["构造 DeepDogMqtt"]
+  EXT["InitializeExtPinModules"]
+  CAN["InitializeCan + DeepMotor"]
+  TOOLS["InitializeTools MCP 注册"]
+  NET["StartNetwork"]
+  SNTP["SNTP + 可选静态 IP"]
+  IMU["InitializeImu"]
+  HEAVY["MQTT / WS-MCP / Face / VisionHub 启动"]
+  DEFER{"Boot defer?"}
+  ACT["OnActivationComplete"]
+
+  CTOR --> I2C --> SPI --> BTN --> HDL --> CAM --> MQTTC --> EXT --> CAN --> TOOLS
+  TOOLS --> NET --> SNTP --> IMU --> DEFER
+  DEFER -->|否| HEAVY
+  DEFER -->|是| ACT --> HEAVY
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  class CTOR,TOOLS,NET,DEFER,ACT ui
+  class CAM,MQTTC,HEAVY eng
+  class I2C,SPI,BTN,HDL,EXT,CAN,IMU io
+  class SNTP cfg
+</pre>
+  </div>
+  <div class="note info">Handle BT 可在 WiFi 前启动以抢 HCI DMA；重服务可延到激活完成（见机制页 Boot defer）。</div>
+</section>
+
+<section id="motion">
+  <h2>运控栈</h2>
+  <div class="sub">四足垂直依赖：Dog → Leg → Trajectory（可选）→ Motor → CAN</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  MCP["self.chassis.* / Touch·Handle Apps"]
+  DOG["dog/ DogControl<br/>状态机 · 步态编排"]
+  LEG["leg/ LegControl<br/>3 关节目标"]
+  TRAJ["trajectory/ 插值可选"]
+  MOT["motor/ DeepMotor<br/>12 轴协议"]
+  CAN["can/ TWAI<br/>CanRxTask"]
+  HW["EXT_PIN=CAN GPIO"]
+
+  MCP --> DOG --> LEG
+  LEG --> TRAJ
+  LEG --> MOT
+  TRAJ --> MOT
+  MOT --> CAN --> HW
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  class MCP ui
+  class DOG,LEG,TRAJ eng
+  class MOT,CAN io
+  class HW cfg
+</pre>
+  </div>
+</section>
+
+<section id="vision">
+  <h2>视觉栈</h2>
+  <div class="sub">Camera → VisionFrameHub → Face（永驻）∥ RTSP 推流（按需）</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart LR
+  CAM["EspVideo Camera"]
+  HUB["VisionFrameHub"]
+  FACE["face_ai/<br/>FaceControl"]
+  RTSP["RtspH264Pusher"]
+  GATE["stream_audio_gate"]
+  MTX["MediaMTX"]
+  IMM["Immich"]
+  MQ["MQTT face / stream"]
+
+  CAM --> HUB
+  HUB --> FACE
+  HUB --> RTSP
+  GATE -.-> RTSP
+  RTSP --> MTX
+  FACE --> IMM
+  FACE -.-> MQ
+  RTSP -.-> MQ
+
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  classDef data fill:#538f53,stroke:#2e5a2e,color:#fff
+  classDef stat fill:#b06a8f,stroke:#7a3a5a,color:#fff
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  class HUB,FACE,GATE eng
+  class CAM,RTSP io
+  class MQ data
+  class MTX,IMM stat
+</pre>
+  </div>
+</section>
+
+<section id="input">
+  <h2>输入 Hub</h2>
+  <div class="sub">Touch / Handle：驱动 → Hub → Dispatcher → Apps；与业务解耦</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  subgraph Touch["touch_btn/"]
+    TC["TouchButtonController"]
+    TH["TouchEventHub"]
+    TD["TouchAppDispatcher"]
+    TA["Apps: dog / servo / log / combo"]
+    TC --> TH --> TD --> TA
+  end
+
+  subgraph Handle["handle/"]
+    HS["BT source / MQTT input"]
+    HH["HandleEventHub"]
+    HD["HandleAppDispatcher"]
+    HA["Apps: dog / servo / motor / keymap"]
+    HS --> HH --> HD --> HA
+  end
+
+  DOM["Domain: DogControl / Servo / Led / Motor"]
+  TA --> DOM
+  HA --> DOM
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  class TC,TH,TD,HS,HH,HD ui
+  class TA,HA ui
+  class DOM eng
+</pre>
+  </div>
+</section>
+
+<section id="mqtt">
+  <h2>MQTT 编排</h2>
+  <div class="sub"><code>DeepDogMqtt</code> 注入各域适配模块；cmd 入、status/retain 出</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  ORCH["mqtt/ DeepDogMqtt"]
+  M1["device / pairing"]
+  M2["stream / face / track / imu"]
+  M3["touch / dog / led / gimbal / servo"]
+  M4["handle / can / motor / person"]
+  DOM["Domain APIs + mcp_call"]
+  BROKER["EMQX"]
+
+  BROKER <--> ORCH
+  ORCH --- M1 & M2 & M3 & M4
+  M1 & M2 & M3 & M4 --> DOM
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef stat fill:#b06a8f,stroke:#7a3a5a,color:#fff
+  class ORCH,M1,M2,M3,M4 ui
+  class DOM eng
+  class BROKER stat
+</pre>
+  </div>
+  <div class="note">Topic 契约见 <code>docs/requirements/mqtt/protocol/deep-dog-mqtt.yml</code>；事件拓扑见 <a href="signal_flow.html">事件流</a>。</div>
+</section>
+
+</div>
+</div>
+<footer>Deep-Dog 架构 · 继续阅读 <a href="components.html">组件关系</a></footer>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # 01 · MQTT 标准接口契约
 
 > 契约版本：`interop-2`（2026-10）——**统一命名空间**定稿
-> 前缀与字段真源：[deep-dog-mqtt.yml](../../swrs/mqtt/protocol/deep-dog-mqtt.yml)
+> 前缀与字段真源：[deep-dog-mqtt.yml](../requirements/mqtt/protocol/deep-dog-mqtt.yml)
 > 关联：[00-architecture-review.md](./00-architecture-review.md) · [02-ws-contract.md](./02-ws-contract.md) · [03-http-api-contract.md](./03-http-api-contract.md)
 
 **本版决议（已拍板）**：
@@ -89,7 +89,7 @@ deep-trace/aabbccddeeff/event/stream/photo
 
 - `ack` 不单列 kind，作为 `cmd/{subject}/ack` 存在于 `cmd` 命名空间（设备→端）。
 - **禁止**：语义不明后缀（`frames`/`tx`/`input`/`photo`/`active`/`request` 等，一律归入上述 kind + `subject`）。
-- **真源**：kind 语义以 `swrs/mqtt/protocol/deep-dog-mqtt.yml` 的 `protocol.kinds` 为准；本节为其人读镜像。
+- **真源**：kind 语义以 `requirements/mqtt/protocol/deep-dog-mqtt.yml` 的 `protocol.kinds` 为准；本节为其人读镜像。
 
 #### 3.1.1 `result` 与 `telemetry` 的边界（易混淆，重点澄清）
 

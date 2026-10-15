@@ -70,8 +70,8 @@ public:
     /** 注册设备（若无密钥）；返回是否成功 */
     bool EnsureRegistered();
 
-    /** 上报生效结果（同步阻塞，供后台任务/主循环调用） */
-    void AckApplied(const std::string& status, const std::vector<std::string>& errors);
+    /** 上报生效结果（同步阻塞，供后台任务/主循环调用）；errors 为 `{field, code, message}` */
+    void AckApplied(const std::string& status, const std::vector<ConfigApplyError>& errors);
 
     /** 点分路径读取（如 "connectivity.mqtt.broker_host"）；无则 fallback */
     std::string GetString(const std::string& path, const std::string& fallback = "") const;
@@ -100,6 +100,8 @@ private:
     bool ParseConfigJson(const std::string& config_json);
     /** 对比 old/new，按差异路径 Notify */
     void DiffAndNotify(const DeviceConfig& old_cfg, const DeviceConfig& new_cfg);
+    /** CFG-02：下发 io.ext_pins.mode → 校验 + 写 NVS pending（重启生效）；错误进 last_apply_errors_ */
+    void ApplyExtPinMode(const std::string& mode_name);
     /** 用旧 NVS（deep_dog_mqtt）填补缺失字段 */
     void ApplyLegacyFallback(DeviceConfig* cfg);
 
@@ -121,6 +123,8 @@ private:
     std::atomic<bool> cancel_{false};
     int64_t last_pull_at_ = 0;
     const char* sync_reason_ = "init";
+    /** 本轮配置应用的错误列表（ack `errors[]` 内容，元素为 `{field, code, message}`） */
+    std::vector<ConfigApplyError> last_apply_errors_;
 };
 
 }  // namespace config_center

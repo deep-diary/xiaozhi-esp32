@@ -1,5 +1,6 @@
 #include "mqtt/deep_dog_mqtt.h"
 
+#include "ext_pin/ext_pin_mode.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/modules/device_mqtt.h"
@@ -384,26 +385,16 @@ bool DeepDogMqtt::Start() {
 #else
     caps.dog = false;
 #endif
-#if DEEP_DOG_MOTOR_ENABLE
-    caps.motor = true;
-#else
-    caps.motor = false;
-#endif
-#if DEEP_DOG_CAN_ENABLE
-    caps.can = true;
-#else
-    caps.can = false;
-#endif
+    // CFG-02：引出脚相关能力按**生效模式**计算（编译期只决定是否编入）
+    const deep_dog_ext_pin_mode_t ext_mode = deep_dog_ext_pin::ActiveMode();
+    caps.motor = (ext_mode == DEEP_DOG_EXT_PIN_CAN) && DEEP_DOG_MOTOR_ENABLE;
+    caps.can = (ext_mode == DEEP_DOG_EXT_PIN_CAN) && DEEP_DOG_CAN_ENABLE;
 #if DEEP_DOG_ARM_ENABLE
-    caps.arm = true;
+    caps.arm = (ext_mode == DEEP_DOG_EXT_PIN_CAN);
 #else
     caps.arm = false;
 #endif
-#if DEEP_DOG_UART_ENABLE
-    caps.uart = true;
-#else
-    caps.uart = false;
-#endif
+    caps.uart = (ext_mode == DEEP_DOG_EXT_PIN_UART) && DEEP_DOG_UART_ENABLE;
 #if DEEP_DOG_VISION_HUB_ENABLE
     caps.stream = true;
 #else
@@ -424,21 +415,9 @@ bool DeepDogMqtt::Start() {
 #else
     caps.imu = false;
 #endif
-#if DEEP_DOG_LED_ENABLE
-    caps.led = true;
-#else
-    caps.led = false;
-#endif
-#if DEEP_DOG_SERVO_ENABLE
-    caps.servo = true;
-#else
-    caps.servo = false;
-#endif
-#if DEEP_DOG_GIMBAL_ENABLE
-    caps.gimbal = true;
-#else
-    caps.gimbal = false;
-#endif
+    caps.led = (ext_mode == DEEP_DOG_EXT_PIN_LED) && DEEP_DOG_LED_ENABLE;
+    caps.servo = (ext_mode == DEEP_DOG_EXT_PIN_PWM) && DEEP_DOG_SERVO_ENABLE;
+    caps.gimbal = (ext_mode == DEEP_DOG_EXT_PIN_PWM) && DEEP_DOG_GIMBAL_ENABLE;
 #if DEEP_DOG_HANDLE_ENABLE
     caps.handle = true;
 #else

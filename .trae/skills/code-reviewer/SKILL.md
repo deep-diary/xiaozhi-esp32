@@ -81,5 +81,5 @@ Line 42: 用户输入被直接拼进查询语句。
 
 - 嵌入式改动额外检查：RTOS 上下文安全（ISR 内禁用阻塞 API 与动态分配）、`esp_err_t` 返回值是否被忽略、缓冲区长度与并发访问
 - 审到「顺手重构 / 顺手清理」类改动时，按 `.trae/skills/minimal-change-engineer/SKILL.md` 的标准要求拆成独立提交
-- 改动是否超出 `main/boards/deep-dog/swrs/` 已登记范围，按 `.trae/rules/deep-dog-swrs-first.md` 判断
+- 改动是否超出 `main/boards/deep-dog/docs/requirements/` 已登记范围，按 `.trae/rules/deep-dog-docs-first.md` 判断
 - 发现可复用的坑，按 `.trae/rules/deep-dog-lessons-learned.md` 要求沉淀到 `main/boards/deep-dog/docs/ll/`

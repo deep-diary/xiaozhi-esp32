@@ -1,15 +1,15 @@
 # handle BT 源（Bluepad32 + BTstack）
 
 板载 Xbox BLE：`HandleBt*` → Normalize → `HandleEventHub`（`source=bt`）。  
-规格：[I02](../../swrs/input/I02-source-bluepad32-xbox.md)。
+规格：[I02](../../docs/requirements/input/I02-source-bluepad32-xbox.md)。
 
 ## 日常剖面（推荐）
 
 | 项 | 选择 |
 |----|------|
 | 板载 BT | **关**（`-DDEEP_DOG_HANDLE_BT=OFF`，CMake 默认即 OFF） |
-| 手柄输入 | **PC 桥** `source=wifi`（[I03](../../swrs/input/I03-source-pc-mqtt-bridge.md)） |
-| 灯/震调试 | `handle/cmd` **`action: output`**（DS4 HID 或 Xbox pygame rumble，见 [I09](../../swrs/input/I09-ds4-output-feedback.md)） |
+| 手柄输入 | **PC 桥** `source=wifi`（[I03](../../docs/requirements/input/I03-source-pc-mqtt-bridge.md)） |
+| 灯/震调试 | `handle/cmd` **`action: output`**（DS4 HID 或 Xbox pygame rumble，见 [I09](../../docs/requirements/input/I09-ds4-output-feedback.md)） |
 
 板载 BT 已在实机验证过；日常关是为给人脸 / 板级 MQTT / 唤醒让出 **INTERNAL** 堆（开 BT 时常见 `Error create mqtt task` / `esp-aes`）。
 

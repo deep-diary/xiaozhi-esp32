@@ -71,16 +71,14 @@ void DeepDogPairingMqtt::LoadBoundState() {
 }
 
 void DeepDogPairingMqtt::SaveBoundState(bool bound) {
+    // device_id 恒为 MAC（见 mqtt_config.h EffectiveDeviceId）：绑定/解绑不再改 Topic 前缀，
+    // 因此不再写/清 NVS device_id，也不再需要 defer 重启 MQTT 客户端切前缀。
     Settings settings("deep_dog_mqtt", true);
     settings.SetBool("bound", bound);
+    session_active_ = false;
     if (bound) {
-        settings.SetString("device_id", DeepDogMqttConfig::MacCompactDeviceId());
         settings.EraseKey("pair_code");
         pair_code_.clear();
-        session_active_ = false;
-    } else {
-        settings.EraseKey("device_id");
-        session_active_ = false;
     }
     bound_ = bound;
 }
@@ -274,7 +272,7 @@ void DeepDogPairingMqtt::StartPairingSessionOrAnnounceBound() {
         ShowAlreadyBoundAlert();
         return;
     }
-    // 配置了 deep-trace 服务器 → 走 HTTP 配对（见 swrs/mqtt/modules/16-http-pairing）；
+    // 配置了 deep-trace 服务器 → 走 HTTP 配对（见 docs/requirements/mqtt/modules/16-http-pairing）；
     // 未配置 → 走既有 MQTT 配对。两条路径幂等共存。
     const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
     if (!settings.server_api_base.empty()) {

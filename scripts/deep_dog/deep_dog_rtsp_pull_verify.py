@@ -26,7 +26,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT = ROOT / "main/boards/deep-dog/swrs/vision/fixtures/rtsp_pull_verify"
+DEFAULT_OUT = ROOT / "main/boards/deep-dog/docs/requirements/vision/fixtures/rtsp_pull_verify"
 DEFAULT_DEVICE = "http://192.168.31.211:8080"
 DEFAULT_RTSP = "rtsp://192.168.31.25:8554/deep-dog/dev"
 

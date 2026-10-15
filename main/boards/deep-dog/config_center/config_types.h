@@ -49,6 +49,27 @@ struct ConfigCenterConfig {
     bool enable_mqtt_notify = true;
 };
 
+/**
+ * CFG-02：自由引出脚（GPIO38/48）运行时模式。
+ * 只接受 mode（can/pwm/led/uart/rs485/io/ad/none）；gpio_a/gpio_b 为只读。
+ */
+struct IoExtPinsConfig {
+    /** 目标模式名；空 = 本次未下发 */
+    std::string mode;
+};
+
+/**
+ * 配置应用错误项（ack 载荷 `errors[]` 的元素）。
+ *
+ * 契约真源：docs/requirements/config/CFG-01 §4.4（`{field, code, message}`）。
+ * 例：{"field": "io.ext_pins.mode", "code": "E_UNSUPPORTED_MODE", "message": "..."}
+ */
+struct ConfigApplyError {
+    std::string field;    ///< 点分路径，如 "io.ext_pins.mode"
+    std::string code;     ///< 错误码，如 "E_UNSUPPORTED_MODE"
+    std::string message;  ///< 人类可读说明
+};
+
 struct DeviceConfig {
     std::string schema_version = "device.config.v1";
     int config_version = 0;
@@ -60,6 +81,7 @@ struct DeviceConfig {
     MediamtxConfig mediamtx;
     ApiServerConfig api_server;
     ConfigCenterConfig config_center;
+    IoExtPinsConfig ext_pins;
 };
 
 }  // namespace config_center

@@ -9,7 +9,10 @@
  * 联调剖面说明见 FEATURE_FLAGS.md。
  */
 
-/* -------- 自由引出脚 GPIO38/48：成对模式（同一时刻仅一种；IO 与 LED 互斥） --------
+/* -------- 自由引出脚 GPIO38/48：运行时模式（CFG-02） --------
+ * 编译期：38/48 相关软件栈**全部编入**（*_AVAILABLE 恒为 1）；
+ * 运行期：由 ext_pin/ 决定生效模式（NVS + 配置中心下发，重启生效）。
+ *
  * 必须用 #define 数值（不能仅用 enum）：#if 里未定义的标识符一律当 0，
  * 若用 enum 常量比较会出现 NONE==CAN 恒真，MODE_STR 误报 can。
  */
@@ -24,8 +27,8 @@
 
 typedef int deep_dog_ext_pin_mode_t;
 
-/** 联调默认 CAN 单电机（A=38 TX / B=48 RX，见 swrs/motor/01-can-hw-profile.md）；
- *  云台改 _PWM，灯带改 _LED，前端壳 _NONE */
+/** 编译期默认模式（无 NVS 时的兜底）：CAN 单电机（A=38 TX / B=48 RX，见
+ *  docs/requirements/motor/01-can-hw-profile.md）；运行时可改，无需重编。 */
 #ifndef DEEP_DOG_EXT_PIN_MODE
 #define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_CAN
 #endif
@@ -33,49 +36,16 @@ typedef int deep_dog_ext_pin_mode_t;
 #define DEEP_DOG_EXT_PIN_A_GPIO GPIO_NUM_38
 #define DEEP_DOG_EXT_PIN_B_GPIO GPIO_NUM_48
 
-/* 由模式推导硬件可用性（不直接打开产品链） */
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_CAN
-#define DEEP_DOG_CAN_AVAILABLE 1
-#else
-#define DEEP_DOG_CAN_AVAILABLE 0
-#endif
-
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_UART
-#define DEEP_DOG_UART_AVAILABLE 1
-#else
-#define DEEP_DOG_UART_AVAILABLE 0
-#endif
-
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_RS485
+/* 运行时统一切换：所有引出脚外设栈均编入，故 *_AVAILABLE 恒为 1（CFG-02 §4.1） */
+#define DEEP_DOG_CAN_AVAILABLE   1
+#define DEEP_DOG_UART_AVAILABLE  1
 #define DEEP_DOG_RS485_AVAILABLE 1
-#else
-#define DEEP_DOG_RS485_AVAILABLE 0
-#endif
+#define DEEP_DOG_PWM_AVAILABLE   1
+#define DEEP_DOG_IO_AVAILABLE    1
+#define DEEP_DOG_AD_AVAILABLE    1
+#define DEEP_DOG_LED_AVAILABLE   1
 
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_PWM
-#define DEEP_DOG_PWM_AVAILABLE 1
-#else
-#define DEEP_DOG_PWM_AVAILABLE 0
-#endif
-
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_IO
-#define DEEP_DOG_IO_AVAILABLE 1
-#else
-#define DEEP_DOG_IO_AVAILABLE 0
-#endif
-
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_AD
-#define DEEP_DOG_AD_AVAILABLE 1
-#else
-#define DEEP_DOG_AD_AVAILABLE 0
-#endif
-
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_LED
-#define DEEP_DOG_LED_AVAILABLE 1
-#else
-#define DEEP_DOG_LED_AVAILABLE 0
-#endif
-
+/** 编译期默认模式字符串：仅日志 / 兜底用；上报走运行时（ext_pin/） */
 #if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_CAN
 #define DEEP_DOG_EXT_PIN_MODE_STR "can"
 #elif DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_UART
@@ -181,21 +151,13 @@ typedef int deep_dog_ext_pin_mode_t;
 #define TOUCH_BUTTON2_GPIO       (GPIO_NUM_2)
 #define TOUCH_BUTTON3_GPIO       (GPIO_NUM_3)
 
-/* 灯带：mode=led 时默认 DIN=gpio_a(38)、count=24；可覆盖 LED_STRIP_GPIO，仍须 EXT_PIN=LED + LED_ENABLE */
-#if DEEP_DOG_EXT_PIN_MODE == DEEP_DOG_EXT_PIN_LED
+/* 灯带：运行时 LED 模式时 DIN=gpio_a(38)、count=24（仅在生效模式为 led 时初始化）
+ * 可覆盖 DEEP_DOG_LED_STRIP_GPIO；灯带不是 IO 的一种用法，走 LED_ENABLE */
 #ifndef DEEP_DOG_LED_STRIP_GPIO
 #define DEEP_DOG_LED_STRIP_GPIO  DEEP_DOG_EXT_PIN_A_GPIO
 #endif
 #ifndef DEEP_DOG_LED_STRIP_COUNT
 #define DEEP_DOG_LED_STRIP_COUNT 24
-#endif
-#else
-#ifndef DEEP_DOG_LED_STRIP_GPIO
-#define DEEP_DOG_LED_STRIP_GPIO  GPIO_NUM_NC
-#endif
-#ifndef DEEP_DOG_LED_STRIP_COUNT
-#define DEEP_DOG_LED_STRIP_COUNT 0
-#endif
 #endif
 
 #endif // _BOARD_CONFIG_H_

@@ -122,4 +122,4 @@ uint8_t  data[8];
 - `../motor/README.md` — 协议与 `DeepMotor`。
 - `../config.h` + `can/can_config.h` — 引出脚成对模式为 CAN 时映射 TX/RX；总开关 `DEEP_DOG_CAN_ENABLE`。
 - `../dog/README.md` — 整机与 MCP。
-- [`../swrs/mqtt/modules/12-can.md`](../swrs/mqtt/modules/12-can.md) — MQTT `can/*` 透传（网页帧表）。
+- [`../docs/requirements/mqtt/modules/12-can.md`](../docs/requirements/mqtt/modules/12-can.md) — MQTT `can/*` 透传（网页帧表）。

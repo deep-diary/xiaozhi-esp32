@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "config_center/config_types.h"
+
 namespace config_center {
 
 /** pull 结果 */
@@ -59,9 +61,9 @@ public:
     PullResponse Pull(int current_version, const std::string& current_fingerprint,
                       const std::vector<std::string>& schema_versions);
 
-    /** 上报生效结果 */
+    /** 上报生效结果；errors 为 `{field, code, message}` 对象数组（CFG-01 §4.4） */
     AckResponse Ack(int config_version, const std::string& status,
-                    const std::vector<std::string>& errors);
+                    const std::vector<ConfigApplyError>& errors);
 
 private:
     /** POST JSON；返回 HTTP 状态码（-1=网络错误）。resp 收响应体。 */

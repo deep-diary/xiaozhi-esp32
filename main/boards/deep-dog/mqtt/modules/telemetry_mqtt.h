@@ -7,7 +7,7 @@
 class DeepDogMqttClient;
 
 /**
- * deep-trace 遥测上行（见 swrs/mqtt/modules/15-telemetry.md）。
+ * deep-trace 遥测上行（见 docs/requirements/mqtt/modules/15-telemetry.md）。
  * 话题为云端按工位分配的 deep-trace/{home}/{wu}/telemetry，**不挂**模块前缀。
  * 未配置 telemetry_topic 时自禁用，不发。
  */

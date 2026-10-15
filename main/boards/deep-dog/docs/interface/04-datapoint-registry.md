@@ -346,10 +346,16 @@ dp_register_module("motor", kMotorDataPoints, DP_ARRAY_SIZE(kMotorDataPoints),
 > 复杂过程性操作（如 `motor.scan`、`dog.init`、`face.recognize`）**不进入**数据点体系，
 > 仍由各模块独立注册 MCP 工具。数据点只覆盖「标量读写」。
 
-### 3.6 与 Telemetry 的映射
+### 3.6 与 Telemetry 的映射（已实现）
 
 标记了 `DP_CH_TELEMETRY` 的数值型数据点（int / float），由发布引擎自动汇入
-`status/telemetry` 主题的 `points[]` 数组。
+`status/telemetry` 主题的 `points`。
+
+> **实际载荷格式**：为兼容云端既有 ingest，采用**对象格式**
+> （`points.{field_code} = number | {value,unit}`，`field_code` = 点 id 最后一段），
+> 而非下方早期设想的数组。真源见
+> [15-telemetry.md](../../requirements/mqtt/modules/15-telemetry.md)（"数据点自动归并"章节）。
+> 数组形式（`[{key,ts,value}]`）属**未来可选演进**，需云端配合。
 
 **telemetry payload 示例**：
 ```json
@@ -635,5 +641,5 @@ dp_register_module("motor", kMotorDataPoints, DP_ARRAY_SIZE(kMotorDataPoints),
 - [02-ws-contract.md](./02-ws-contract.md) — WebSocket 标准接口契约（MCP 通道）
 - [03-http-api-contract.md](./03-http-api-contract.md) — HTTP REST 标准接口契约
 - [00-architecture-review.md](./00-architecture-review.md) — 现状架构审查
-- [swrs/mqtt/M01-board-mqtt-protocol.md](../../swrs/mqtt/M01-board-mqtt-protocol.md) — M01 板级 MQTT 总览
-- [swrs/mqtt/protocol/deep-dog-mqtt.yml](../../swrs/mqtt/protocol/deep-dog-mqtt.yml) — MQTT YAML 契约真源
+- [requirements/mqtt/M01-board-mqtt-protocol.md](../requirements/mqtt/M01-board-mqtt-protocol.md) — M01 板级 MQTT 总览
+- [requirements/mqtt/protocol/deep-dog-mqtt.yml](../requirements/mqtt/protocol/deep-dog-mqtt.yml) — MQTT YAML 契约真源

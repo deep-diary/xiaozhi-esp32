@@ -26,4 +26,4 @@ void DeviceDataPoints_Register(DeepDogMqttClient* client);
 const DataModuleDef* DeviceDataPoints_GetModuleDef();
 
 /** 数据点总数 */
-constexpr size_t kDeviceDataPointCount = 12;
+constexpr size_t kDeviceDataPointCount = 13;

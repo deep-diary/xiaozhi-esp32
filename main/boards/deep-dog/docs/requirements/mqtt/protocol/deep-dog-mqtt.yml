@@ -1,0 +1,1466 @@
+# deep-dog board MQTT protocol — field source of truth
+# Docs: ../M01-board-mqtt-protocol.md  |  Broker: ../../vision/infra.md
+
+protocol:
+  id: deep-dog-mqtt
+  version: "0.2.0"
+  product: deep-dog
+  description: >
+    Modular full-feature board MQTT contract. Topics are split by module;
+    trim via info/device.capabilities (e.g. disable dog for non-quadruped builds).
+    Stable device_id defaults to STA MAC compact (lowercase, no colons);
+    pairing uses status/pairing + cmd/pairing (see modules/00-pairing).
+    Unified topic skeleton (interop-2, 2026-10): every topic collapses to
+    {prefix}/{device_id}/{kind}/{subject[/...]} with kind in info|status|cmd|event|result.
+    The legacy prefix deepdiary/deep-dog/{device_id} is DEPRECATED; the per-module
+    old->new migration table lives in docs/interface/01-mqtt-contract.md section 5.
+  topic_prefix: "{prefix}/{device_id}"
+  topic_prefix_note: >
+    {prefix} is configurable and MUST be identical across all three ends (device,
+    cloud worker+API, frontend); default deep-trace. Precedence: pairing-issued value
+    > NVS > compile-time default. Device end uses compile macro
+    DEEP_DOG_MQTT_DEFAULT_TOPIC_ROOT plus NVS deep_dog_mqtt.topic_root. Cloud worker/API
+    reads env MQTT_TOPIC_ROOT. Frontend reads VITE_MQTT_TOPIC_ROOT. Changing {prefix}
+    is a breaking change requiring a coordinated three-end rollout.
+  device_id:
+    default: "mac_compact"
+    note: >
+      Device hardware identity used as the {device_id} topic segment: STA MAC compact
+      (lowercase, no colons, e.g. aabbccddeeff); stable and identical for both unbound
+      and bound states. There is NO unbound "dev" identity (namespace cleanup, 2026-10):
+      removing it eliminates the globally-shared dev topic whose retained info/device
+      was overwritten by every unbound device, and removes the bind-time topic switch.
+      NVS deep_dog_mqtt.device_id explicit override for lab only.
+  payload: json
+  conventions:
+    cmd_qos: 1
+    status_qos: 0
+    timestamp_field: ts
+    timestamp_unit: unix_seconds
+    sparse_cmd: true  # only include keys to change
+  # ---- kind 语义词汇表（真源；禁止自造 kind） ----
+  kinds:
+    info:
+      direction: device_to_peer
+      qos: 0
+      retain: true
+      semantics: "上线快照：静态/准静态元数据，晚订阅者必须能拿到"
+      examples: ["info/device", "info/schema"]
+    status:
+      direction: device_to_peer
+      qos: 0
+      retain: "per_subject"  # 快照型 true / 流式型 false，判据见 01-mqtt-contract 3.3
+      semantics: "当前状态：心跳 / 实时值 / 快照；telemetry 是本 kind 的流式子类"
+      examples: ["status/led", "status/imu", "status/telemetry", "status/face/registry"]
+    cmd:
+      direction: peer_to_device
+      qos: 1
+      retain: false
+      semantics: "命令下发；应答固定为 cmd/{subject}/ack（不单列 kind）"
+      examples: ["cmd/led", "cmd/motor", "cmd/led/ack"]
+    event:
+      direction: device_to_peer
+      qos: 0
+      retain: false
+      semantics: "一次性事件：某时刻发生、过期无意义"
+      examples: ["event/stream/photo", "event/touch/tap"]
+    result:
+      direction: device_to_peer
+      qos: 0
+      retain: false
+      semantics: "操作结果帧：对应某次 cmd/action 的离散产出，不可丢"
+      examples: ["result/motor/scan", "result/fct"]
+  kind_boundary_note: >
+    result 与 telemetry 语义层级不同，不可互相替代：
+    - telemetry 是「持续流式的 status」——周期/变化时自动产生，走 status/telemetry，
+      属 kind=status 的流式子类，可采样、可丢，消费方为时序库/实时图表。
+    - result 是「离散应答的产出」——由某个 cmd 或动作触发，走 result/<subject>，
+      属独立 kind，一次性、结构化、不可丢，消费方为调用方/测试框架。
+    判据一句话：状态随时间连续演化 → status(telemetry)；某次操作的结果 → result。
+  client_id:
+    format: "deep-dog-{device_id}-{random}"
+    note: >
+      Random suffix avoids broker session takeover when two clients share a
+      device_id prefix. See modules/00-pairing.
+
+broker:
+  device_preferred: "mqtt://192.168.3.73:1883"
+  device_public_optional: "mqtt://broker.emqx.io:1883"
+  web_ws_lan: "ws://192.168.3.73:8083/mqtt"
+  web_ws: "wss://broker.emqx.io:8084/mqtt"
+  note: >
+    Addresses owned by vision/infra.md. Lab default is local Docker EMQX
+    (DeepServer/emqx/start.sh): device TCP :1883 and web/ingest WS :8083.
+    Public broker.emqx.io remains optional (anonymous lab, not production).
+    Credentials in NVS / secret store only.
+
+modules:
+  pairing:
+    status: defined
+    required: true
+    impl: modules/00-pairing
+    note: >
+      Unbound devices stay silent on boot; pairing via MCP or hold1_tap2.
+      status/pairing with code during session or pro_pairing_mqtt NVS.
+      Device unbind via event/pairing/request (interop-2 also offers uplink HTTP);
+      backend confirms via cmd/pairing.
+  device:
+    status: defined
+    required: true
+  dog:
+    status: defined
+    required: false
+    trim_note: "Disable for non-quadruped products"
+  stream:
+    status: defined
+    required: false
+    impl: modules/02-stream
+  face:
+    status: defined
+    required: false
+    impl: modules/04-face
+    note: "UI shares detail page with track (modules/04-face); topics stay in the face family (status/face*, cmd/face, event/face/*)"
+  imu:
+    status: defined
+    required: false
+    chip: BMI270
+    impl: D9
+    ref: main/boards/deep-thumble/sensor/
+  led:
+    status: defined
+    required: false
+    impl: mqtt/modules/led_mqtt
+    ref: main/boards/deep-dog/led/
+  servo:
+    status: defined
+    required: false
+    ref: main/boards/deep-diary/servo/
+  gimbal:
+    status: defined
+    required: false
+    depends: [servo]
+    impl: mqtt/modules/gimbal_mqtt
+    note: >
+      Product pan/tilt path; mutually exclusive with bare servo on same EXT pins.
+      Default board profile: GIMBAL=1 SERVO=0. Keymap via handle profile=gimbal (I08a).
+    ref: main/boards/deep-dog/gimbal/
+  handle:
+    status: defined
+    required: false
+    note: >
+      Dual-source v0.1: onboard Bluepad32+BTstack Xbox BLE (source=bt) and PC MQTT
+      bridge (source=wifi, cmd/handle/input). Hub+App layering in docs/requirements/input/;
+      keymap+profile (I08a/I08b) selects HandleApp class; press/hold + axis_bindings;
+      profiles led_demo|gimbal|motor|dog|off.
+    ref: main/boards/deep-dog/docs/requirements/input/
+    impl: modules/11-handle
+  touch:
+    status: defined
+    required: false
+    note: "Driver + touch_mqtt; status/touch thresholds+calib; cmd/touch set/calibrate/reset"
+    ref: main/boards/deep-dog/touch_btn/
+  can:
+    status: ready
+    required: false
+    note: >
+      TWAI tunnel to MQTT for web frame table. Pins GPIO38/48 from esp-sparkbot UART
+      reused as CAN_TX/RX on deep-dog. Align web UI with deep-trace 80-can-web-tunnel.
+    ref: main/boards/deep-dog/can/
+    impl: modules/12-can
+    pins:
+      tx_gpio: 38
+      rx_gpio: 48
+      sparkbot_was: "UART_ECHO_TXD/RXD"
+  motor:
+    status: ready
+    required: false
+    depends: [can]
+    note: >
+      Single-motor semantic control via DeepMotor (position/enable/MIT). Complements
+      the raw CAN tunnel (cmd/can, status/can). Handle profile=motor catalog in docs/requirements/motor/04 + I08b axes.
+    ref: main/boards/deep-dog/motor/
+    impl: modules/14-motor
+  person:
+    status: ready
+    required: false
+    impl: V-P01
+  track:
+    status: ready
+    required: false
+    depends: [face]
+    depends_optional: [gimbal, dog]
+    impl: modules/05-track
+    ui: modules/04-face
+    note: >
+      MQTT ready with actuator=none (no real pan). No separate device-page entry card.
+      Frontend: /modules/face#track; /modules/track redirects there. Device reads face
+      snapshot in-process; optional gimbal/dog actuators later.
+  config:
+    status: ready
+    required: false
+    impl: CFG-01
+    doc: ../config/CFG-01-unified-config-center.md
+    note: >
+      Unified config center notify channel. Downlink cmd/config triggers an immediate
+      HTTP config pull; periodic HTTP poll is the fallback. No device-page entry card.
+
+topics:
+  # ---- pairing ----
+  status/pairing:
+    module: pairing
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect_if_bound_or_pairing_session_or_pro_mode
+    payload:
+      device_id: { type: string, note: "STA MAC compact, e.g. aabbccddeeff" }
+      mac: { type: string, optional: true, note: "AA:BB:CC:DD:EE:FF display form" }
+      code: { type: string, optional: true, note: "6 digit chars when pairing session active or pro_pairing_mqtt" }
+      bound: { type: bool }
+      ts: { type: int }
+      ts_iso: { type: string, optional: true }
+
+  event/pairing/request:
+    module: pairing
+    dir: uplink
+    qos: 1
+    retain: false
+    when: user_unbind_via_mcp_or_hold1_tap3
+    payload:
+      action: { type: string, note: "unbind" }
+      device_id: { type: string }
+      ts: { type: int }
+
+  cmd/pairing:
+    module: pairing
+    dir: downlink
+    qos: 1
+    retain: false
+    payload:
+      action: { type: string, note: "bound|unbind|start_pairing (unbound uses device_id=MAC)" }
+      ts: { type: int }
+
+  # ---- device ----
+  info/device:
+    module: device
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect
+    payload:
+      device_id: { type: string, note: "same as topic prefix id; default MAC compact" }
+      firmware: { type: string }
+      board: { type: string, optional: true, note: "BOARD_NAME / board id, e.g. deep-dog" }
+      chip_model: { type: string, optional: true, note: "CONFIG_IDF_TARGET, e.g. esp32s3" }
+      idf_version: { type: string, optional: true }
+      flash_size: { type: int, optional: true, note: "bytes" }
+      mac: { type: string, optional: true }
+      ip: { type: string, optional: true }
+      http_port: { type: int, optional: true }
+      ws_mcp_port: { type: int, optional: true, note: "WebSocket MCP server port" }
+      ws_mcp_path: { type: string, optional: true, note: "WebSocket MCP server path, e.g. /mcp" }
+      reset_reason:
+        type: string
+        optional: true
+        note: "esp_reset_reason short form: poweron|external|software|panic|watchdog|deepsleep|brownout|sdio|unknown"
+      power:
+        type: object
+        optional: true
+        fields:
+          supported: { type: bool, note: "deep-dog currently false (no ADC/PMIC)" }
+          level_pct: { type: int, optional: true, note: "0-100 when supported" }
+          charging: { type: bool, optional: true }
+      ext_pins:
+        type: object
+        optional: true
+        note: "自由引出脚 GPIO38/48 成对模式；前端据此切换 can/uart/pwm/led 等页面。运行时可配置见 CFG-02"
+        fields:
+          mode: { type: string, note: "当前生效模式：none|can|uart|rs485|pwm|io|ad|led" }
+          gpio_a: { type: int, note: "DEEP_DOG_EXT_PIN_A_GPIO；mode=led 时为 WS2812 DIN" }
+          gpio_b: { type: int, note: "DEEP_DOG_EXT_PIN_B_GPIO；mode=led 时空闲保留" }
+          supported_modes:
+            type: array
+            optional: true
+            note: "本固件实际编入的模式白名单（CFG-02）；前端据此禁用不可选项；旧固件无此字段"
+          pending_mode:
+            type: string
+            optional: true
+            note: "已下发、待重启生效的模式（CFG-02）；无待生效时省略或 null"
+          apply_policy:
+            type: string
+            optional: true
+            note: "模式生效策略；v1 固定 restart（重启生效）"
+      capabilities:
+        type: object
+        fields:
+          dog: { type: bool }
+          motor: { type: bool, note: "CAN 电机栈；可无 dog" }
+          stream: { type: bool }
+          face: { type: bool }
+          track: { type: bool }
+          imu: { type: bool }
+          led: { type: bool }
+          servo: { type: bool }
+          gimbal: { type: bool }
+          handle: { type: bool }
+          touch: { type: bool }
+          can: { type: bool }
+          arm: { type: bool, note: "机械臂占位" }
+          uart: { type: bool }
+          ws_mcp: { type: bool, note: "WebSocket MCP server available" }
+      ts: { type: int }
+      ts_iso: { type: string, optional: true }
+
+  status/device:
+    module: device
+    dir: uplink
+    qos: 0
+    retain: false
+    when: heartbeat
+    publish_hz: 0.2
+    payload:
+      online: { type: bool }
+      uptime_s: { type: int, optional: true }
+      free_heap: { type: int, optional: true, note: "esp_get_free_heap_size bytes" }
+      min_free_heap: { type: int, optional: true, note: "esp_get_minimum_free_heap_size bytes" }
+      mem:
+        type: object
+        optional: true
+        fields:
+          internal:
+            type: object
+            fields:
+              free: { type: int }
+              min: { type: int }
+              total: { type: int }
+              largest_free: { type: int, optional: true }
+              used: { type: int, optional: true, note: "total - free" }
+          psram:
+            type: object
+            fields:
+              free: { type: int }
+              min: { type: int }
+              total: { type: int, note: "0 if no PSRAM" }
+              largest_free: { type: int, optional: true }
+              used: { type: int, optional: true }
+      rssi: { type: int, optional: true }
+      wifi_ssid: { type: string, optional: true, note: "status only; may change on roam" }
+      wifi_channel: { type: int, optional: true }
+      health:
+        type: object
+        optional: true
+        fields:
+          ok: { type: bool }
+          warn:
+            type: array
+            items: { type: string }
+            note: "e.g. low_internal_heap (<32KiB free); clock_unsynced; motor faults stay in status/dog"
+      clock_synced:
+        type: bool
+        optional: true
+        note: "true when time() is plausible Unix sec (>=1e9); see docs/requirements/net/N01-sntp-clock-sync.md"
+      task_count: { type: int, optional: true, note: "requires CONFIG_FREERTOS_USE_TRACE_FACILITY" }
+      tasks:
+        type: array
+        optional: true
+        items:
+          type: object
+          fields:
+            name: { type: string }
+            prio: { type: int }
+            stack_hwm: { type: int, note: "FreeRTOS high water mark bytes (unused stack)" }
+            stack_domain: { type: string, optional: true, enum: [internal, psram, unknown] }
+            stack_used_est: { type: int, optional: true, note: "known alloc - stack_hwm" }
+            state: { type: int, note: "eTaskState enum value" }
+      ts: { type: int }
+      ts_iso: { type: string, optional: true }
+
+  # ---- telemetry (migrated into unified skeleton) ----
+  status/telemetry:
+    module: telemetry
+    dir: uplink
+    qos: 0
+    retain: false
+    when: periodic_throttled
+    topic:
+      template: "{prefix}/{device_id}/status/telemetry"
+      note: >
+        Migrated from the legacy cloud-assigned deep-trace/{home_code}/{work_unit_code}/telemetry
+        (that topic's 2nd segment was a work-unit code, conflicting with the {device_id} slot).
+        Device now publishes to {prefix}/{device_id}/status/telemetry; cloud ingest wildcard-subscribes
+        {prefix}/+/status/telemetry and maps device_id -> WorkUnit.
+        Source of {prefix}: HTTP pairing handshake `topics` or NVS deep_dog_mqtt.topic_root.
+        Empty => telemetry disabled. See modules/15-telemetry and docs/interface/01-mqtt-contract.md 5.5.
+    impl: modules/15-telemetry
+    payload:
+      home_code: { type: string }
+      work_unit_code: { type: string }
+      device_program: { type: string, note: "e.g. esp_sparkbot" }
+      ts: { type: string, note: "ISO8601 with timezone" }
+      points:
+        type: object
+        note: "key=field_code; value=number or {value,unit}; must be numeric-convertible"
+        fields:
+          free_heap: { type: int }
+          min_free_heap: { type: int }
+          internal_free: { type: int }
+          psram_free: { type: int, optional: true }
+          rssi: { type: int }
+          uptime_s: { type: int }
+
+  # ---- dog ----
+  cmd/dog:
+    module: dog
+    dir: downlink
+    qos: 1
+    retain: false
+    http: "POST /api/cmd?cmd="
+    payload:
+      cmd:
+        type: enum
+        values: [init, forward, back, stand, liedown, dance, stop_walk, disable]
+      ts: { type: int }
+
+  status/dog:
+    module: dog
+    dir: uplink
+    qos: 0
+    retain: true
+    http: "GET /api/status + /api/dog_status summary"
+    payload:
+      dog_initialized: { type: bool }
+      has_fault: { type: bool, optional: true }
+      ts: { type: int }
+
+  # ---- stream ----
+  cmd/stream:
+    module: stream
+    dir: downlink
+    qos: 1
+    retain: false
+    http: "POST /api/vision_publish"
+    payload:
+      action: { type: enum, values: [start, stop, take_photo] }
+      mode:
+        type: enum
+        values: [off, stream, rtsp_push]
+        optional: true
+        note: "default start->rtsp_push, stop->off; stop always forces off; ignored for take_photo"
+      question:
+        type: string
+        optional: true
+        note: "only for take_photo; default 描述画面里有什么"
+      ts: { type: int, optional: true }
+
+  event/stream/photo:
+    module: stream
+    dir: uplink
+    qos: 0
+    retain: false
+    when: after_take_photo
+    payload:
+      ok: { type: bool }
+      result: { type: string, optional: true, note: "Explain response when ok (often stringified JSON)" }
+      error: { type: string, optional: true }
+      elapsed_ms: { type: int }
+      ts: { type: int }
+
+  status/stream:
+    module: stream
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_change
+    http: "GET /api/status push_status/push_url/play_url/lan_play_url/mode"
+    payload:
+      state: { type: enum, values: [idle, starting, streaming, error] }
+      mode: { type: enum, values: [off, stream, rtsp_push] }
+      url:
+        type: string
+        note: "Public HLS play URL (DEEP_DOG_VISION_PUBLIC_PLAY_URL); always present for web player"
+      lan_url:
+        type: string
+        optional: true
+        note: "LAN HLS (DEEP_DOG_VISION_LAN_PLAY_URL); same MediaMTX path"
+      push_url:
+        type: string
+        optional: true
+        note: "Device RTSP publish URL (LAN); empty when not pushing"
+      error:
+        type: string
+        optional: true
+        note: "empty when ok; codes: invalid_json|missing_action|bad_mode|start_requires_mode|unknown_action|stream_unavailable|push_error|no_rtp|auto_stop_timeout|http_stream_disabled"
+      voice_paused:
+        type: bool
+        optional: true
+        note: "true while RTSP push active and voice/AFE paused"
+      ts: { type: int }
+      ts_iso: { type: string, optional: true, note: "UTC ISO8601 for UI display" }
+
+  # ---- face ----
+  cmd/face:
+    module: face
+    dir: downlink
+    qos: 1
+    retain: false
+    http: "POST /api/face_enable (+ clear_db / pipeline / interval via MQTT)"
+    payload:
+      enabled: { type: bool, optional: true, note: "master switch; default true at boot (DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1); lazy-loads runtime on first true if not boot-started" }
+      action:
+        type: enum
+        values: [clear_db, rename, delete_one, merge, refresh_immich, set_immich_config, ping_immich, refresh_status]
+        optional: true
+        note: "clear_db= wipe all; merge=alias; refresh_status= force uplink status/face (UI sync); set_immich_config= NVS fdog_im; ping_immich= probe server/ping"
+      local_id: { type: int, optional: true }
+      target_local_id: { type: int, optional: true, note: "merge canonical target" }
+      display_name: { type: string, optional: true, note: "rename" }
+      api_url: { type: string, optional: true, note: "Immich API root for set_immich_config" }
+      api_key: { type: string, optional: true, note: "Immich x-api-key; never echoed on uplink" }
+      delete_asset: { type: int, optional: true, note: "0 keep temp asset / 1 delete after naming" }
+      latitude: { type: number, optional: true, note: "home GPS for Immich timeline (set_immich_config, with longitude)" }
+      longitude: { type: number, optional: true, note: "home GPS for Immich timeline (set_immich_config, with latitude)" }
+      recognize_enabled: { type: bool, optional: true, note: "false=detect only, no enroll" }
+      pipeline:
+        type: enum
+        values: [live, identity]
+        optional: true
+        note: "live=detect at interval, recog slower; identity=detect+recog same interval"
+      detect_interval_ms:
+        type: int
+        optional: true
+        note: "clamped 200-5000; echoed in status/face"
+      ts: { type: int, optional: true }
+
+  status/face:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: false
+    when: on_change_or_poll_heartbeat
+    note: "retain=false; ~30s forced publish of control fields (enabled/recognize_enabled) for late subscribers; boxes on_change when detect on"
+    http: "GET /api/face"
+    payload:
+      enabled: { type: bool }
+      recognize_enabled: { type: bool, optional: true }
+      pipeline: { type: enum, values: [live, identity], optional: true }
+      detect_interval_ms: { type: int, optional: true }
+      has_person: { type: bool, alias: has_face }
+      n: { type: int }
+      w: { type: int }
+      h: { type: int }
+      primary:
+        type: object
+        optional: true
+        fields:
+          cx: { type: number }
+          cy: { type: number }
+          score: { type: number, optional: true }
+      faces:
+        type: array
+        item:
+          x0: { type: number }
+          y0: { type: number }
+          x1: { type: number }
+          y1: { type: number }
+          cx: { type: number }
+          cy: { type: number }
+          score: { type: number, optional: true }
+          local_id: { type: int, optional: true }
+          display_name: { type: string, optional: true }
+      ts: { type: int }
+
+  status/face/registry:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect, on_recognizer_ready, on_face_cmd, on_enroll_bind_rename_merge_delete_clear
+    note: "MQTT connect publishes current snapshot; recognizer NVS restore must republish to overwrite stale empty retain when Face AI lazy-starts"
+    payload:
+      version: { type: int }
+      count: { type: int, note: "canonical entries count" }
+      feat_count: { type: int, note: "embedding slots in use (may differ from count when aliases exist)" }
+      max_count: { type: int, note: "DEEP_DOG_FACE_RECOG_MAX (32)" }
+      entries:
+        type: array
+        item:
+          local_id: { type: int }
+          display_name: { type: string }
+          immich_person_id: { type: string, optional: true }
+          immich_asset_id: { type: string, optional: true }
+          aliases: { type: array, item: { type: int }, optional: true }
+          updated_at: { type: int, note: "meta write time (rename/Immich bind)" }
+          last_seen_at: { type: int, optional: true, note: "Unix sec, last successful recognition" }
+      ts: { type: int }
+
+  status/face/immich:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_connect_config_change_periodic_ping
+    payload:
+      configured: { type: bool }
+      url: { type: string }
+      key_len: { type: int }
+      delete_asset: { type: int }
+      server_ok: { type: bool }
+      server_http: { type: int, optional: true }
+      ping_ms: { type: int, optional: true }
+      inflight: { type: int }
+      last: { type: string }
+      last_local_id: { type: int }
+      ts: { type: int }
+
+  event/face/thumb:
+    module: face
+    dir: uplink
+    qos: 0
+    retain: false
+    status: planned
+    note: "optional JPEG base64 crop; default off; event-triggered only — not implemented yet"
+    payload:
+      local_id: { type: int, optional: true }
+      mime: { type: string }
+      w: { type: int }
+      h: { type: int }
+      b64: { type: string }
+      ts: { type: int }
+
+  # ---- imu ----
+  status/imu:
+    module: imu
+    dir: uplink
+    qos: 0
+    retain: false
+    chip: BMI270
+    publish_hz: 10
+    note: "MQTT telemetry ~10 Hz; local switch detect target 100 Hz (chip ODR 200 Hz); switches.* = edge counts since previous publish"
+    units:
+      accel: m_s2
+      gyro: dps
+      angle: deg
+    payload:
+      ok: { type: bool }
+      accel_x: { type: float }
+      accel_y: { type: float }
+      accel_z: { type: float }
+      accel_g: { type: float, note: "sqrt(x^2+y^2+z^2)" }
+      gyro_x: { type: float }
+      gyro_y: { type: float }
+      gyro_z: { type: float }
+      pitch: { type: float, note: "estimated from accel" }
+      roll: { type: float, note: "estimated from accel" }
+      switches:
+        type: object
+        note: "12 edge-pulse counts since previous status/imu frame (6 rot ± + 6 trans ±); 0 if none; all 0 when ok=false; body frame; no flip_* / no displacement"
+        fields:
+          rot_x_pos: { type: int, note: "gyro integrate +X axis past angle threshold" }
+          rot_x_neg: { type: int, note: "gyro integrate -X axis past angle threshold" }
+          rot_y_pos: { type: int, note: "gyro integrate +Y axis past angle threshold" }
+          rot_y_neg: { type: int, note: "gyro integrate -Y axis past angle threshold" }
+          rot_z_pos: { type: int, note: "gyro integrate +Z axis past angle threshold (typical table left/right yaw)" }
+          rot_z_neg: { type: int, note: "gyro integrate -Z axis past angle threshold" }
+          trans_x_pos: { type: int, note: "linear impulse +X after gravity removal" }
+          trans_x_neg: { type: int, note: "linear impulse -X after gravity removal" }
+          trans_y_pos: { type: int, note: "linear impulse +Y after gravity removal" }
+          trans_y_neg: { type: int, note: "linear impulse -Y after gravity removal" }
+          trans_z_pos: { type: int, note: "linear impulse +Z after gravity removal" }
+          trans_z_neg: { type: int, note: "linear impulse -Z after gravity removal" }
+      ts: { type: int }
+
+  # ---- led ----
+  cmd/led:
+    module: led
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    payload:
+      mode: { type: enum, values: [0, 1, 2, 3, 4, 5], note: "off/static/blink/breathe/scroll/system" }
+      brightness: { type: int, range: [0, 255], optional: true }
+      low_brightness: { type: int, range: [0, 255], optional: true }
+      r: { type: int, range: [0, 255], optional: true }
+      g: { type: int, range: [0, 255], optional: true }
+      b: { type: int, range: [0, 255], optional: true }
+      low_r: { type: int, range: [0, 255], optional: true }
+      low_g: { type: int, range: [0, 255], optional: true }
+      low_b: { type: int, range: [0, 255], optional: true }
+      interval_ms: { type: int, optional: true }
+      scroll_length: { type: int, optional: true }
+      ts: { type: int }
+
+  status/led:
+    module: led
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      mode: { type: int }
+      brightness: { type: int }
+      low_brightness: { type: int, optional: true }
+      r: { type: int }
+      g: { type: int }
+      b: { type: int }
+      low_r: { type: int, optional: true }
+      low_g: { type: int, optional: true }
+      low_b: { type: int, optional: true }
+      interval_ms: { type: int, optional: true }
+      scroll_length: { type: int, optional: true }
+      led_count: { type: int, optional: true }
+      ok: { type: bool }
+      ts: { type: int }
+
+  # ---- servo ----
+  cmd/servo:
+    module: servo
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "Low-level; prefer gimbal/* for pan-tilt product path"
+    payload:
+      index: { type: int, note: "0=GPIO38(A), 1=GPIO48(B)" }
+      angle: { type: int, optional: true }
+      duration_ms: { type: int, optional: true, note: "0 or omit = ASAP; >0 interpolate to angle" }
+      attach: { type: bool, optional: true }
+      type: { type: enum, values: [90, 180, 270, 360], optional: true }
+      ts: { type: int }
+
+  status/servo:
+    module: servo
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      servos:
+        type: array
+        item:
+          index: { type: int }
+          angle: { type: int }
+          target: { type: int, optional: true, note: "goal angle; equals angle when idle" }
+          attached: { type: bool }
+          moving: { type: bool, optional: true }
+          type: { type: int, optional: true }
+          min: { type: int, optional: true }
+          max: { type: int, optional: true }
+      ts: { type: int }
+
+  # ---- gimbal ----
+  cmd/gimbal:
+    module: gimbal
+    dir: downlink
+    qos: 1
+    retain: false
+    note: >
+      Either mode absolute|relative (+pan/tilt), or action-based control.
+      speed / pan_speed / tilt_speed in deg/s; 0 speed on absolute = ASAP.
+    payload:
+      mode: { type: enum, values: [absolute, relative], optional: true }
+      pan: { type: number, optional: true }
+      tilt: { type: number, optional: true }
+      speed: { type: number, optional: true, note: "deg/s for this move; 0 = ASAP" }
+      action:
+        type: enum
+        optional: true
+        values:
+          - nudge_left
+          - nudge_right
+          - nudge_up
+          - nudge_down
+          - jog_start
+          - jog_stop
+          - pan_speed_up
+          - pan_speed_down
+          - tilt_speed_up
+          - tilt_speed_down
+          - set_speed
+          - stop
+          - home
+      dir:
+        type: enum
+        values: [left, right, up, down]
+        optional: true
+        note: "jog_start"
+      pan_speed: { type: number, optional: true, note: "set_speed; deg/s" }
+      tilt_speed: { type: number, optional: true, note: "set_speed; deg/s" }
+      ts: { type: int }
+
+  status/gimbal:
+    module: gimbal
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      pan: { type: number }
+      tilt: { type: number }
+      pan_speed: { type: number, note: "deg/s" }
+      tilt_speed: { type: number, note: "deg/s" }
+      step_deg: { type: number }
+      moving_pan: { type: bool }
+      moving_tilt: { type: bool }
+      ready: { type: bool }
+      lim_pan: { type: array, item: number, optional: true }
+      lim_tilt: { type: array, item: number, optional: true }
+      ts: { type: int }
+
+  # ---- handle ----
+  # Snapshot fields (status uplink + input downlink) share the same shape.
+  cmd/handle:
+    module: handle
+    dir: downlink
+    qos: 1
+    retain: false
+    note: >
+      enable/disable gate local HandleApps; pair onboard BT;
+      rumble = board BT Xbox (I02, lean profile); output = PC-bridge DS4 LED+rumble
+      or Xbox pygame rumble (I09, daily profile). Device may PUBLISH output (alerts);
+      bridge SUB and applies.
+      Keymap (I08a/I08b): set_keymap/get_keymap/reset_keymap/set_profile;
+      profile selects which HandleApp class drives actuators
+      (led_demo|gimbal|motor|dog|off). Discrete press+hold + axis_bindings.
+    payload:
+      action:
+        type: enum
+        values:
+          - enable
+          - disable
+          - pair
+          - rumble
+          - output
+          - set_keymap
+          - get_keymap
+          - reset_keymap
+          - set_profile
+      duration_ms: { type: int, optional: true, note: "rumble or output; ms; cap ~2000" }
+      weak: { type: int, optional: true, note: "BT rumble weak 0-255" }
+      strong: { type: int, optional: true, note: "BT rumble strong 0-255" }
+      delay_ms: { type: int, optional: true, note: "BT rumble delay ms" }
+      led:
+        type: object
+        optional: true
+        note: "output only; DS4 lightbar"
+        fields:
+          r: { type: int, range: [0, 255] }
+          g: { type: int, range: [0, 255] }
+          b: { type: int, range: [0, 255] }
+      rumble:
+        type: object
+        optional: true
+        note: "output only; normalized motors (PC bridge)"
+        fields:
+          strong: { type: float, range: [0, 1], note: "large motor" }
+          weak: { type: float, range: [0, 1], note: "small motor" }
+      merge: { type: bool, optional: true, note: "set_keymap; default true" }
+      persist: { type: bool, optional: true, note: "keymap/profile; default true" }
+      profile:
+        type: enum
+        values: [led_demo, gimbal, motor, dog, off]
+        optional: true
+        note: "set_profile; App-class slice (I08a §0)"
+      bindings:
+        type: object
+        optional: true
+        note: >
+          set_keymap; keys a|b|x|y|l1|r1|start|select|dpad_*|l3|r3;
+          value = {press:{id,...}, hold:{id,...}} or legacy flat {id,...}=press only
+      axis_bindings:
+        type: object
+        optional: true
+        note: >
+          set_keymap (I08b); keys lx|ly|rx|ry|l2|r2;
+          value = {id, optional motor_id|scale|deadzone}
+      ts: { type: int }
+
+  status/handle/keymap:
+    module: handle
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_change_or_reconnect_or_get
+    note: >
+      I08a/I08b schema_ver 7: press/hold + axis_bindings; bindable_keys/axes;
+      catalog filtered by profile (led_demo|gimbal|motor|dog|off).
+      set_profile always loads that app's default key+axis bindings.
+      gimbal defaults: rx→gimbal.pan_rate, ry→gimbal.tilt_rate;
+      factory default profile=gimbal when GIMBAL_ENABLE.
+    payload:
+      schema_ver: { type: int }
+      ok: { type: bool }
+      profile: { type: enum, values: [led_demo, gimbal, motor, dog, off] }
+      persist: { type: bool }
+      source: { type: enum, values: [nvs, default, mqtt] }
+      bindable_keys:
+        type: array
+        item: { type: string }
+        note: "all remappable bool keys for UI"
+      bindable_axes:
+        type: array
+        item: { type: string }
+        note: "lx|ly|rx|ry (signed [-1,1]); l2|r2 (unit [0,1])"
+      bindings:
+        type: object
+        note: "each bindable key → {press,hold} with {id, optional params}"
+      axis_bindings:
+        type: object
+        note: >
+          each bindable axis → {id, optional params};
+          gimbal defaults rx→gimbal.pan_rate, ry→gimbal.tilt_rate
+      catalog:
+        type: array
+        item: { type: [string, object] }
+        note: >
+          action ids or {id,kind,value_domain} for current profile (+ none);
+          gimbal axis: gimbal.pan_rate|gimbal.tilt_rate (signed)
+      warnings:
+        type: array
+        item: { type: string }
+        optional: true
+      ts: { type: int }
+
+  cmd/handle/input:
+    module: handle
+    dir: downlink
+    qos: 0
+    retain: false
+    when: on_change_or_poll
+    note: >
+      PC/web injects control snapshot (PS4/Xbox bridge). Device merges into
+      HandleEventHub; last-writer-wins. Prefer source=wifi. See docs/requirements/input/I03.
+    payload:
+      connected: { type: bool }
+      source: { type: enum, values: [bt, usb, wifi], optional: true, note: "bridge should set wifi" }
+      axes:
+        type: object
+        fields:
+          lx: { type: float, range: [-1, 1] }
+          ly: { type: float, range: [-1, 1] }
+          rx: { type: float, range: [-1, 1] }
+          ry: { type: float, range: [-1, 1] }
+      buttons:
+        type: object
+        fields:
+          a: { type: bool }
+          b: { type: bool }
+          x: { type: bool }
+          y: { type: bool }
+          l1: { type: bool }
+          r1: { type: bool }
+          l2: { type: float, range: [0, 1] }
+          r2: { type: float, range: [0, 1] }
+          start: { type: bool }
+          select: { type: bool }
+      touchpad:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 touchpad (I06). Absent = source unsupported / flag off.
+          x/y = primary contact (compat). contacts[] up to 2 fingers (I06 dual).
+        fields:
+          active: { type: bool }
+          x: { type: float, range: [0, 1] }
+          y: { type: float, range: [0, 1] }
+          fingers: { type: int, optional: true }
+          contacts:
+            type: array
+            optional: true
+            note: "0..2 items; each {active,x,y}"
+            item:
+              active: { type: bool }
+              x: { type: float, range: [0, 1] }
+              y: { type: float, range: [0, 1] }
+      motion:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 onboard IMU (I07). Absent without HID full report.
+          Body frame: +X right, +Y forward (light bar), +Z up;
+          flat face-up => accel_z ≈ -1 g. gyro_* dps; accel_* g.
+          Not board status/imu. See I07.
+        fields:
+          gyro_x: { type: float }
+          gyro_y: { type: float }
+          gyro_z: { type: float }
+          accel_x: { type: float }
+          accel_y: { type: float }
+          accel_z: { type: float }
+      raw: { type: object, optional: true }
+      ts: { type: int }
+
+  status/handle:
+    module: handle
+    dir: uplink
+    qos: 0
+    retain: false
+    when: on_change_or_poll
+    note: >
+      Merged control request after Hub normalize (bt and/or wifi input).
+      Web UI read-only viz; actuators consume via HandleApps not this topic alone.
+    payload:
+      connected: { type: bool }
+      source: { type: enum, values: [bt, usb, wifi], optional: true }
+      axes:
+        type: object
+        fields:
+          lx: { type: float, range: [-1, 1] }
+          ly: { type: float, range: [-1, 1] }
+          rx: { type: float, range: [-1, 1] }
+          ry: { type: float, range: [-1, 1] }
+      buttons:
+        type: object
+        fields:
+          a: { type: bool }
+          b: { type: bool }
+          x: { type: bool }
+          y: { type: bool }
+          l1: { type: bool }
+          r1: { type: bool }
+          l2: { type: float, range: [0, 1] }
+          r2: { type: float, range: [0, 1] }
+          start: { type: bool }
+          select: { type: bool }
+      touchpad:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 touchpad passthrough (I06). Absent when input omitted it.
+          x/y primary; contacts[] up to 2.
+        fields:
+          active: { type: bool }
+          x: { type: float, range: [0, 1] }
+          y: { type: float, range: [0, 1] }
+          fingers: { type: int, optional: true }
+          contacts:
+            type: array
+            optional: true
+            item:
+              active: { type: bool }
+              x: { type: float, range: [0, 1] }
+              y: { type: float, range: [0, 1] }
+      motion:
+        type: object
+        optional: true
+        note: >
+          Optional DS4 IMU passthrough (I07). Body frame +X right/+Y forward/+Z up;
+          flat face-up => accel_z ≈ -1 g. gyro dps, accel g.
+        fields:
+          gyro_x: { type: float }
+          gyro_y: { type: float }
+          gyro_z: { type: float }
+          accel_x: { type: float }
+          accel_y: { type: float }
+          accel_z: { type: float }
+      raw: { type: object, optional: true }
+      ts: { type: int }
+
+  # ---- touch ----
+  cmd/touch:
+    module: touch
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    note: "Threshold tune + single-button soft calibrate; see modules/06-touch.md"
+    payload:
+      action:
+        type: enum
+        values: [set_thresholds, calibrate, reset_thresholds, cancel_calibrate]
+      persist: { type: bool, optional: true, default: true }
+      debug: { type: bool, optional: true, note: "Force debug[] in status" }
+      press_abs_ratio: { type: float, optional: true }
+      release_abs_ratio: { type: float, optional: true }
+      press_abs_offset: { type: int, optional: true }
+      release_abs_offset: { type: int, optional: true }
+      debounce_cycles: { type: int, optional: true }
+      baseline_alpha: { type: float, optional: true }
+      buttons:
+        type: array
+        optional: true
+        item:
+          id: { type: int, values: [1, 2, 3] }
+          press_abs_min: { type: int, optional: true }
+          release_abs_min: { type: int, optional: true }
+      button_id: { type: int, optional: true, values: [1, 2, 3], note: "calibrate" }
+      samples: { type: int, optional: true, default: 10, note: "calibrate" }
+
+  status/touch:
+    module: touch
+    dir: uplink
+    qos: 0
+    retain: true
+    when: on_button_event
+    note: "Full snapshot + thresholds always; calib progress; debug when calib or DEEP_DOG_TOUCH_MQTT_DEBUG/cmd"
+    payload:
+      ok: { type: bool }
+      pressed_mask: { type: int, note: "bit0/1/2 = button 1/2/3 currently pressed" }
+      buttons:
+        type: array
+        length: 3
+        item:
+          id: { type: int, values: [1, 2, 3] }
+          pressed: { type: bool }
+          long_press: { type: bool }
+          last_event:
+            type: enum
+            values: [press, release, long_press, short_press, double_click]
+      thresholds:
+        type: object
+        note: "Always present when controller bound"
+        fields:
+          press_abs_ratio: { type: float }
+          release_abs_ratio: { type: float }
+          press_abs_offset: { type: int }
+          release_abs_offset: { type: int }
+          debounce_cycles: { type: int }
+          baseline_alpha: { type: float, optional: true }
+          baseline_update_abs_ratio: { type: float, optional: true }
+          baseline_update_abs_offset: { type: int, optional: true }
+          buttons:
+            type: array
+            length: 3
+            item:
+              id: { type: int, values: [1, 2, 3] }
+              press_abs_min: { type: int }
+              release_abs_min: { type: int }
+      calib:
+        type: object
+        optional: true
+        fields:
+          active: { type: bool }
+          button_id: { type: int }
+          phase: { type: enum, values: [idle, collect, done, fail] }
+          count: { type: int }
+          samples: { type: int }
+          error: { type: string, optional: true }
+      last_combo:
+        type: object
+        optional: true
+        note: "Present after combo recognizer hit when DEEP_DOG_TOUCH_COMBO_ENABLE=1; retained with snapshot"
+        fields:
+          id:
+            type: enum
+            values:
+              [chord_short_1_2, chord_short_1_3, chord_short_2_3, hold1_tap2, hold1_tap3]
+          ts: { type: int, note: "Unix seconds of combo recognition" }
+      debug:
+        type: array
+        optional: true
+        item:
+          id: { type: int }
+          value: { type: int }
+          baseline: { type: int }
+          abs_diff: { type: int }
+      ts: { type: int }
+
+  # ---- can (TWAI MQTT tunnel for web frame table) ----
+  cmd/can:
+    module: can
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    note: "Enable tunnel + rate limits; allow_tx default false"
+    payload:
+      tunnel: { type: bool, optional: true }
+      mirror_tx: { type: bool, optional: true }
+      allow_tx: { type: bool, optional: true, default: false }
+      max_hz: { type: int, optional: true, default: 50 }
+      batch_max: { type: int, optional: true, default: 32 }
+      id_filter:
+        type: array
+        optional: true
+        item: { type: [int, string], note: "decimal or 0x hex string" }
+      ext_only: { type: bool, optional: true }
+      ts: { type: int }
+
+  status/can:
+    module: can
+    dir: uplink
+    qos: 0
+    retain: true
+    payload:
+      ok: { type: bool }
+      tunnel: { type: bool }
+      allow_tx: { type: bool }
+      bitrate_kbps: { type: int }
+      tx_gpio: { type: int }
+      rx_gpio: { type: int }
+      bus_state: { type: int, optional: true }
+      rx_err: { type: int, optional: true }
+      tx_err: { type: int, optional: true }
+      bus_err: { type: int, optional: true }
+      dropped: { type: int, optional: true }
+      ts: { type: int }
+
+  status/can/frames:
+    module: can
+    dir: uplink
+    qos: 0
+    retain: false
+    when: tunnel_batch
+    note: "Packed frames for web CAN table; throttle via max_hz/batch_max"
+    web_ref: "deep-trace docs/requirements/features/iot/80-can-web-tunnel.md"
+    payload:
+      frames:
+        type: array
+        item:
+          dir: { type: enum, values: [rx, tx] }
+          id: { type: int }
+          id_hex: { type: string }
+          ext: { type: bool }
+          rtr: { type: bool }
+          dlc: { type: int, range: [0, 8] }
+          data_hex: { type: string, note: "even-length hex, 0..16 chars" }
+          ts_ms: { type: int, optional: true }
+      dropped: { type: int, optional: true }
+      ts: { type: int }
+
+  cmd/can/tx:
+    module: can
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "Inject frames only if status/can.allow_tx==true"
+    payload:
+      frames:
+        type: array
+        item:
+          id: { type: int, optional: true }
+          id_hex: { type: string, optional: true }
+          ext: { type: bool }
+          rtr: { type: bool, optional: true }
+          dlc: { type: int, range: [0, 8] }
+          data_hex: { type: string }
+      ts: { type: int }
+
+  # ---- motor (DeepMotor semantic control) ----
+  cmd/motor:
+    module: motor
+    dir: downlink
+    qos: 1
+    retain: false
+    sparse: true
+    note: "Enable/position/MIT for one motor_id; see modules/14-motor"
+    payload:
+      motor_id: { type: int, range: [1, 255] }
+      enable: { type: bool, optional: true }
+      reset: { type: bool, optional: true }
+      position_rad: { type: float, optional: true, note: "clamp ±12.57" }
+      speed_limit: { type: float, optional: true }
+      iq_ref: { type: float, optional: true }
+      mit:
+        type: object
+        optional: true
+        fields:
+          position_rad: { type: float }
+          velocity_rad_s: { type: float, optional: true }
+          kp: { type: float, optional: true }
+          kd: { type: float, optional: true }
+          torque_ff: { type: float, optional: true }
+      teaching:
+        type: string
+        optional: true
+        note: "start | stop | play (MOT-11/12)"
+      teaching_motor_ids:
+        type: array
+        optional: true
+        note: "multi-axis motor ids"
+      sample_period_ms: { type: int, optional: true, note: "EPScan period on start, default 50" }
+      play_duration_ms: { type: int, optional: true, note: "uniform play ms, default 10000" }
+      play_blend_ms: { type: int, optional: true, note: "blend to first point ms, default 3000" }
+      play_time_scale: { type: float, optional: true, note: "timeline scale, default 1.0" }
+      play_use_timeline: { type: bool, optional: true, note: "use recorded t_ms, default true" }
+      play_kp: { type: float, optional: true }
+      play_kd: { type: float, optional: true }
+      play_tau_ff: { type: float, optional: true }
+      mcp_call:
+        type: object
+        optional: true
+        note: "Invoke self.motor.* / self.can.* MCP tool (MOT-10)"
+        fields:
+          name: { type: string }
+          arguments: { type: object, optional: true }
+      ts: { type: int, optional: true }
+
+  cmd/motor/scan:
+    module: motor
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "Discovery scan; {started, range} to start a scan, or {event:'discovered', id, ...} to register"
+    payload:
+      started: { type: bool, optional: true, note: "start a discovery scan" }
+      range: { type: array, item: int, optional: true, note: "candidate motor ids to probe" }
+      event: { type: string, optional: true, note: "discovered" }
+      id: { type: int, optional: true, note: "discovered motor id" }
+      ts: { type: int, optional: true }
+
+  status/motor/tools:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: true
+    note: "MCP tool catalog for motor debug page"
+    payload:
+      tools: { type: array }
+      ts: { type: int }
+
+  event/motor/mcp_result:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: false
+    note: "Result of cmd/motor mcp_call"
+    payload:
+      name: { type: string }
+      ok: { type: bool }
+      result: { type: object, optional: true }
+      text: { type: string, optional: true }
+      error: { type: string, optional: true }
+      ts: { type: int }
+
+  event/motor/scan:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: false
+    when: scan_discovery
+    note: "Discovery result frame (was motor/scan_result); pairs with cmd/motor/scan"
+    payload:
+      event: { type: string, note: "discovered" }
+      id: { type: int, note: "discovered motor id" }
+      ts: { type: int }
+
+  status/motor:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: true
+    note: "Registered motors feedback snapshot"
+    payload:
+      ok: { type: bool }
+      motors:
+        type: array
+        item:
+          id: { type: int }
+          init_state: { type: string, optional: true, note: "none|initializing|ready|failed" }
+          position_rad: { type: float }
+          speed_rad_s: { type: float }
+          torque_nm: { type: float }
+          temperature: { type: float, optional: true }
+          fault: { type: bool, optional: true }
+          target_rad: { type: float, optional: true }
+      ts: { type: int }
+
+  event/motor/teaching:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: false
+    note: "Teaching track after stop (MOT-12)"
+    payload:
+      motor_id: { type: int }
+      point_count: { type: int }
+      duration_ms: { type: int }
+      sample_period_ms: { type: int }
+      samples:
+        type: array
+        item:
+          t_ms: { type: int }
+          pos: { type: float }
+          vel: { type: float }
+      ts: { type: int }
+
+  status/motor/teaching:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: true
+    note: "Teaching session summary"
+    payload:
+      recording: { type: bool }
+      ready: { type: bool }
+      motor_id: { type: int, optional: true }
+      point_count: { type: int, optional: true }
+      duration_ms: { type: int, optional: true }
+      ts: { type: int }
+
+  # ---- person ----
+  status/person/active:
+    module: person
+    dir: uplink
+    qos: 0
+    retain: true
+    status: ready
+
+  # ---- config (CFG-01 统一配置中心) ----
+  cmd/config:
+    module: config
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "配置变更通知：设备收到后立即触发一次 HTTP config/pull"
+    payload:
+      action: { type: string, note: "refresh" }
+      config_version: { type: int, optional: true }
+      reason: { type: string, optional: true, note: "template_updated|manual_update|bulk_push" }
+      ts: { type: int, optional: true }
+
+  cmd/config/ack:
+    module: config
+    dir: uplink
+    qos: 0
+    retain: false
+    note: "收到 cmd/config 后的即时回执（真正的生效回执走 HTTP ack）"
+    payload:
+      action: { type: string }
+      result: { type: string, note: "accepted|unsupported" }
+      config_version: { type: int }
+      has_remote_config: { type: bool }
+      ts_iso: { type: string }
+    when: primary_local_id_changes
+    note: "Identity event for Face page / Kiosk; no separate Person entry card"
+    payload:
+      local_id: { type: int, optional: true }
+      display_name: { type: string, optional: true }
+      immich_person_id: { type: string, optional: true }
+      ts: { type: int }
+
+  cmd/track:
+    module: track
+    dir: downlink
+    qos: 1
+    retain: false
+    status: ready
+    note: >
+      enable/disable tracking. If face detect off or no primary, accept enable
+      but status/track.following stays false.
+    payload:
+      action: { type: enum, values: [enable, disable], optional: true }
+      ts: { type: int }
+
+  status/track:
+    module: track
+    dir: uplink
+    qos: 0
+    retain: false
+    status: ready
+    when: on_change
+    note: >
+      UI on face detail page; target mirrors face primary (pixels).
+      v0.1 actuator always none; error may be face_off / no_target.
+    payload:
+      enabled: { type: bool }
+      following: { type: bool }
+      target:
+        type: object
+        optional: true
+        fields:
+          cx: { type: number }
+          cy: { type: number }
+          local_id: { type: int, optional: true }
+      actuator:
+        type: enum
+        optional: true
+        values: [none, gimbal, dog]
+      error: { type: string, optional: true }
+      ts: { type: int }

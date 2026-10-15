@@ -24,8 +24,8 @@
 
 /**
  * Topic 前缀中的 device_id；与 RTSP path deep-dog/<id> 对齐。
- * 未绑定默认 "dev"；已绑定默认 STA MAC 紧凑串（见 Load / EffectiveDeviceId）。
- * NVS 显式写入 device_id 可覆盖（仅联调）。
+ * **恒为 STA MAC 紧凑串**（未绑定 / 绑定一致，见 Load / EffectiveDeviceId）；本宏仅作解析前占位，
+ * 并作为"历史遗留 dev 身份"的无效标记（NVS 若为 "dev" 将被忽略）。
  */
 #ifndef DEEP_DOG_MQTT_DEFAULT_DEVICE_ID
 #define DEEP_DOG_MQTT_DEFAULT_DEVICE_ID "dev"
@@ -60,7 +60,7 @@
 
 /**
  * 编译默认 deep-trace 服务器 API 基址（HTTP 配对）；配网页/NVS 非空则覆盖。
- * 生产默认留空，由配网门户设置（见 swrs/net/N03）。
+ * 生产默认留空，由配网门户设置（见 docs/requirements/net/N03）。
  */
 #ifndef DEEP_DOG_MQTT_DEFAULT_SERVER_API_BASE
 #define DEEP_DOG_MQTT_DEFAULT_SERVER_API_BASE ""
@@ -105,9 +105,9 @@ struct DeepDogMqttSettings {
     std::string username;
     std::string password;
     int keepalive_s = DEEP_DOG_MQTT_DEFAULT_KEEPALIVE_S;
-    /** deep-trace 服务器 API 基址（HTTP 配对，见 swrs/mqtt/modules/16-http-pairing） */
+    /** deep-trace 服务器 API 基址（HTTP 配对，见 docs/requirements/mqtt/modules/16-http-pairing） */
     std::string server_api_base;
-    /** deep-trace 遥测话题（云端按工位分配；空=关闭，见 swrs/mqtt/modules/15-telemetry） */
+    /** deep-trace 遥测话题（云端按工位分配；空=关闭，见 docs/requirements/mqtt/modules/15-telemetry） */
     std::string telemetry_topic;
     std::string home_code;
     std::string work_unit_code;
@@ -129,8 +129,8 @@ public:
     static std::string DefaultClientId(const std::string& device_id);
     /** STA MAC 紧凑小写无冒号，如 aabbccddeeff */
     static std::string MacCompactDeviceId();
-    /** NVS override 非空则用之；否则 bound→MAC，未绑定→dev */
-    static std::string EffectiveDeviceId(bool bound, const std::string& nvs_override);
+    /** NVS override 非空且非遗留 "dev" 则用之；否则 STA MAC（恒 MAC，与 bound 无关） */
+    static std::string EffectiveDeviceId(const std::string& nvs_override);
     static std::string StreamPathForDeviceId(const std::string& device_id);
     static std::string RtspPushUrlForDeviceId(const std::string& device_id);
     static std::string PublicHlsUrlForDeviceId(const std::string& device_id);

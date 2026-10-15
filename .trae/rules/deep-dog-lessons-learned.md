@@ -12,7 +12,7 @@ alwaysApply: true
 `main/boards/deep-dog/docs/ll/`
 
 - 目录约定、模板、索引见 `main/boards/deep-dog/docs/ll/README.md`。
-- 新经验以 `LL-NNN-<slug>.md` 命名（三位序号全局递增），并更新 `README.md` 的「索引」。
+- 新经验以 `LL-NNN-<slug>.md` 命名（三位序号全局递增），并更新 `README.md` 的「索引」。格式与模板见 `main/boards/deep-dog/docs/CONVENTIONS.md`。
 
 ## 何时记录（满足任一条）
 

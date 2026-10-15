@@ -129,7 +129,7 @@ topic 骨架与载荷规范见 [01-mqtt-contract.md](./01-mqtt-contract.md)。
 | joynet 手柄 | 3s | `useJoyNetHandleMqtt.js:23` |
 | ECU 工位 | 45s | `useEcuStationMqtt.js:19` |
 | MQTT 重连 | 4000ms | `mqttBroker.js:178-193` |
-| 设备 MQTT 重连 | ~3s | `swrs/mqtt/M01:39` |
+| 设备 MQTT 重连 | ~3s | `requirements/mqtt/M01:39` |
 
 ### 5.2 建议（统一规范）
 

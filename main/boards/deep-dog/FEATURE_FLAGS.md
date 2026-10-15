@@ -9,7 +9,7 @@
 | [`config.h`](./config.h) | 硬件 GPIO + **自由引出脚成对模式** `DEEP_DOG_EXT_PIN_MODE` |
 | [`board_features.h`](./board_features.h) | 分层 ENABLE：**引出脚外设**（CAN/UART/IO/LED…）→ 产品链 → **与脚位无关** |
 
-**只改一个宏开/关云台**：`board_features.h` 里的 `DEEP_DOG_GIMBAL_ENABLE`（需 `EXT_PIN=PWM`）。不要单独改底层 `Servo.c` 开关；驱动随 `GIMBAL|SERVO` 自动编入。模块侧请 `#include "config.h"`，**禁止**直接 include `board_features.h`（否则 `*_AVAILABLE` 未定义会被当成 0，误关云台）。
+**云台 vs 裸舵机（同脚二选一，编译期）**：`board_features.h` 里的 `DEEP_DOG_GIMBAL_ENABLE`（默认 1，`PWM` 生效模式下初始化云台）。不要单独改底层 `Servo.c` 开关；驱动随 `GIMBAL|SERVO` 自动编入。模块侧请 `#include "config.h"`，**禁止**直接 include `board_features.h`（否则 `*_AVAILABLE` 未定义会被当成 0，误关云台）。
 
 模块参数（波特率、电机增益、步态等）留在各目录 `*_config.h`，**不要**在模块内写死 GPIO 38/48。
 
@@ -30,20 +30,26 @@
 
 同一 `EXT_PIN_MODE` 下 **IO 与 LED 不会同时 AVAILABLE**；灯带不是「IO 的一种用法」，而是独立模式。
 
-> **运行时可配置（规划中）**：以上 `DEEP_DOG_EXT_PIN_MODE` 目前是**编译期**选择；改为 web/配置中心下发 + 重启生效的完整方案见 [CFG-02](./swrs/config/CFG-02-ext-pin-runtime-mode.md)（体积实测：全模式编入仅 +22KB）。
+> **运行时可配置（已落地，CFG-02）**：38/48 模式不再需要重编固件——所有引出脚软件栈全部编入，
+> 由 NVS / 配置中心下发 `io.ext_pins.mode` 决定生效模式（**重启生效**，失败自动回滚）。
+> `DEEP_DOG_EXT_PIN_MODE` 现在只是**编译期默认/兜底**。详见 [`swrs/config/CFG-02`](./docs/requirements/config/CFG-02-ext-pin-runtime-mode.md)。
 
-## 引出脚外设 ENABLE（`board_features.h`，须 `EXT_PIN_MODE` 匹配）
+## 引出脚外设 ENABLE（`board_features.h`，默认全 1 = 编入）
 
-| 宏 | 须 EXT_PIN | 说明 |
-|----|------------|------|
-| `CAN_ENABLE` / `MOTOR_ENABLE` | `CAN` | TWAI + DeepMotor |
-| `UART_ENABLE` | `UART` | 串口 echo |
-| `RS485_ENABLE` | `RS485` | 占位 |
-| `IO_ENABLE` | `IO` | 普通 GPIO 栈（`io_ext/`） |
-| `AD_ENABLE` | `AD` | 占位 |
-| `LED_ENABLE` | `LED` | WS2812 + MQTT/MCP（`led/`）；DIN 默认 38，可在 `config.h` 覆盖 `DEEP_DOG_LED_STRIP_GPIO` |
+| 宏 | 生效模式 | 说明 |
+|----|----------|------|
+| `CAN_ENABLE` / `MOTOR_ENABLE` | `can` | TWAI + DeepMotor（运行时按模式初始化） |
+| `UART_ENABLE` | `uart` | 串口 echo |
+| `RS485_ENABLE` | `rs485` | 占位 |
+| `IO_ENABLE` | `io` | 普通 GPIO 栈（`io_ext/`） |
+| `AD_ENABLE` | `ad` | 占位 |
+| `LED_ENABLE` | `led` | WS2812 + MQTT/MCP（`led/`）；DIN 默认 38，可在 `config.h` 覆盖 `DEEP_DOG_LED_STRIP_GPIO` |
+| `SERVO_ENABLE` / `GIMBAL_ENABLE` | `pwm` | 舵机 / 云台（同脚互斥，`GIMBAL` 优先） |
 
-**灯带不在 38/48 上时**：保持 `EXT_PIN=LED`（MQTT `ext_pins.mode=led`），在 `config.h` 里 `#define DEEP_DOG_LED_STRIP_GPIO GPIO_NUM_xx` 即可；仍用 `LED_ENABLE=1`，**不要**改用 `IO_ENABLE`。
+> CFG-02 后：`*_ENABLE=1` 只表示「编入固件」，**不再要求**与 `EXT_PIN_MODE` 匹配；
+> 真正决定初始化哪个栈的是运行时生效模式（`ext_pin/`）。
+
+**灯带不在 38/48 上时**：在 `config.h` 里 `#define DEEP_DOG_LED_STRIP_GPIO GPIO_NUM_xx` 即可；仍用 `LED_ENABLE=1`，**不要**改用 `IO_ENABLE`。
 
 ## 分层 ENABLE（CAN 栈）
 
@@ -62,6 +68,9 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 > 说明：`can/`、`motor/`、`dog/`、`leg/`、`trajectory/` 的实现 TU 用整文件 `#if DEEP_DOG_*_ENABLE` 门控（`WHOLE_ARCHIVE` 下空 TU 几乎不占 flash）。调用侧（板级初始化 / MCP / HTTP 狗 API / 触摸）同步 `#if`。改开关后普通重编即可，无需改 CMake。
 
 ## 联调剖面
+
+> CFG-02 后「剖面」= **运行时生效模式**（`ext_pin/` 决定）。下表 `EXT_PIN` 列即目标 mode；
+> 产品级开关（`DOG` / `ARM` / `SERVO` vs `GIMBAL`）仍需编译期决定。
 
 | 剖面 | EXT_PIN | CAN | MOTOR | DOG | ARM | SERVO/GIMBAL | 说明 |
 |------|---------|-----|-------|-----|-----|--------------|------|
@@ -91,11 +100,15 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 `device/info`（retain）含：
 
 ```json
-"ext_pins": { "mode": "can", "gpio_a": 38, "gpio_b": 48 },
+"ext_pins": {
+  "mode": "can", "gpio_a": 38, "gpio_b": 48,
+  "supported_modes": ["can","pwm","led","uart","rs485","io","ad","none"],
+  "pending_mode": "pwm", "apply_policy": "restart"
+},
 "capabilities": { "can", "motor", "dog", "arm", "uart", "servo", "gimbal", "led", ... }
 ```
 
-前端：`ext_pins.mode` 选总线类页面；`capabilities.motor` vs `dog` 区分电机调试与四足。当前默认 `config.h` 为 **`EXT_PIN=CAN`** + `CAN_ENABLE=1`/`MOTOR_ENABLE=1`（单电机 CAN 联调，38=TX/48=RX）；云台联调改回 `EXT_PIN=PWM`。MQTT 联调默认 broker 见 [infra.md](./swrs/vision/infra.md)（`192.168.3.73:1883（本机 EMQX；见 infra.md）`）。
+前端：`ext_pins.mode` 选总线类页面；`capabilities.motor` vs `dog` 区分电机调试与四足。编译默认 `config.h` 为 **`EXT_PIN=CAN`**（单电机 CAN 联调，38=TX/48=RX），可运行时改（`pending_mode` → 重启生效）。MQTT 联调默认 broker 见 [infra.md](./docs/requirements/vision/infra.md)（`192.168.3.73:1883（本机 EMQX；见 infra.md）`）。
 
 ## 目录与依赖
 

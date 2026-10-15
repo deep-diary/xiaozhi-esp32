@@ -25,7 +25,7 @@
 | MQTT | `mqtt/mqtt_config.*`、`mqtt/mqtt_client.*`、`mqtt/modules/*_mqtt.*` | `backend/devices/mqtt_standard.py`、`mqtt_publish.py`、`telemetry/consumers/*`、`devices/consumers/*` |
 | WebSocket | `ws-mcp/deep_dog_ws_mcp_server.*` | `config/asgi.py`（无 Channels）、`frontend/src/composables/useDeviceWsMcp.js` 等 |
 | HTTP | `http-server/deep_dog_http_server.cc`、`pairing/deep_dog_pair_http.cc` | 各 app `urls.py`/`views.py` |
-| 契约文档 | `swrs/mqtt/protocol/deep-dog-mqtt.yml`、`M01`、`M02` | `docs/requirements/features/device-platform/unified-mqtt-subscription.md`、`docs/design/unified-device-architecture.md` |
+| 契约文档 | `requirements/mqtt/protocol/deep-dog-mqtt.yml`、`M01`、`M02` | `docs/requirements/features/device-platform/unified-mqtt-subscription.md`、`docs/design/unified-device-architecture.md` |
 
 ---
 
@@ -266,7 +266,7 @@ graph LR
 |------|------|
 | 缺"契约 ↔ 代码"一致性校验 | ✅ 新增后端单测 `devices/tests/test_mqtt_standard.py`（前缀可配置/kind 全集/ack 形态）；前端沿用 `mqttUnified` 单测 |
 | `deep-dog-mqtt.yml` 旧主题/重复键 | ✅ 重写 `0.2.0`（44 topics，去重） |
-| 板级旧文档（`swrs/mqtt/**`、`input/**`、`vision/infra.md`）仍写旧前缀 | ⏳ 需逐篇同步（建议随下次板级文档维护批量改，本文档为权威替代） |
+| 板级旧文档（`requirements/mqtt/**`、`input/**`、`vision/infra.md`）仍写旧前缀 | ⏳ 需逐篇同步（建议随下次板级文档维护批量改，本文档为权威替代） |
 | `ingest` 仍从 DB 订阅旧 `telemetry` topic | ⏳ 过渡期保留（新骨架通配已覆盖）；待 seed 更新后清理 |
 
 ### 复查结论

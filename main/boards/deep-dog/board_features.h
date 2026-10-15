@@ -16,7 +16,8 @@
  *   LED_AVAILABLE → LED（WS2812；DIN 默认 gpio_a，可在 config.h 覆盖 LED_STRIP_GPIO）
  */
 
-/* -------- 引出脚外设（须 config.h EXT_PIN_MODE 匹配；A/B 默认 38/48） -------- */
+/* -------- 引出脚外设（运行时模式选择，见 CFG-02；A/B 默认 38/48） --------
+ * 全部默认编入 = 1：由 ext_pin/ 在启动时按生效模式只初始化其中一个。 */
 #ifndef DEEP_DOG_CAN_ENABLE
 #define DEEP_DOG_CAN_ENABLE 1
 #endif
@@ -24,24 +25,25 @@
 #define DEEP_DOG_MOTOR_ENABLE 1
 #endif
 #ifndef DEEP_DOG_UART_ENABLE
-#define DEEP_DOG_UART_ENABLE 0
+#define DEEP_DOG_UART_ENABLE 1
 #endif
 #ifndef DEEP_DOG_RS485_ENABLE
-#define DEEP_DOG_RS485_ENABLE 0
+#define DEEP_DOG_RS485_ENABLE 1
 #endif
 /** EXT_PIN=IO：两路普通 GPIO 输入/输出（非 WS2812；灯带用 LED_ENABLE） */
 #ifndef DEEP_DOG_IO_ENABLE
-#define DEEP_DOG_IO_ENABLE 0
+#define DEEP_DOG_IO_ENABLE 1
 #endif
 #ifndef DEEP_DOG_AD_ENABLE
-#define DEEP_DOG_AD_ENABLE 0
+#define DEEP_DOG_AD_ENABLE 1
 #endif
 /** EXT_PIN=LED：WS2812 灯带（DIN 默认 gpio_a；脚位见 config.h DEEP_DOG_LED_STRIP_GPIO） */
 #ifndef DEEP_DOG_LED_ENABLE
-#define DEEP_DOG_LED_ENABLE 0
+#define DEEP_DOG_LED_ENABLE 1
 #endif
 
-/* -------- CAN 产品链（须 CAN+MOTOR） -------- */
+/* -------- CAN 产品链（须 CAN+MOTOR）--------
+ * 产品级开关（非引脚模式）：保持编译期决定，运行时模式只决定 CAN 硬件是否可用。 */
 #ifndef DEEP_DOG_DOG_ENABLE
 #define DEEP_DOG_DOG_ENABLE 0
 #endif
@@ -49,9 +51,9 @@
 #define DEEP_DOG_ARM_ENABLE 0
 #endif
 
-/* -------- 引出脚 PWM 产品（须 EXT_PIN=PWM） -------- */
+/* -------- 引出脚 PWM 产品（生效模式=PWM 时才初始化） -------- */
 #ifndef DEEP_DOG_SERVO_ENABLE
-#define DEEP_DOG_SERVO_ENABLE 0
+#define DEEP_DOG_SERVO_ENABLE 1
 #endif
 #ifndef DEEP_DOG_GIMBAL_ENABLE
 #define DEEP_DOG_GIMBAL_ENABLE 1

@@ -108,5 +108,5 @@ void app_main(void) {
 ## 本项目落地（xiaozhi-esp32 / deep-dog）
 
 - 构建/烧录/监控流程见 `AGENTS.md`：`idf.py build` → `flash` → `monitor`，观察 `ESP_LOGE` / crash / OOM
-- 改动 deep-dog 板级功能前，先按 `.trae/rules/deep-dog-swrs-first.md` 对齐 `main/boards/deep-dog/swrs/` 需求文档
+- 改动 deep-dog 板级功能前，先按 `.trae/rules/deep-dog-docs-first.md` 对齐 `main/boards/deep-dog/docs/requirements/` 需求文档
 - 踩到可复用的坑时，按 `.trae/rules/deep-dog-lessons-learned.md` 沉淀到 `main/boards/deep-dog/docs/ll/`

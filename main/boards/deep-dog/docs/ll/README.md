@@ -45,4 +45,4 @@
 | [LL-002](./LL-002-board-type-not-switched.md) | 板型未切换导致编出别的板 | BOARD_TYPE / sdkconfig / 编错板 / SKU=deep-dog |
 | [LL-003](./LL-003-ccache-cmake-cxx-features.md) | ccache 导致 CMake CXX 特性探测失败 + 新增源需 reconfigure | ccache / target_compile_features / GLOB / undefined reference |
 | [LL-004](./LL-004-httpd-and-datapoint-http.md) | HTTP/WS 服务与 ESP-IDF httpd 踩坑 | uri_match_fn / 通配符 URI 404 / ESP_ERR_HTTPD_TASK / internal 内存 / 复用 httpd |
-| [LL-004](./LL-004-restore-headers-and-union-size-measure.md) | 还原头文件后增量编译不生效 + 全模式固件体积实测方法 | Copy-Item mtime / ninja 假增量 / 全集体积 / nm 符号校验 |
+| [LL-005](./LL-005-restore-headers-and-union-size-measure.md) | 还原头文件后增量编译不生效 + 全模式固件体积实测方法 | Copy-Item mtime / ninja 假增量 / 全集体积 / nm 符号校验 |

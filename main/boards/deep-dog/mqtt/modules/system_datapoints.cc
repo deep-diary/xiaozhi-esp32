@@ -99,7 +99,7 @@ static const DataPointDef kSystemDataPoints[kSystemDataPointCount] = {
         0, 2147483647.0f, 1,
         nullptr,
         DP_ACCESS_RO,
-        DP_CH_MQTT | DP_CH_HTTP | DP_CH_MCP | DP_CH_TELEMETRY,
+        DP_CH_MQTT | DP_CH_HTTP | DP_CH_MCP,  // 不上 telemetry（uptime_s 由 device.uptime_s 提供，避免重复）
         DP_POLICY_PERIODIC,
         30000,
         0,
@@ -108,7 +108,7 @@ static const DataPointDef kSystemDataPoints[kSystemDataPointCount] = {
         { nullptr },
     },
     {
-        "system.free_heap_internal",
+        "system.internal_free",
         "内部空闲内存",
         "system",
         nullptr,
@@ -128,7 +128,7 @@ static const DataPointDef kSystemDataPoints[kSystemDataPointCount] = {
         { nullptr },
     },
     {
-        "system.min_free_heap_internal",
+        "system.min_free_heap",
         "内部最小空闲",
         "system",
         nullptr,
@@ -139,7 +139,7 @@ static const DataPointDef kSystemDataPoints[kSystemDataPointCount] = {
         0, 524288.0f, 1,
         nullptr,
         DP_ACCESS_RO,
-        DP_CH_MQTT | DP_CH_HTTP | DP_CH_MCP,
+        DP_CH_MQTT | DP_CH_HTTP | DP_CH_MCP | DP_CH_TELEMETRY,
         DP_POLICY_PERIODIC,
         30000,
         0,
@@ -168,7 +168,7 @@ static const DataPointDef kSystemDataPoints[kSystemDataPointCount] = {
         { nullptr },
     },
     {
-        "system.free_heap_psram",
+        "system.psram_free",
         "PSRAM 空闲内存",
         "system",
         nullptr,

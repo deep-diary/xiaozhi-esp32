@@ -27,7 +27,7 @@
 
 ## MQTT / 手柄
 
-- Topic：`gimbal/cmd` · `gimbal/status`（见 `swrs/mqtt/modules/09-gimbal.md`）
+- Topic：`gimbal/cmd` · `gimbal/status`（见 `docs/requirements/mqtt/modules/09-gimbal.md`）
 - 按键绑定：`handle/keymap`，`profile=gimbal`（I08a press/hold）
 
 ## 出厂手柄建议（profile=gimbal）

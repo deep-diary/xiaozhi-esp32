@@ -247,6 +247,13 @@ public:
     /** 将指定模块的所有 RO/RW 数据点序列化为 JSON 对象（追加到 target_obj） */
     bool SerializeModuleStatus(const char* module_name, cJSON* target_obj) const;
 
+    /**
+     * 将带 DP_CH_TELEMETRY 的数值点（int/float）汇入 telemetry 的 points 对象。
+     * key 取点 id 最后一段（如 device.free_heap -> free_heap）；value 为 number 或 {value, unit}。
+     * @return 汇入的点数量
+     */
+    int AppendTelemetryPoints(cJSON* points_obj) const;
+
     /** 生成完整 schema JSON（用于 info/schema 主题发布） */
     cJSON* BuildSchemaJson() const;
 

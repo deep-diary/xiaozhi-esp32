@@ -5,7 +5,7 @@
 #include <string>
 
 /**
- * deep-trace HTTP 配对（见 swrs/mqtt/modules/16-http-pairing.md）。
+ * deep-trace HTTP 配对（见 docs/requirements/mqtt/modules/16-http-pairing.md）。
  * 握手领码 → 屏显 + 语音 → 轮询确认 → 应用身份（回调触发主循环 reload）。
  * 独立任务，不阻塞主循环；支持 Cancel。
  */

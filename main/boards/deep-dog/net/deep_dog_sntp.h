@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/** WiFi 联网后 SNTP 同步 UTC（幂等）。见 swrs/net/N01-sntp-clock-sync.md */
+/** WiFi 联网后 SNTP 同步 UTC（幂等）。见 docs/requirements/net/N01-sntp-clock-sync.md */
 void DeepDogSntpInit(void);
 
 /** true 当 time(nullptr) >= 1e9（SNTP 或 OTA server_time 已设钟） */

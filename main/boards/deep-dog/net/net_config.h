@@ -6,7 +6,7 @@
  */
 
 /**
- * Wi‑Fi STA 寻址（见 swrs/net/N02-sta-address.md）：
+ * Wi‑Fi STA 寻址（见 docs/requirements/net/N02-sta-address.md）：
  * 默认 DHCP——换网段不必改固件；WS MCP 听 0.0.0.0，客户端用当前 STA IP。
  * 仅固定实验室可置 1，并填**当前**网段的 IP/网关（写死 31 网段在非 31 环境会搞挂 DNS/OTA）。
  */
@@ -31,7 +31,7 @@
 #define DEEP_DOG_WIFI_STATIC_NM_O4 0
 #endif
 
-/** WiFi 获 IP 后 SNTP 同步 UTC（见 swrs/net/N01-sntp-clock-sync.md） */
+/** WiFi 获 IP 后 SNTP 同步 UTC（见 docs/requirements/net/N01-sntp-clock-sync.md） */
 #ifndef DEEP_DOG_SNTP_ENABLE
 #define DEEP_DOG_SNTP_ENABLE 1
 #endif

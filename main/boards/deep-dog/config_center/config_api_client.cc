@@ -280,15 +280,20 @@ PullResponse ConfigApiClient::Pull(int current_version, const std::string& curre
 }
 
 AckResponse ConfigApiClient::Ack(int config_version, const std::string& status,
-                                 const std::vector<std::string>& errors) {
+                                 const std::vector<ConfigApplyError>& errors) {
     AckResponse out;
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "config_version", config_version);
     cJSON_AddStringToObject(root, "status", status.c_str());
+    // errors[] 元素为对象 {field, code, message}（CFG-01 §4.4）
     cJSON* errs = cJSON_AddArrayToObject(root, "errors");
     for (const auto& e : errors) {
-        cJSON_AddItemToArray(errs, cJSON_CreateString(e.c_str()));
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "field", e.field.c_str());
+        cJSON_AddStringToObject(item, "code", e.code.c_str());
+        cJSON_AddStringToObject(item, "message", e.message.c_str());
+        cJSON_AddItemToArray(errs, item);
     }
     char* body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

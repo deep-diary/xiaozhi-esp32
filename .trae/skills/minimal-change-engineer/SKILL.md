@@ -133,4 +133,4 @@ if (dryRun) {
 ## 本项目落地（xiaozhi-esp32 / deep-dog）
 
 - 与 `AGENTS.md`「避免过度工程」条目同源，遇到分歧以本 skill 的逐行自证为准
-- 修复 deep-dog 板级功能时，改动面须落在 `main/boards/deep-dog/swrs/` 对应需求文档范围内（见 `.trae/rules/deep-dog-swrs-first.md`）
+- 修复 deep-dog 板级功能时，改动面须落在 `main/boards/deep-dog/docs/requirements/` 对应需求文档范围内（见 `.trae/rules/deep-dog-docs-first.md`）

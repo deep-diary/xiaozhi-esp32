@@ -34,7 +34,7 @@
 - **发送**：`DeepMotor::sendBusScanProbes()` → `MotorProtocol::sendGetDeviceIdProbes()`，只发不等（dlc=8，data 全 0）。
 - **接收**：`CanRxTask` → `processCanFrame` → `parseMotorData(cmd=0)`，自动 `registerMotorId` 并写入 `mcu_uid`。
 - **MQTT**：`motor/scan` 触发探测；`motor/scan_result` 先发 `{started:true}`，发现后发 `{event:"discovered", id, mcu_uid}`。
-- 需求文档：[swrs/motor/06-bus-scan-get-device-id.md](../swrs/motor/06-bus-scan-get-device-id.md)
+- 需求文档：[docs/requirements/motor/06-bus-scan-get-device-id.md](../docs/requirements/motor/06-bus-scan-get-device-id.md)
 
 ### 主动上报（通信类型 24）
 
@@ -42,7 +42,7 @@
 - **管理层**：`DeepMotor::requestActiveReport` / `releaseActiveReport`（引用计数，避免 init 与 MQTT 互相关闭）。
 - **MQTT**：`motor/report_start` → 对已注册电机 `requestActiveReport`；`motor/report_stop` → `releaseActiveReport`。
 - **旧式 API**：`sendRunModeForStatusQuery` 仍保留，新代码请用 T24。
-- 需求文档：[swrs/motor/07-active-report-frame.md](../swrs/motor/07-active-report-frame.md)
+- 需求文档：[docs/requirements/motor/07-active-report-frame.md](../docs/requirements/motor/07-active-report-frame.md)
 
 便捷读取：
 

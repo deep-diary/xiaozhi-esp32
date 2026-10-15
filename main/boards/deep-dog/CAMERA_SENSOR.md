@@ -125,7 +125,7 @@ CONFIG_CAMERA_OV2640_DVP_RGB565_240X240_25FPS=y
 "CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP=y"
 ```
 
-高分辨率 Immich 剖面见 [`swrs/vision/server/S06-higher-resolution.md`](swrs/vision/server/S06-higher-resolution.md)（OV3660 640×480 RGB565）。
+高分辨率 Immich 剖面见 [`docs/requirements/vision/server/S06-higher-resolution.md`](docs/requirements/vision/server/S06-higher-resolution.md)（OV3660 640×480 RGB565）。
 
 ### 5.2 其他可能调整项
 
@@ -207,7 +207,7 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 | **外网 HLS 播放** | `https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8` | `PublicHlsUrlForDeviceId`；MQTT `stream/status.url` |
 | **MQTT 上报** | `push_url`=内网 RTSP，`url`=外网 HLS | [`mqtt/modules/stream_mqtt.cc`](mqtt/modules/stream_mqtt.cc) |
 
-**结论：设备只向内网 MediaMTX 推 RTSP**；外网 HLS 由服务器侧转发，设备不直连公网推流。见 [`swrs/vision/infra.md`](swrs/vision/infra.md)。
+**结论：设备只向内网 MediaMTX 推 RTSP**；外网 HLS 由服务器侧转发，设备不直连公网推流。见 [`docs/requirements/vision/infra.md`](docs/requirements/vision/infra.md)。
 
 ---
 
@@ -239,7 +239,7 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 | [`../deep-thumble/config.json`](../deep-thumble/config.json) | OV3660 RGB565 + ENDIANNESS_SWAP |
 | [`config.json`](config.json) | deep-dog 当前传感器 Kconfig 片段 |
 | [`vision/vision_frame_hub.cc`](vision/vision_frame_hub.cc) | YUYV→RGB565 转换 |
-| [`swrs/vision/server/S06-higher-resolution.md`](swrs/vision/server/S06-higher-resolution.md) | OV3660 640×480 剖面 |
+| [`docs/requirements/vision/server/S06-higher-resolution.md`](docs/requirements/vision/server/S06-higher-resolution.md) | OV3660 640×480 剖面 |
 | [`../deep-thumble/docs/face-detect-esp-who-vs-current-detail.md`](../deep-thumble/docs/face-detect-esp-who-vs-current-detail.md) | YUV vs RGB565 与人脸检测 |
 
 ---

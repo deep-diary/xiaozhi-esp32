@@ -3,7 +3,7 @@
 本目录是 **设备端（xiaozhi-esp32 / deep-dog）** 与 **云平台端（deep-trace-com：Django 后端 + Vue 前端）**
 之间的**跨仓库接口契约基线**。目标是让两端在**不改对方代码**的前提下各自独立开发、并行联调。
 
-> 与 [swrs/README.md](../../swrs/README.md)（板级需求）和 [swrs/mqtt/README.md](../../swrs/mqtt/README.md)（板级 MQTT 契约）并列，
+> 与 [requirements/README.md](../requirements/README.md)（板级需求）和 [requirements/mqtt/README.md](../requirements/mqtt/README.md)（板级 MQTT 契约）并列，
 > 本目录**只描述"跨端"接口**，不重复板内业务细节。
 
 ## 目录内容
@@ -15,6 +15,7 @@
 | [02-ws-contract.md](./02-ws-contract.md) | **WebSocket 标准接口契约**：设备 WS-MCP、前端原生 WS、MQTT-over-WS 接入规范、心跳/重连 | 设备固件、前端 |
 | [03-http-api-contract.md](./03-http-api-contract.md) | **HTTP/REST 标准接口契约**：设备内置 httpd、设备配对握手、云端 REST API 规范与端点清单 | 设备固件、云端后端、前端 |
 | [04-datapoint-registry.md](./04-datapoint-registry.md) | **数据点归一化（Data Point Registry）**：声明式数据点目录 + 统一发布引擎，三通道（MQTT/HTTP/MCP/Telemetry）单一真源，支撑前端设备页归一化 | 架构/技术负责人、设备固件、前端、云端 |
+| [05-mcp-tool-normalization.md](./05-mcp-tool-normalization.md) | **MCP 工具归一化规范**：数据点体系 vs 手写 MCP 的职责边界铁律、新增决策流程、命名规范、冻结规则与审计清单 | 架构/技术负责人、设备固件 |
 
 ## 读者与使用方式（两端独立开发）
 
@@ -29,7 +30,7 @@
 ```
 
 - **设备端**：以 [01-mqtt-contract.md](./01-mqtt-contract.md) / [02-ws-contract.md](./02-ws-contract.md) 为准实现固件；
-  板级字段细节仍以 [mqtt/protocol/deep-dog-mqtt.yml](../../swrs/mqtt/protocol/deep-dog-mqtt.yml) 为真源。
+  板级字段细节仍以 [mqtt/protocol/deep-dog-mqtt.yml](../requirements/mqtt/protocol/deep-dog-mqtt.yml) 为真源。
 - **云平台端**：以 [01-mqtt-contract.md](./01-mqtt-contract.md) / [03-http-api-contract.md](./03-http-api-contract.md) 为准实现订阅/下发与页面。
   云端现有规格 [unified-mqtt-subscription.md](../../../../../deep-trace-com/docs/requirements/features/device-platform/unified-mqtt-subscription.md)
   与 UDM 规格的 uuid 骨架关系：**由本契约的统一骨架取代**（见 [01-mqtt-contract.md §2](./01-mqtt-contract.md#2-统一命名空间)）。
@@ -60,6 +61,15 @@
   - ✅ 统一信封（§4）三端落地：**上行**（设备 `envelope.h::Wrap` / 云端 `unwrap_payload` / 前端 `unwrapPayload`）；
     **下行 `cmd`** 亦对齐 `data` 信封（设备 `ParseBusiness`、云端 `publish_unified_cmd`、前端 `buildCmdEnvelope`），
     三端对旧扁平报文均回退兼容（详见 [01 §9](./01-mqtt-contract.md)）。
+  - ✅ 数据点归一化（[04](./04-datapoint-registry.md) / [05](./05-mcp-tool-normalization.md)）：
+    设备端落地 Data Point Registry，三通道生效——MQTT `status/<module>` + `info/schema`、
+    HTTP `GET/POST /api/datapoints/...`、MCP 自动 `self.<module>.get_/set_<point>`；
+    子实例机制（`servo.<i>.*` / `motor.<id>.*`）与懒注册就绪；telemetry `points` 由注册表**自动汇入**
+    （`DP_CH_TELEMETRY` 点，见 [15-telemetry](../../requirements/mqtt/modules/15-telemetry.md)）；
+    MCP 工具归一化规范确立并**冻结新增**（05）。
+    真机验证：`dp_registry: registered module ...`、`dp_mcp: registered NN auto MCP tools`、
+    `GET /api/datapoints/point/device.device_id → 200`（复用 WS MCP 的 httpd，见 [LL-004](../../docs/ll/LL-004-httpd-and-datapoint-http.md)）、
+    `dog_mqtt_telem: telemetry publish ... points=15`。
 - **端到端验证**：
   - 模拟设备（本地 EMQX + 后端 + 前端）：配对闭环（handshake→输码→bind→activate `bound=true`）；
     前端 IMU/CAN 页实时刷新、telemetry 落库（`TelemetrySample`）。

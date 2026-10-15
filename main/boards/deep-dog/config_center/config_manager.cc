@@ -2,6 +2,7 @@
 
 #include "config_center/config_api_client.h"
 #include "config_center/config_change_hub.h"
+#include "ext_pin/ext_pin_mode.h"
 #include "mqtt/mqtt_config.h"
 #include "settings.h"
 
@@ -275,6 +276,19 @@ bool ConfigManager::ParseConfigJson(const std::string& config_json) {
             JsonBool(cc, "enable_mqtt_notify", cfg.config_center.enable_mqtt_notify);
     }
 
+    // io.ext_pins（CFG-02：38/48 运行时模式）
+    const cJSON* ext_pins = JsonGetByPath(root, "io.ext_pins");
+    if (cJSON_IsObject(ext_pins)) {
+        cfg.ext_pins.mode = JsonStr(ext_pins, "mode", cfg.ext_pins.mode);
+        // gpio_a / gpio_b 只读：出现即忽略并在 ack 上报 E_RO_PIN
+        if (cJSON_GetObjectItemCaseSensitive(ext_pins, "gpio_a") != nullptr ||
+            cJSON_GetObjectItemCaseSensitive(ext_pins, "gpio_b") != nullptr) {
+            last_apply_errors_.push_back({"io.ext_pins.gpio_a", "E_RO_PIN",
+                                          "gpio_a/gpio_b is read-only; ignored"});
+            ESP_LOGW(TAG, "io.ext_pins gpio_a/gpio_b is read-only; ignored");
+        }
+    }
+
     // 应用旧 NVS 补齐仍为空的字段
     ApplyLegacyFallback(&cfg);
 
@@ -326,6 +340,30 @@ void ConfigManager::DiffAndNotify(const DeviceConfig& old_cfg, const DeviceConfi
         old_cfg.config_center.pull_interval_s != new_cfg.config_center.pull_interval_s) {
         hub.Notify("config_center");
     }
+    // CFG-02：38/48 模式变化 → 写 pending（重启生效）
+    if (old_cfg.ext_pins.mode != new_cfg.ext_pins.mode) {
+        ApplyExtPinMode(new_cfg.ext_pins.mode);
+        hub.Notify("io.ext_pins");
+    }
+}
+
+void ConfigManager::ApplyExtPinMode(const std::string& mode_name) {
+    if (mode_name.empty()) {
+        return;  // 本次未下发该字段
+    }
+    deep_dog_ext_pin_mode_t mode = deep_dog_ext_pin::kNoPending;
+    if (!deep_dog_ext_pin::StrToMode(mode_name.c_str(), &mode) || !deep_dog_ext_pin::IsSupported(mode)) {
+        ESP_LOGW(TAG, "unsupported ext_pins mode '%s'", mode_name.c_str());
+        last_apply_errors_.push_back({"io.ext_pins.mode", "E_UNSUPPORTED_MODE",
+                                      "unsupported ext_pins mode '" + mode_name + "'"});
+        return;
+    }
+    if (deep_dog_ext_pin::SetPendingMode(mode) != ESP_OK) {
+        last_apply_errors_.push_back(
+            {"io.ext_pins.mode", "E_APPLY_FAILED", "failed to persist pending ext_pins mode"});
+        return;
+    }
+    ESP_LOGI(TAG, "ext_pins pending=%s (apply after restart)", mode_name.c_str());
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -425,7 +463,8 @@ bool ConfigManager::EnsureRegistered() {
     return true;
 }
 
-void ConfigManager::AckApplied(const std::string& status, const std::vector<std::string>& errors) {
+void ConfigManager::AckApplied(const std::string& status,
+                               const std::vector<ConfigApplyError>& errors) {
     ConfigApiClient* client = MakeClient();
     if (!client) {
         return;
@@ -526,15 +565,19 @@ void ConfigManager::Run() {
                                 config_.config_version = new_ver;
                             }
                             fingerprint_ = new_fp;
+                            last_apply_errors_.clear();
                             ParseConfigJson(cfg_json);
                             DiffAndNotify(old_cfg, config_);
                             last_pull_at_ = static_cast<int64_t>(esp_timer_get_time() / 1000000);
                             SaveToNvs();
                             has_remote_.store(true, std::memory_order_release);
                             state_.store(SyncState::kSynced, std::memory_order_release);
-                            ESP_LOGI(TAG, "config updated ver=%d fp=%.8s (reason=%s)", new_ver,
-                                     new_fp.c_str(), sync_reason_);
-                            AckApplied("success", {});
+                            ESP_LOGI(TAG, "config updated ver=%d fp=%.8s (reason=%s) errors=%u", new_ver,
+                                     new_fp.c_str(), sync_reason_,
+                                     static_cast<unsigned>(last_apply_errors_.size()));
+                            AckApplied(last_apply_errors_.empty() ? "success" : "partial",
+                                       last_apply_errors_);
+                            last_apply_errors_.clear();
                             backoff_s = 0;
                         } else {
                             state_.store(SyncState::kError, std::memory_order_release);

@@ -64,8 +64,10 @@ main/boards/deep-dog/
 ├── can/ motor/ leg/ dog/ trajectory/
 ├── uart/ led/ servo/ gimbal/ arm/ rs485/ io_ext/ ad/   # 引出脚相关占位
 ├── mqtt/ vision/ face_ai/ http-server/ …
-└── swrs/                     # 需求与 MQTT 契约
+└── docs/                     # 板级文档汇总根（requirements/ + interface/ + ll/）
 ```
+
+> 板级文档统一入口：[`docs/README.md`](./docs/README.md)；写作规范：[`docs/CONVENTIONS.md`](./docs/CONVENTIONS.md)。
 
 - **编译**：主项目 `CMakeLists.txt` 根据 `CONFIG_BOARD_TYPE_DEEP_DOG` 选择 `BOARD_TYPE=deep-dog`，并通过 `GLOB_RECURSE` 递归收集本目录及子目录下所有 `*.cc`/`*.cpp`/`*.c` 参与编译，无需修改主项目源列表。
 - **头文件**：主项目已把 `boards/deep-dog` 加入 include 路径，本目录内引用使用相对路径即可，例如 `#include "dog/dog_control.h"`、`#include "can/ESP32-TWAI-CAN.hpp"`。
@@ -166,4 +168,4 @@ main/boards/deep-dog/
 
 各子模块的接口约定、数据结构与注意事项见对应子目录 README。
 
-更细的**分阶段任务表**与完成标准见 [swrs/dog/DEVELOPMENT_PLAN.md](./swrs/dog/DEVELOPMENT_PLAN.md)；视觉/人脸/推流见 [swrs/ROADMAP.md](./swrs/ROADMAP.md)。
+更细的**分阶段任务表**与完成标准见 [docs/requirements/dog/DEVELOPMENT_PLAN.md](./docs/requirements/dog/DEVELOPMENT_PLAN.md)；视觉/人脸/推流见 [docs/requirements/ROADMAP.md](./docs/requirements/ROADMAP.md)。

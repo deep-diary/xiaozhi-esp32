@@ -14,7 +14,7 @@
 
 - 开关：`DEEP_DOG_HTTP_SERVER_ENABLE`（默认 **0**，`http_server_config.h:7-9`）；端口 `8080`（`http_server_config.h:12-14`）。
 - CORS：所有 JSON 响应带 `Access-Control-Allow-Origin: *` 且禁缓存（`deep_dog_http_server.cc:121-129`）。
-- 状态：该模块**将逐步弃用**，UI 迁移至 deep-trace 前端（`swrs/ws-mcp/01:64-69`）。
+- 状态：该模块**将逐步弃用**，UI 迁移至 deep-trace 前端（`requirements/ws-mcp/01:64-69`）。
 
 | Method | Path | 用途 | 关键参数 | 响应 |
 |--------|------|------|----------|------|
@@ -155,7 +155,7 @@ Body: { "device_id": "...", "reason"?: "user" }
 
 ### C.5 配置中心（`devices/urls.py` → `devices/config/urls.py`，CFG-01）
 
-> 后端实现：`deep-trace/backend/devices/config/`；契约与需求见 [CFG-01](../../swrs/config/CFG-01-unified-config-center.md)。
+> 后端实现：`deep-trace/backend/devices/config/`；契约与需求见 [CFG-01](../requirements/config/CFG-01-unified-config-center.md)。
 > 设备面接口用 **HMAC 设备自签名**（非 Token），管理面用 Token。
 
 **设备面**（HMAC；开发期 `DEVICE_AUTH_REQUIRED=False` 可放行）
@@ -186,6 +186,26 @@ Key   : hex_decode(device_secret)
 // 200 未变更（304 语义，简化体）
 { "config_version": 1, "ttl_s": 300, "next_poll_s": 300 }
 ```
+
+`ack` 请求（生效确认）：
+
+```jsonc
+// 全部生效
+{ "config_version": 1, "status": "success", "errors": [] }
+// 部分生效：字段被拒绝 / 忽略，设备已回退到默认值或上一值
+{ "config_version": 2, "status": "partial", "errors": [
+    { "field": "io.ext_pins.mode", "code": "E_UNSUPPORTED_MODE",
+      "message": "unsupported ext_pins mode 'spi'" }
+] }
+```
+
+- `status`：`success` | `partial` | `failed`
+- `errors[]` 元素**固定为** `{field, code, message}`：
+  - `field`：配置点分路径（如 `io.ext_pins.mode`）
+  - `code`：设备侧错误码（`E_*`），与 HTTP 层 `CFG_*` 分属两个命名空间
+  - `message`：人类可读说明
+- `E_*` 现有取值（设备端已实现）：`E_UNSUPPORTED_MODE`（不在白名单）· `E_RO_PIN`（只读字段被修改，已忽略）· `E_APPLY_FAILED`（重启后初始化失败，已自动回滚）；`E_MODE_CONFLICT`（模式互斥）为预留码
+- **不要**再用裸字符串数组（`["io.ext_pins.mode:E_UNSUPPORTED_MODE"]`）；后端对未知形状应容错并记录告警
 
 **管理面**（Token）
 

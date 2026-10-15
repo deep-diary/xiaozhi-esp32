@@ -4,6 +4,7 @@
 #include "mqtt/mqtt_config.h"
 #include "mqtt/mqtt_topics.h"
 #include "mqtt/modules/envelope.h"
+#include "mqtt/datapoint_registry.h"
 #include "net/deep_dog_sntp.h"
 
 #include <cJSON.h>
@@ -28,16 +29,6 @@ std::string IsoTs(uint32_t unix_s) {
     snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02dZ", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1,
              tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
     return buf;
-}
-
-void AddPoint(cJSON* points, const char* field, double value, const char* unit) {
-    if (!unit || !unit[0]) {
-        cJSON_AddNumberToObject(points, field, value);
-        return;
-    }
-    cJSON* obj = cJSON_AddObjectToObject(points, field);
-    cJSON_AddNumberToObject(obj, "value", value);
-    cJSON_AddStringToObject(obj, "unit", unit);
 }
 
 /** 从 deep-trace/{home}/{wu}/telemetry 反推 home / work_unit（缺省时兜底） */
@@ -150,18 +141,11 @@ void DeepDogTelemetryMqtt::Publish() {
     cJSON_AddStringToObject(root, "device_program", device_program_.c_str());
     cJSON_AddStringToObject(root, "ts", IsoTs(DeepDogNowUnixSec()).c_str());
 
+    // points 由数据点注册表自动汇入（见 docs/requirements/mqtt/modules/15-telemetry.md）
     cJSON* points = cJSON_AddObjectToObject(root, "points");
-    AddPoint(points, "free_heap", static_cast<double>(esp_get_free_heap_size()), "B");
-    AddPoint(points, "min_free_heap", static_cast<double>(esp_get_minimum_free_heap_size()), "B");
-    AddPoint(points, "internal_free", static_cast<double>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)), "B");
-    const size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    if (psram_free > 0) {
-        AddPoint(points, "psram_free", static_cast<double>(psram_free), "B");
-    }
-    AddPoint(points, "uptime_s", static_cast<double>(esp_timer_get_time() / 1000000LL), "s");
-    wifi_ap_record_t ap{};
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        AddPoint(points, "rssi", ap.rssi, "dBm");
+    const int n_points = DataPointRegistry::Instance().AppendTelemetryPoints(points);
+    if (n_points <= 0) {
+        ESP_LOGW(TAG, "telemetry points empty (no DP_CH_TELEMETRY data points)");
     }
 
     const std::string payload =
@@ -170,5 +154,6 @@ void DeepDogTelemetryMqtt::Publish() {
         return;
     }
     const bool ok = client_->PublishRaw(topic_, payload, 0, false);
-    ESP_LOGD(TAG, "telemetry publish ok=%d topic=%s", ok ? 1 : 0, topic_.c_str());
+    ESP_LOGI(TAG, "telemetry publish ok=%d topic=%s points=%d", ok ? 1 : 0, topic_.c_str(),
+             n_points);
 }

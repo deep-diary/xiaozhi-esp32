@@ -6,7 +6,7 @@
  * 扫描 DataPointRegistry 中标记了 DP_CH_MCP 通道的数据点，
  * 自动生成 self.<module>.get_<point> 和 self.<module>.set_<point> MCP 工具。
  *
- * 文档：swrs/interop/04-datapoint-registry.md §3.5
+ * 文档：docs/interface/04-datapoint-registry.md §3.5
  *
  * 注：复杂过程性操作（如 motor.scan、face.recognize）仍由各模块独立注册，
  *     不进入数据点自动生成体系。

@@ -92,14 +92,15 @@ idf.py monitor
 路径: `main/boards/deep-dog/`
 
 - MQTT 通信为核心协议
-- 功能模块通过 `swrs/mqtt/modules/` 下的 MQTT 契约定义
-- 需求文档: `main/boards/deep-dog/swrs/README.md`
+- 功能模块通过 `docs/requirements/mqtt/modules/` 下的 MQTT 契约定义
+- 需求文档: `main/boards/deep-dog/docs/requirements/README.md`
+- 板级文档根: `main/boards/deep-dog/docs/`（规范见 `docs/CONVENTIONS.md`）
 - 功能开关: `main/boards/deep-dog/FEATURE_FLAGS.md`
 
 ## 规范
 
 - C++17，ESP-IDF 编码规范
-- 新增 MQTT 模块遵循 `swrs/mqtt/modules/` 下的契约格式
+- 新增 MQTT 模块遵循 `docs/requirements/mqtt/modules/` 下的契约格式
 - 固件分区表为 v2 格式 (`partitions/v2/`)
 - 日志用 `ESP_LOGI`/`ESP_LOGE` 等 IDF 宏
 - 配置在 `sdkconfig.defaults` / menuconfig

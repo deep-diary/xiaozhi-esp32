@@ -15,7 +15,7 @@ LedStripControl               ← 模式 0–5 / 颜色快照 / 变更回调（�
 ## 配置
 
 见 [`FEATURE_FLAGS.md`](../FEATURE_FLAGS.md)：`EXT_PIN_MODE=LED` + `LED_ENABLE=1`。  
-DIN 默认 GPIO38（`gpio_a`）；MQTT 契约见 [`swrs/mqtt/modules/08-led.md`](../swrs/mqtt/modules/08-led.md)。
+DIN 默认 GPIO38（`gpio_a`）；MQTT 契约见 [`docs/requirements/mqtt/modules/08-led.md`](../docs/requirements/mqtt/modules/08-led.md)。
 
 ## 文件
 

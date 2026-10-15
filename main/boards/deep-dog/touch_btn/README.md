@@ -84,7 +84,7 @@ touch_btn/
 
 `DEEP_DOG_DOG_ENABLE=0` 时仅保留键1 short（拍照解释等），长按1 打日志忽略。
 
-通用组合键见 [06-touch · 组合键](../swrs/mqtt/modules/06-touch.md#组合键识别层)。狗控仍用本表；`DEEP_DOG_TOUCH_COMBO_ENABLE`（默认 1）开启识别与 MQTT `last_combo`，`COMBO_CONSUME` 默认 0 不吞单键。
+通用组合键见 [06-touch · 组合键](../docs/requirements/mqtt/modules/06-touch.md#组合键识别层)。狗控仍用本表；`DEEP_DOG_TOUCH_COMBO_ENABLE`（默认 1）开启识别与 MQTT `last_combo`，`COMBO_CONSUME` 默认 0 不吞单键。
 
 ### servo（`DEEP_DOG_TOUCH_APP_SERVO_ENABLE`，默认跟随 `DEEP_DOG_SERVO_ENABLE`）
 
@@ -127,10 +127,10 @@ MQTT：`touch/status.thresholds` 始终上报；`touch/cmd` 调参/标定。
 
 ## 组合层
 
-- 实现：[`touch_combo_recognizer`](./touch_combo_recognizer.h)；契约：[06-touch.md](../swrs/mqtt/modules/06-touch.md#组合键识别层)
+- 实现：[`touch_combo_recognizer`](./touch_combo_recognizer.h)；契约：[06-touch.md](../docs/requirements/mqtt/modules/06-touch.md#组合键识别层)
 - `DEEP_DOG_TOUCH_COMBO_ENABLE`（默认 1）：打开识别 + MQTT `last_combo`
 - `DEEP_DOG_TOUCH_COMBO_CONSUME`（默认 0）：命中后是否跳过应用 fan-out
-- **配对**：`hold1_tap2` → 进入配对播报；`hold1_tap3` → 设备解绑请求（见 [00-pairing](../swrs/mqtt/modules/00-pairing.md)）
+- **配对**：`hold1_tap2` → 进入配对播报；`hold1_tap3` → 设备解绑请求（见 [00-pairing](../docs/requirements/mqtt/modules/00-pairing.md)）
 
 ## 新增应用
 
@@ -138,7 +138,7 @@ MQTT：`touch/status.thresholds` 始终上报；`touch/cmd` 调参/标定。
 2. 在 `touch_config.h` 增加 `DEEP_DOG_TOUCH_APP_xxx_ENABLE`。
 3. 在 [`esp_sparkbot_board.cc`](../esp_sparkbot_board.cc) `#if` 注册到 `touch_dispatcher_`。
 4. **不要改** `TouchButtonController`（调灵敏用阈值/标定 API）。
-5. 同步更新本文「应用与按键映射」与 [06-touch.md](../swrs/mqtt/modules/06-touch.md) 对照摘要。
+5. 同步更新本文「应用与按键映射」与 [06-touch.md](../docs/requirements/mqtt/modules/06-touch.md) 对照摘要。
 
 ## MQTT
 
@@ -147,7 +147,7 @@ MQTT：`touch/status.thresholds` 始终上报；`touch/cmd` 调参/标定。
 | `touch/status` | ↑ retain | 物理快照 + `thresholds` + `calib` |
 | `touch/cmd` | ↓ | `set_thresholds` / `calibrate` / `reset_thresholds` / `cancel_calibrate` |
 
-契约：[`swrs/mqtt/modules/06-touch.md`](../swrs/mqtt/modules/06-touch.md)
+契约：[`docs/requirements/mqtt/modules/06-touch.md`](../docs/requirements/mqtt/modules/06-touch.md)
 
 ## 联调建议
 

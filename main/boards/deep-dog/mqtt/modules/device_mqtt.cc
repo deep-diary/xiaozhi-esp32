@@ -7,6 +7,7 @@
 #include "mqtt/mqtt_config.h"
 #include "mqtt/mqtt_topics.h"
 #include "config.h"
+#include "ext_pin/ext_pin_mode.h"
 #include "face_ai_config.h"
 #include "face_greet.h"
 #include "net/deep_dog_sntp.h"
@@ -170,9 +171,26 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     cJSON_AddBoolToObject(power, "supported", false);
 
     cJSON* ext_pins = cJSON_AddObjectToObject(root, "ext_pins");
-    cJSON_AddStringToObject(ext_pins, "mode", DEEP_DOG_EXT_PIN_MODE_STR);
+    cJSON_AddStringToObject(ext_pins, "mode",
+                            deep_dog_ext_pin::ModeToStr(deep_dog_ext_pin::ActiveMode()));
     cJSON_AddNumberToObject(ext_pins, "gpio_a", static_cast<double>(DEEP_DOG_EXT_PIN_A_GPIO));
     cJSON_AddNumberToObject(ext_pins, "gpio_b", static_cast<double>(DEEP_DOG_EXT_PIN_B_GPIO));
+    // CFG-02：本固件编入的模式白名单 / 待重启生效模式 / 生效策略
+    {
+        size_t mode_count = 0;
+        const deep_dog_ext_pin_mode_t* modes = deep_dog_ext_pin::SupportedModes(&mode_count);
+        cJSON* supported = cJSON_AddArrayToObject(ext_pins, "supported_modes");
+        for (size_t i = 0; i < mode_count; ++i) {
+            cJSON_AddItemToArray(supported,
+                                 cJSON_CreateString(deep_dog_ext_pin::ModeToStr(modes[i])));
+        }
+        const deep_dog_ext_pin_mode_t pending = deep_dog_ext_pin::PendingMode();
+        if (pending != deep_dog_ext_pin::kNoPending) {
+            cJSON_AddStringToObject(ext_pins, "pending_mode",
+                                    deep_dog_ext_pin::ModeToStr(pending));
+        }
+        cJSON_AddStringToObject(ext_pins, "apply_policy", deep_dog_ext_pin::ApplyPolicy());
+    }
 
     cJSON* caps = cJSON_AddObjectToObject(root, "capabilities");
     cJSON_AddBoolToObject(caps, "dog", caps_.dog);

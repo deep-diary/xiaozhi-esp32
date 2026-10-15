@@ -3,7 +3,7 @@
 /**
  * HTTP 统一数据点端点（/api/datapoints/...）。
  *
- * 文档：swrs/interop/04-datapoint-registry.md §3.4
+ * 文档：docs/interface/04-datapoint-registry.md §3.4
  *
  * 端点列表：
  *   GET  /api/datapoints/schema          - 完整 schema JSON

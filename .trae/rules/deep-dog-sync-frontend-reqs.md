@@ -1,6 +1,6 @@
 ---
 description: deep-dog MQTT/板级契约变更后，同步更新 deep-trace 前后端 IoT 需求文档
-globs: main/boards/deep-dog/swrs/**/*,main/boards/deep-dog/mqtt/**/*,main/boards/deep-dog/config.h,main/boards/deep-dog/board_features.h,main/boards/deep-dog/FEATURE_FLAGS.md
+globs: main/boards/deep-dog/docs/requirements/**/*,main/boards/deep-dog/mqtt/**/*,main/boards/deep-dog/config.h,main/boards/deep-dog/board_features.h,main/boards/deep-dog/FEATURE_FLAGS.md
 alwaysApply: false
 ---
 
@@ -12,7 +12,7 @@ alwaysApply: false
 
 | 角色 | 绝对路径 |
 |------|----------|
-| 设备契约 / swrs | `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/swrs/` |
+| 设备契约 / docs/requirements | `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/docs/requirements/` |
 | 设备 MQTT 实现 | `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/mqtt/` |
 | 前端代码 | `/Volumes/MacExtStorage/projects/deep-trace/frontend/` |
 | 后端代码 | `/Volumes/MacExtStorage/projects/deep-trace/backend/` |
@@ -30,7 +30,7 @@ alwaysApply: false
 | 添加设备 UX（配对码 / 本地调试） | `hub/`（140 调试；**142** 正式配对码） |
 | 绑定 API / 配对入库 / Device 模型 | `iot/` 根横切（**143**，对齐 30）+ `/Volumes/MacExtStorage/projects/deep-trace/backend/devices/README.md` 链接 |
 | 模块详情字段 / Topic | `modules/<moduleId>/` |
-| 配对 MQTT 契约 | 设备 `swrs/mqtt`（如 `modules/00-pairing.md` + YAML）+ 前端 142 + 后端 143 **三处对齐** |
+| 配对 MQTT 契约 | 设备 `docs/requirements/mqtt`（如 `modules/00-pairing.md` + YAML）+ 前端 142 + 后端 143 **三处对齐** |
 | 索引与路线图 | `iot/README.md`、必要时 `docs/requirements/README.md` |
 
 编号全局唯一、步长 10；文件夹只表归属。
@@ -38,9 +38,9 @@ alwaysApply: false
 ## 强制约定
 
 1. **引用跨仓文件一律用绝对路径**（对方工作区看不到相对路径），例如：
-   - `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/swrs/mqtt/protocol/deep-dog-mqtt.yml`
-   - `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/swrs/mqtt/modules/00-pairing.md`
-   - `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/swrs/mqtt/modules/01-device.md`
+   - `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/docs/requirements/mqtt/protocol/deep-dog-mqtt.yml`
+   - `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/docs/requirements/mqtt/modules/00-pairing.md`
+   - `/Volumes/MacExtStorage/projects/DeepDiary/xiaozhi-esp32/main/boards/deep-dog/docs/requirements/mqtt/modules/01-device.md`
    - `/Volumes/MacExtStorage/projects/deep-trace/frontend/src/iot/homeDevices.js`
    - `/Volumes/MacExtStorage/projects/deep-trace/backend/devices/`
 2. 权威契约以固件 YAML / 模块 md 为准；前端需求只写**展示与导航行为**；后端需求写 **API / 模型 / MQTT worker**，勿整份复制 YAML。
@@ -52,6 +52,6 @@ alwaysApply: false
 
 - [ ] 对应 `hub/`、`modules/` 或根横切（143）需求已更新或新建
 - [ ] `iot/README.md`（及总看板若需要）索引已挂上
-- [ ] 配对相关变更时：设备 swrs + 142 + 143 字段/Topic 一致
+- [ ] 配对相关变更时：设备 docs/requirements + 142 + 143 字段/Topic 一致
 - [ ] 样例 / capabilities / `device_id` 语义与当前固件约定一致（或注明剖面）
 - [ ] 未误写 DeepDiary/DeepServer/DeepWeb

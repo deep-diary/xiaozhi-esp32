@@ -38,21 +38,21 @@ std::string DeepDogMqttConfig::MacCompactDeviceId() {
 }
 
 std::string DeepDogMqttConfig::DefaultClientId(const std::string& device_id) {
-    // deep-dog-{device_id}-{随机}：随机后缀避免同 device_id 会话互踢（swrs/mqtt/modules/00-pairing）
+    // deep-dog-{device_id}-{随机}：随机后缀避免同 device_id 会话互踢（docs/requirements/mqtt/modules/00-pairing）
     char buf[64];
     snprintf(buf, sizeof(buf), "deep-dog-%s-%08lx", device_id.c_str(),
              static_cast<unsigned long>(esp_random()));
     return buf;
 }
 
-std::string DeepDogMqttConfig::EffectiveDeviceId(bool bound, const std::string& nvs_override) {
-    if (!nvs_override.empty()) {
+std::string DeepDogMqttConfig::EffectiveDeviceId(const std::string& nvs_override) {
+    // device_id 恒为 STA MAC 紧凑串：未绑定 / 绑定一致，不再有未绑定 "dev"（REQ-IOT-310 §6）。
+    // 好处：多台未绑定设备不再共用同一 Topic 互相覆盖；绑定不再切换前缀（无需 Stop/Start 客户端）。
+    // NVS 显式 override 仅联调；历史遗留的 "dev" 视为无效（该身份已废弃）。
+    if (!nvs_override.empty() && nvs_override != DEEP_DOG_MQTT_DEFAULT_DEVICE_ID) {
         return nvs_override;
     }
-    if (bound) {
-        return MacCompactDeviceId();
-    }
-    return DEEP_DOG_MQTT_DEFAULT_DEVICE_ID;
+    return MacCompactDeviceId();
 }
 
 std::string DeepDogMqttConfig::StreamPathForDeviceId(const std::string& device_id) {
@@ -93,7 +93,7 @@ DeepDogMqttSettings DeepDogMqttConfig::Load() {
     SetTopicRoot(s.topic_root);
     const bool bound = settings.GetBool("bound", false);
     const std::string nvs_device_id = settings.GetString("device_id", "");
-    s.device_id = EffectiveDeviceId(bound, nvs_device_id);
+    s.device_id = EffectiveDeviceId(nvs_device_id);
     s.client_id = settings.GetString("client_id", "");
     s.username = settings.GetString("username", "");
     s.password = settings.GetString("password", "");

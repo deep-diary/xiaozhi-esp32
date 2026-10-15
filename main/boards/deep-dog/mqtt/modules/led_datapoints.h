@@ -6,7 +6,7 @@
  * 遵循 interop-04 Data Point Registry 规范。
  * 这些数据点同时暴露到 MQTT / HTTP / MCP / Telemetry 四通道。
  *
- * 文档：swrs/interop/04-datapoint-registry.md
+ * 文档：docs/interface/04-datapoint-registry.md
  */
 
 #include "mqtt/datapoint_registry.h"

@@ -56,7 +56,7 @@ python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe
 
 结论：Xbox 走 HID **多不出陀螺仪/触控**；主要增益是 **Share 位（若系统放行）**、电池、以及不依赖 pygame 的解析。日常桥继续 pygame 即可；DS4 才值得 HID 全量。
 
-规格：[I03](../../main/boards/deep-dog/swrs/input/I03-source-pc-mqtt-bridge.md) · [I07](../../main/boards/deep-dog/swrs/input/I07-motion-gyro.md) · [I09](../../main/boards/deep-dog/swrs/input/I09-ds4-output-feedback.md)
+规格：[I03](../../main/boards/deep-dog/docs/requirements/input/I03-source-pc-mqtt-bridge.md) · [I07](../../main/boards/deep-dog/docs/requirements/input/I07-motion-gyro.md) · [I09](../../main/boards/deep-dog/docs/requirements/input/I09-ds4-output-feedback.md)
 
 ## MQTT / 视觉验收
 

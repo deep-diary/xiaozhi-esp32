@@ -37,6 +37,6 @@ python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir jpeg --python-onl
 # HLS（软探，非硬门禁）：http://192.168.31.25:8888/deep-dog/dev/index.m3u8
 ```
 
-产物目录：[`swrs/vision/fixtures/rtsp_pull_verify/`](../swrs/vision/fixtures/rtsp_pull_verify/)。
+产物目录：[`docs/requirements/vision/fixtures/rtsp_pull_verify/`](../docs/requirements/vision/fixtures/rtsp_pull_verify/)。
 
 说明：JPEG RTSP **不能**被 MediaMTX 转成可用 HLS；H.264 为网页 HLS 前置。推流与人脸同机时若卡顿/OOM，可降人脸间隔或优先关人脸。

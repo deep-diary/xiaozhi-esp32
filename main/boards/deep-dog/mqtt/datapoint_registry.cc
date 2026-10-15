@@ -422,6 +422,40 @@ bool DataPointRegistry::SerializeModuleStatus(const char* module_name, cJSON* ta
     return count > 0;
 }
 
+int DataPointRegistry::AppendTelemetryPoints(cJSON* points_obj) const {
+    if (!points_obj) {
+        return 0;
+    }
+    int count = 0;
+    for (const auto& entry : impl_->modules) {
+        for (const auto& dp : entry.points) {
+            if (!(dp.channels & DP_CH_TELEMETRY)) continue;
+            if (dp.type != DP_TYPE_INT && dp.type != DP_TYPE_FLOAT) continue;
+
+            DpValue val;
+            if (ReadPointValue(&dp, val) != DP_ERR_OK) continue;
+
+            // key = 点 id 最后一段（如 device.free_heap -> free_heap）
+            const std::string id = dp.id ? dp.id : "";
+            const size_t last_dot = id.rfind('.');
+            const char* key =
+                (last_dot == std::string::npos) ? id.c_str() : id.c_str() + last_dot + 1;
+
+            const double num = (dp.type == DP_TYPE_FLOAT) ? static_cast<double>(val.f)
+                                                          : static_cast<double>(val.i);
+            if (dp.unit && dp.unit[0]) {
+                cJSON* obj = cJSON_AddObjectToObject(points_obj, key);
+                cJSON_AddNumberToObject(obj, "value", num);
+                cJSON_AddStringToObject(obj, "unit", dp.unit);
+            } else {
+                cJSON_AddNumberToObject(points_obj, key, num);
+            }
+            ++count;
+        }
+    }
+    return count;
+}
+
 // ============================================================
 // Schema 导出
 // ============================================================

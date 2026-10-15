@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>组件关系 — Deep-Dog</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="mermaid-init.js"></script>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="home" href="index.html">主页</a><span class="sep">|</span>
+  <a href="overview.html">宏观架构</a>
+  <a href="detail.html">微观架构</a>
+  <a href="components.html">组件关系</a>
+  <a href="control_flow.html">控制流</a>
+  <a href="signal_flow.html">事件流</a>
+  <a href="data.html">数据架构</a>
+  <a href="mechanisms.html">工作机制</a>
+</div></nav>
+
+<header class="main">
+  <h1>LEVEL 3 · 组件与关系</h1>
+  <p>目录依赖 · MCP Hub-Spoke ·「改哪里」决策 · 组件档案</p>
+</header>
+
+<div class="wrap">
+
+<section>
+  <h2>目录依赖总图</h2>
+  <div class="sub">相对 <code>FEATURE_FLAGS.md</code> 树扩展；箭头表示编译/运行时依赖方向</div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TB
+  CFG["config.h / board_features.h"]
+  BOARD["esp_sparkbot_board.cc"]
+  CAN["can/"]
+  MOT["motor/"]
+  LEG["leg/"]
+  DOG["dog/"]
+  TRAJ["trajectory/"]
+  VIS["vision/"]
+  FACE["face_ai/"]
+  MQTT["mqtt/"]
+  WSMCP["ws-mcp/"]
+  TOUCH["touch_btn/"]
+  HANDLE["handle/"]
+  LED["led/"]
+  GIM["gimbal/servo/"]
+  SNS["sensor/"]
+
+  CFG --> BOARD
+  CFG --> CAN & LED & GIM
+  BOARD --> CAN & MOT & DOG & VIS & MQTT & WSMCP & TOUCH & HANDLE & SNS
+  CAN --> MOT
+  MOT --> LEG
+  LEG --> DOG
+  TRAJ --> DOG
+  VIS --> FACE
+  MQTT --> DOG & FACE & LED & GIM & MOT & CAN
+  TOUCH --> DOG
+  HANDLE --> DOG & MOT & GIM
+
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  class CFG,BOARD cfg
+  class MQTT,WSMCP,TOUCH,HANDLE ui
+  class DOG,LEG,TRAJ,VIS,FACE,LED,GIM eng
+  class CAN,MOT,SNS io
+</pre>
+  </div>
+</section>
+
+<section>
+  <h2>MCP Hub-Spoke</h2>
+  <div class="sub">主项目 <code>McpServer</code> 为中枢；板级在 <code>InitializeTools</code> 注册 <code>self.*</code></div>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart LR
+  Hub["McpServer"]
+  Hub --- Chassis["self.chassis.*"]
+  Hub --- Motor["self.motor.*"]
+  Hub --- CanT["self.can.*"]
+  Hub --- Led["self.led.*"]
+  Hub --- Face["self.face.*"]
+  Hub --- Pair["self.pairing.*"]
+  Hub --- Diag["diagnostics"]
+
+  Chassis --> Dog["DogControl"]
+  Motor --> DM["DeepMotor"]
+  CanT --> TWAI["TWAI"]
+  Led --> Strip["LedStrip"]
+  Face --> FC["FaceControl"]
+
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  class Hub,Chassis,Motor,CanT,Led,Face,Pair,Diag ui
+  class Dog,Strip,FC eng
+  class DM,TWAI io
+</pre>
+  </div>
+  <div class="hub-bar"><b>入口：</b>语音云端 MCP · 局域网 WS-MCP · MQTT <code>mcp_call</code>（M02）均落到同一工具表。</div>
+</section>
+
+<section>
+  <h2>「改哪里」决策流</h2>
+  <div class="mmd">
+<pre class="mermaid">
+flowchart TD
+  Q["要改什么？"]
+  Q -->|GPIO / 引出脚模式| A["config.h<br/>EXT_PIN_MODE"]
+  Q -->|开/关能力| B["board_features.h<br/>*_ENABLE"]
+  Q -->|MQTT 字段/Topic| C["docs/requirements/mqtt YAML<br/>+ modules/*_mqtt"]
+  Q -->|步态/动作| D["dog/ · leg/ · trajectory/"]
+  Q -->|电机协议| E["motor/ protocol"]
+  Q -->|推流/人脸| F["vision/ · face_ai/"]
+  Q -->|本地调试工具| G["ws-mcp/ 或 MCP 注册"]
+
+  classDef cfg fill:#4fb6c7,stroke:#2a7a8a,color:#fff
+  classDef ui fill:#2e74b5,stroke:#1a4a7a,color:#fff
+  classDef eng fill:#7b4fb6,stroke:#4a2a7a,color:#fff
+  classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
+  class Q cfg
+  class A,B cfg
+  class C,G ui
+  class D,F eng
+  class E io
+</pre>
+  </div>
+</section>
+
+<section>
+  <h2>组件档案</h2>
+  <table>
+    <thead>
+      <tr><th>目录</th><th>关键类 / 文件</th><th>ENABLE / 条件</th><th>角色</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>can/</td><td>ESP32-TWAI-CAN, can_frame_hub</td><td>CAN_ENABLE</td><td>驱动</td></tr>
+      <tr><td>motor/</td><td>DeepMotor, protocol_motor</td><td>MOTOR_ENABLE</td><td>驱动</td></tr>
+      <tr><td>leg/</td><td>LegControl</td><td>DOG_ENABLE</td><td>领域</td></tr>
+      <tr><td>dog/</td><td>DogControl, GaitPlanner</td><td>DOG_ENABLE</td><td>领域</td></tr>
+      <tr><td>trajectory/</td><td>trajectory_planner</td><td>DOG_ENABLE</td><td>领域</td></tr>
+      <tr><td>vision/</td><td>VisionFrameHub, RtspH264Pusher</td><td>VISION_HUB_ENABLE</td><td>领域</td></tr>
+      <tr><td>face_ai/</td><td>FaceControl, Immich client</td><td>FACE_AI</td><td>领域</td></tr>
+      <tr><td>mqtt/</td><td>DeepDogMqtt, modules/*</td><td>MQTT_ENABLE</td><td>控制面</td></tr>
+      <tr><td>ws-mcp/</td><td>DeepDogWsMcpServer</td><td>板级开关</td><td>控制面</td></tr>
+      <tr><td>touch_btn/</td><td>Hub / Dispatcher / Apps</td><td>触摸初始化</td><td>控制面</td></tr>
+      <tr><td>handle/</td><td>Hub / BT / MQTT source</td><td>HANDLE_ENABLE</td><td>控制面</td></tr>
+      <tr><td>led/</td><td>led_strip_control</td><td>LED_ENABLE</td><td>领域</td></tr>
+      <tr><td>gimbal/ servo/</td><td>Gimbal, Servo</td><td>PWM + GIMBAL|SERVO</td><td>领域</td></tr>
+      <tr><td>sensor/</td><td>DeepDogImuSensor</td><td>IMU</td><td>驱动</td></tr>
+    </tbody>
+  </table>
+  <div class="note">目录边界：尽量只在 <code>main/boards/deep-dog/</code> 内改；契约与需求写在 <code>docs/requirements/</code>。</div>
+</section>
+
+</div>
+<footer>Deep-Dog 架构 · 继续阅读 <a href="control_flow.html">控制流</a></footer>
+</body>
+</html>

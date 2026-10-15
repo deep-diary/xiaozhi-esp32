@@ -140,6 +140,15 @@ static const char* dp_dev_read_ip(void* ctx) {
     return "";
 }
 
+static int32_t dp_dev_read_rssi(void* ctx) {
+    (void)ctx;
+    wifi_ap_record_t ap{};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        return static_cast<int32_t>(ap.rssi);
+    }
+    return 0;
+}
+
 // ============================================================
 // 数据点定义表（12 个）
 // ============================================================
@@ -385,6 +394,27 @@ static const DataPointDef kDeviceDataPoints[kDeviceDataPointCount] = {
         0,
         nullptr, nullptr,
         { .read_string = dp_dev_read_ip },
+        { nullptr },
+    },
+    // rssi（telemetry：与原手写 telemetry 字段 rssi 对齐）
+    {
+        "device.rssi",
+        "WiFi 信号强度",
+        "device",
+        nullptr,
+        "WiFi 接收信号强度指示（dBm）",
+        DP_TYPE_INT,
+        "dBm",
+        0,
+        -100.0f, 0.0f, 1,
+        nullptr,
+        DP_ACCESS_RO,
+        DP_CH_MQTT | DP_CH_HTTP | DP_CH_MCP | DP_CH_TELEMETRY,
+        DP_POLICY_PERIODIC,
+        30000,
+        2.0f,
+        nullptr, nullptr,
+        { .read_int = dp_dev_read_rssi },
         { nullptr },
     },
 };
