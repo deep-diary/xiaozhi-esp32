@@ -1,5 +1,7 @@
 #pragma once
 
+#include "pairing/deep_dog_pair_http.h"
+
 #include <esp_timer.h>
 
 #include <functional>
@@ -27,6 +29,9 @@ public:
     /** MCP / 长按1+轻触3：上行 pairing/request unbind */
     void RequestUnbind();
 
+    /** 取消进行中的配对会话（HTTP 轮询 / MQTT 重播） */
+    void CancelPairing();
+
     /** bound 切换后重载 MQTT prefix / 推流 path */
     void SetIdentityReloadCallback(std::function<void()> cb);
 
@@ -52,6 +57,7 @@ private:
     bool ShouldPublishPairCode() const;
 
     DeepDogMqttClient* client_;
+    DeepDogPairHttp http_pairing_;
     bool connected_ = false;
     bool bound_ = false;
     bool pro_pairing_mqtt_ = false;

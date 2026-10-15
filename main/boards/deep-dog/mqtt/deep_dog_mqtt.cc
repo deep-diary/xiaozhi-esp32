@@ -4,6 +4,7 @@
 #include "mqtt/mqtt_config.h"
 #include "mqtt/modules/device_mqtt.h"
 #include "mqtt/modules/pairing_mqtt.h"
+#include "mqtt/modules/telemetry_mqtt.h"
 #include "mqtt/modules/stream_mqtt.h"
 #include "mqtt/modules/imu_mqtt.h"
 #include "mqtt/modules/face_mqtt.h"
@@ -50,6 +51,7 @@ struct DeepDogMqtt::Impl {
     DeepDogMqttClient client;
     DeepDogDeviceMqtt device{&client};
     DeepDogPairingMqtt pairing{&client};
+    DeepDogTelemetryMqtt telemetry{&client};
     DeepDogStreamMqtt stream{&client};
     DeepDogImuMqtt imu{&client};
     DeepDogFaceMqtt face{&client};
@@ -84,6 +86,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
     if (connected) {
         device.OnConnected();
         pairing.OnConnected();
+        telemetry.OnConnected();
         stream.OnConnected();
         imu.OnConnected();
         face.OnConnected();
@@ -98,6 +101,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
     } else {
         device.OnDisconnected();
         pairing.OnDisconnected();
+        telemetry.OnDisconnected();
         stream.OnDisconnected();
         imu.OnDisconnected();
         face.OnDisconnected();
@@ -291,6 +295,12 @@ void DeepDogMqtt::StartPairingSessionOrAnnounceBound() {
     }
 }
 
+void DeepDogMqtt::CancelPairing() {
+    if (impl_) {
+        impl_->pairing.CancelPairing();
+    }
+}
+
 void DeepDogMqtt::RequestDeviceUnbind() {
     if (impl_) {
         impl_->pairing.RequestUnbind();
@@ -328,6 +338,7 @@ void DeepDogMqtt::Impl::StopModulesForReload() {
     face.Stop();
     imu.Stop();
     stream.Stop();
+    telemetry.Stop();
     pairing.Stop();
     device.Stop();
     client.Stop();
@@ -496,6 +507,7 @@ void DeepDogMqtt::Stop() {}
 void DeepDogMqtt::ReloadDeviceIdentity() {}
 bool DeepDogMqtt::IsRunning() const { return false; }
 void DeepDogMqtt::StartPairingSessionOrAnnounceBound() {}
+void DeepDogMqtt::CancelPairing() {}
 void DeepDogMqtt::RequestDeviceUnbind() {}
 bool DeepDogMqtt::IsDeviceBound() const { return false; }
 const std::string& DeepDogMqtt::DevicePairCode() const {

@@ -3,6 +3,7 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/modules/device_mqtt.h"
 #include "mqtt/mqtt_config.h"
+#include "mqtt/mqtt_topics.h"
 
 #include "face_ai_config.h"
 #include "face_ai_types.h"
@@ -267,7 +268,7 @@ void DeepDogFaceMqtt::OnConnected() {
         return;
     }
     if (client_) {
-        client_->Subscribe("face/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("face"), 1);
     }
     last_fingerprint_.clear();
     last_registry_fp_.clear();
@@ -300,7 +301,7 @@ void DeepDogFaceMqtt::OnMessage(const std::string& topic, const std::string& pay
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic != client_->Topic("face/cmd")) {
+    if (topic != client_->Topic(deep_dog_topics::Cmd("face"))) {
         return;
     }
 
@@ -432,7 +433,7 @@ void DeepDogFaceMqtt::PublishPersonActiveSpeaker(int local_id, const char* displ
     char* printed = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (printed) {
-        client_->Publish("person/active", printed, 0, true);
+        client_->Publish(deep_dog_topics::Status("person/active"), printed, 0, true);
         cJSON_free(printed);
     }
 }
@@ -472,7 +473,7 @@ bool DeepDogFaceMqtt::PublishRegistry(bool force) {
         return false;
     }
 #if !DEEP_DOG_FACE_AI_ENABLE
-    return client_->Publish("face/registry", "{\"version\":1,\"count\":0,\"entries\":[],\"ts\":0}", 0, true);
+    return client_->Publish(deep_dog_topics::Status("face/registry"), "{\"version\":1,\"count\":0,\"entries\":[],\"ts\":0}", 0, true);
 #else
     auto buf = std::make_unique<char[]>(DEEP_DOG_FACE_REGISTRY_JSON_BUF);
     const size_t n = DeepDogFaceControlFormatRegistryJson(buf.get(), DEEP_DOG_FACE_REGISTRY_JSON_BUF);
@@ -485,7 +486,7 @@ bool DeepDogFaceMqtt::PublishRegistry(bool force) {
         return true;
     }
     last_registry_fp_ = payload;
-    return client_->Publish("face/registry", payload.c_str(), 0, true);
+    return client_->Publish(deep_dog_topics::Status("face/registry"), payload.c_str(), 0, true);
 #endif
 }
 
@@ -494,7 +495,7 @@ bool DeepDogFaceMqtt::PublishImmichStatus(bool force) {
         return false;
     }
 #if !DEEP_DOG_FACE_IMMICH_ENABLE
-    return client_->Publish("face/immich/status",
+    return client_->Publish(deep_dog_topics::Status("face/immich"),
                             "{\"configured\":false,\"url\":\"\",\"key_len\":0,\"delete_asset\":0,"
                             "\"server_ok\":false,\"server_http\":0,\"ping_ms\":-1,\"inflight\":0,"
                             "\"last\":\"disabled\",\"last_local_id\":0,\"ts\":0}",
@@ -509,7 +510,7 @@ bool DeepDogFaceMqtt::PublishImmichStatus(bool force) {
         return true;
     }
     last_immich_fp_ = buf;
-    return client_->Publish("face/immich/status", buf, 0, true);
+    return client_->Publish(deep_dog_topics::Status("face/immich"), buf, 0, true);
 #endif
 }
 
@@ -535,7 +536,7 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("face/status", printed, 0, false);
+    const bool ok = client_->Publish(deep_dog_topics::Status("face"), printed, 0, false);
     cJSON_free(printed);
     return ok;
 #else
@@ -623,7 +624,7 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("face/status", printed, 0, false);
+    const bool ok = client_->Publish(deep_dog_topics::Status("face"), printed, 0, false);
     cJSON_free(printed);
     MaybePublishPersonActive(snap);
     return ok;

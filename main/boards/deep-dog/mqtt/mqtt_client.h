@@ -26,6 +26,8 @@ public:
     bool IsConnected() const;
 
     bool Publish(const std::string& relative_topic, const std::string& payload, int qos, bool retain);
+    /** 绝对话题发布（不加前缀）；用于 deep-trace 遥测等非模块前缀通道 */
+    bool PublishRaw(const std::string& topic, const std::string& payload, int qos, bool retain);
     bool Subscribe(const std::string& relative_topic, int qos);
     bool Unsubscribe(const std::string& relative_topic);
 

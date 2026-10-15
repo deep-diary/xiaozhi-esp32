@@ -2,6 +2,7 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
+#include "mqtt/mqtt_topics.h"
 #include "sensor/imu_config.h"
 #if DEEP_DOG_IMU_ENABLE
 #include "sensor/imu_sensor.h"
@@ -162,7 +163,7 @@ bool DeepDogImuMqtt::PublishStatus() {
     if (!printed) {
         return false;
     }
-    const bool pub_ok = client_->Publish("imu/status", printed, 0, false);
+    const bool pub_ok = client_->Publish(deep_dog_topics::Status("imu"), printed, 0, false);
     static int s_log = 0;
     int switch_sum = 0;
     for (int i = 0; i < kDeepDogImuSwitchCount; ++i) {
@@ -208,7 +209,7 @@ bool DeepDogImuMqtt::PublishStatus() {
     if (!printed) {
         return false;
     }
-    const bool pub_ok = client_->Publish("imu/status", printed, 0, false);
+    const bool pub_ok = client_->Publish(deep_dog_topics::Status("imu"), printed, 0, false);
     cJSON_free(printed);
     return pub_ok;
 #endif

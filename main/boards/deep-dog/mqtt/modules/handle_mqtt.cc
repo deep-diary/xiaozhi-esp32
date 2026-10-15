@@ -1,6 +1,7 @@
 #include "mqtt/modules/handle_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "handle/handle_config.h"
 #include "handle/keymap_store.h"
 #include "handle/sources/handle_bt.h"
@@ -154,9 +155,9 @@ void DeepDogHandleMqtt::OnConnected() {
         return;
     }
     HandleKeymapInit();
-    client_->Subscribe("handle/cmd", 1);
+    client_->Subscribe(deep_dog_topics::Cmd("handle"), 1);
 #if DEEP_DOG_HANDLE_MQTT_INPUT_ENABLE
-    client_->Subscribe("handle/input", 0);
+    client_->Subscribe(deep_dog_topics::Cmd("handle/input"), 0);
 #endif
     PublishStatus();
     PublishKeymap();
@@ -512,7 +513,7 @@ bool DeepDogHandleMqtt::PublishKeymap() {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("handle/keymap", printed, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("handle/keymap"), printed, 0, true);
     cJSON_free(printed);
     return ok;
 }
@@ -547,7 +548,7 @@ bool DeepDogHandleMqtt::PublishOutput(int led_r, int led_g, int led_b, float rum
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("handle/cmd", printed, 1, false);
+    const bool ok = client_->Publish(deep_dog_topics::Cmd("handle"), printed, 1, false);
     cJSON_free(printed);
     if (ok) {
         ESP_LOGI(TAG, "published handle/cmd output rumble=%.2f/%.2f duration=%d", s, w,
@@ -560,12 +561,12 @@ void DeepDogHandleMqtt::OnMessage(const std::string& topic, const std::string& p
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic == client_->Topic("handle/cmd")) {
+    if (topic == client_->Topic(deep_dog_topics::Cmd("handle"))) {
         HandleCmd(payload);
         return;
     }
 #if DEEP_DOG_HANDLE_MQTT_INPUT_ENABLE
-    if (topic == client_->Topic("handle/input")) {
+    if (topic == client_->Topic(deep_dog_topics::Cmd("handle/input"))) {
         HandleInput(payload);
     }
 #endif
@@ -653,7 +654,7 @@ bool DeepDogHandleMqtt::PublishStatus() {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("handle/status", printed, 0, false);
+    const bool ok = client_->Publish(deep_dog_topics::Status("handle"), printed, 0, false);
     cJSON_free(printed);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();

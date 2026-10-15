@@ -66,6 +66,9 @@ struct WifiManagerConfig {
 
     // Whether to show deep-dog board MQTT broker host/port in the advanced tab.
     bool show_mqtt_broker_config = false;
+
+    // Whether to show deep-dog deep-trace server API base in the advanced tab.
+    bool show_deep_trace_config = false;
 };
 
 /**

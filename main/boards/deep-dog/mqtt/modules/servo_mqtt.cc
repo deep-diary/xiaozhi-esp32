@@ -1,6 +1,7 @@
 #include "mqtt/modules/servo_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "servo/servo_control.h"
 
 #include <cJSON.h>
@@ -112,7 +113,7 @@ void DeepDogServoMqtt::OnConnected() {
     connected_ = true;
     DeepDogServoSetNotifyCallback(&DeepDogServoMqtt::BankNotifyCb, this);
     if (client_) {
-        client_->Subscribe("servo/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("servo"), 1);
     }
     PublishStatus(true);
 }
@@ -134,7 +135,7 @@ void DeepDogServoMqtt::OnMessage(const std::string& topic, const std::string& pa
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic != client_->Topic("servo/cmd")) {
+    if (topic != client_->Topic(deep_dog_topics::Cmd("servo"))) {
         return;
     }
 
@@ -260,7 +261,7 @@ bool DeepDogServoMqtt::PublishStatus(bool force) {
     if (!raw) {
         return false;
     }
-    const bool ok = client_->Publish("servo/status", raw, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("servo"), raw, 0, true);
     cJSON_free(raw);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();

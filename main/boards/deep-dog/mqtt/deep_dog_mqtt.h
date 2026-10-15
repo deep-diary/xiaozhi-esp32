@@ -50,6 +50,8 @@ public:
 
     /** 配对：未绑定进入会话；已绑定屏显提示 */
     void StartPairingSessionOrAnnounceBound();
+    /** 取消进行中的配对会话（HTTP 轮询 / MQTT 重播） */
+    void CancelPairing();
     /** 设备发起解绑（pairing/request） */
     void RequestDeviceUnbind();
     bool IsDeviceBound() const;

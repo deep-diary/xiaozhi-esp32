@@ -3,6 +3,7 @@
 #include "mqtt/memory_report.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
+#include "mqtt/mqtt_topics.h"
 #include "config.h"
 #include "face_ai_config.h"
 #include "face_greet.h"
@@ -193,7 +194,7 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("device/info", printed, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Info("device"), printed, 0, true);
     ESP_LOGI(TAG, "device/info retain ok=%d", ok ? 1 : 0);
     cJSON_free(printed);
     return ok;
@@ -260,7 +261,7 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("device/status", printed, 0, false);
+    const bool ok = client_->Publish(deep_dog_topics::Status("device"), printed, 0, false);
     cJSON_free(printed);
     return ok;
 }

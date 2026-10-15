@@ -9,6 +9,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | **权威顺序** | [ROADMAP.md](./ROADMAP.md) |
 | **架构图集** | [architecture/](./architecture/index.html)（HTML + Mermaid；宏观→机制） |
 | **MQTT** | [mqtt/](./mqtt/)（M01 总览 + modules 前端详情页 + YAML） |
+| **跨端接口契约** | [interop/](./interop/)（设备 ⇄ deep-trace：MQTT/WS/HTTP 标准接口 + 架构审查建议） |
 | **控制输入** | [input/](./input/)（手柄双源；I-HANDLE；I08b 轴映射） |
 | **电机 / CAN** | [motor/](./motor/)（单电机联调；MOT） |
 
@@ -29,6 +30,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | [ROADMAP.md](./ROADMAP.md) | 可追溯总表 |
 | [architecture/](./architecture/index.html) | 板卡系统架构图集（Mermaid） |
 | [mqtt/](./mqtt/) | MQTT：M01、frontend、modules、YAML |
+| [interop/](./interop/) | **跨端接口契约**（deep-dog ⇄ deep-trace-com）：架构审查 + MQTT/WS/HTTP 标准接口 |
 | [input/](./input/) | 控制输入（手柄双源：Bluepad32 / PC MQTT 桥） |
 | [motor/](./motor/) | CAN / 单电机调试（MOT；手柄 catalog 见 04） |
 | [dog/](./dog/) | 四足运动 |
@@ -48,7 +50,9 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | **I-HANDLE** | 手柄双源（Xbox BT / PC→MQTT） | [input/](./input/) **文档 ✅**；wifi/keymap 已落地 |
 | **MOT** | CAN + 单电机 + 手柄 motor/轴 | [motor/](./motor/) · I08b | 本轮落地 |
 | V-C03 | 推流 MQTT | [modules/02-stream](./mqtt/modules/02-stream.md) 待办 |
-| V-C04 | 云台 MQTT | [modules/09-gimbal](./mqtt/modules/09-gimbal.md) 本轮联调 |
+| V-C04 | 云台 MQTT | [modules/09-gimbal](./mqtt/modules/09-gimbal.md) | 本轮联调 |
+| **DT-01** | deep-trace 遥测通道 | [modules/15-telemetry](./mqtt/modules/15-telemetry.md) | 本轮落地 |
+| **DT-02** | deep-trace HTTP 配对 | [modules/16-http-pairing](./mqtt/modules/16-http-pairing.md) · [N03](./net/N03-wifi-portal-mqtt-broker.md) | 本轮落地 |
 | V-P01 | Kiosk | 更后 |
 
 ## 约定

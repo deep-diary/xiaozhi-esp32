@@ -1,6 +1,7 @@
 #include "mqtt/modules/can_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "config.h"
 #include "can/can_config.h"
 #include "can/can_frame_hub.h"
@@ -188,7 +189,7 @@ void DeepDogCanMqtt::FlushFrames() {
     char* s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (s) {
-        client_->Publish("can/frames", s, 0, false);
+        client_->Publish(deep_dog_topics::Status("can/frames"), s, 0, false);
         cJSON_free(s);
         last_flush_us_ = esp_timer_get_time();
     }
@@ -217,7 +218,7 @@ bool DeepDogCanMqtt::PublishStatus(bool force) {
     if (!s) {
         return false;
     }
-    const bool ok = client_->Publish("can/status", s, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("can"), s, 0, true);
     cJSON_free(s);
     return ok;
 }
@@ -318,8 +319,8 @@ void DeepDogCanMqtt::OnConnected() {
     }
     connected_ = true;
     DeepDogCanSetFrameListener(&DeepDogCanMqtt::FrameListener, this);
-    client_->Subscribe("can/cmd", 1);
-    client_->Subscribe("can/tx", 1);
+    client_->Subscribe(deep_dog_topics::Cmd("can"), 1);
+    client_->Subscribe(deep_dog_topics::Cmd("can/tx"), 1);
     PublishStatus(true);
 }
 
@@ -339,11 +340,11 @@ void DeepDogCanMqtt::OnMessage(const std::string& topic, const std::string& payl
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic == client_->Topic("can/cmd")) {
+    if (topic == client_->Topic(deep_dog_topics::Cmd("can"))) {
         ApplyCmd(payload.c_str());
         return;
     }
-    if (topic == client_->Topic("can/tx")) {
+    if (topic == client_->Topic(deep_dog_topics::Cmd("can/tx"))) {
         HandleTx(payload.c_str());
     }
 }

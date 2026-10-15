@@ -42,3 +42,4 @@
 | 编号 | 标题 | 关键词 |
 |------|------|--------|
 | [LL-001](./LL-001-board-config-and-bringup.md) | 板级编译配置与联调踩坑合集 | sdkconfig / config.json / OV3660 / 串口占用 / IDF 环境 / MQTT 默认值 |
+| [LL-002](./LL-002-board-type-not-switched.md) | 板型未切换导致编出别的板 | BOARD_TYPE / sdkconfig / 编错板 / SKU=deep-dog |

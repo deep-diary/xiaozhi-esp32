@@ -23,8 +23,8 @@
 | Topic 前缀 | `deepdiary/deep-dog/{device_id}/` |
 | RTSP / HLS path | `deep-dog/{device_id}`（与 MQTT 前缀 id 对齐） |
 | `device/info.mac` | 可读形式 `AA:BB:…`（展示用） |
-| NVS | 命名空间 `deep_dog_mqtt`：`bound`、`device_id`（绑定写入 MAC，解绑清除）、`pair_code`、`pro_pairing_mqtt` |
-| `client_id` | 可继续带 MAC 后缀，避免 Broker 会话冲突 |
+| NVS | 命名空间 `deep_dog_mqtt`：`bound`、`device_id`（绑定写入 MAC，解绑清除）、`pair_code`、`pro_pairing_mqtt`、`server_api_base`（HTTP 配对基址） |
+| `client_id` | `deep-dog-{device_id}-{随机后缀}`，避免 Broker 会话互踢 |
 | 绑定切换 | 收到 `pairing/cmd` `bound`/`unbind` 后 **defer** 重载 MQTT 前缀与推流 URL（不可在 MQTT 回调内 Stop 客户端） |
 
 ## 通道（混合）
@@ -35,6 +35,8 @@
 4. 解绑：MCP / 长按1+轻触3 → 设备上行 `pairing/request` `action=unbind` → 后端解绑并下行 `pairing/cmd` `action=unbind`。
 
 **不**走官方小智 OTA `/activate`；业务 MQTT 与配对共用同一 Broker。
+
+**两条路径并存**：本文件为 **MQTT 配对**（码由设备生成）。另有对接 **deep-trace 服务器** 的 **HTTP 配对**（码由服务器生成，见 [16-http-pairing](./16-http-pairing.md)）。当 NVS `server_api_base` 非空时，触发配对优先走 HTTP；两条路径 **幂等共存**，谁先绑定谁生效，重复无副作用。
 
 ## 状态机
 

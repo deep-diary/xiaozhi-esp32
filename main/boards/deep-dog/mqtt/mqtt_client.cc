@@ -7,6 +7,10 @@
 #include <freertos/event_groups.h>
 #include <freertos/semphr.h>
 
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+#include <esp_crt_bundle.h>
+#endif
+
 #include <atomic>
 #include <cstring>
 
@@ -125,8 +129,14 @@ bool DeepDogMqttClient::Impl::DoConnect() {
     esp_mqtt_client_config_t cfg = {};
     cfg.broker.address.hostname = s.broker_host.c_str();
     cfg.broker.address.port = s.broker_port;
-    cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
+    cfg.broker.address.transport = s.use_tls ? MQTT_TRANSPORT_OVER_SSL : MQTT_TRANSPORT_OVER_TCP;
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+    if (s.use_tls) {
+        cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+    }
+#endif
     cfg.credentials.client_id = s.client_id.c_str();
+    // 匿名：username 为空则不发凭据（与网页/worker 同源）
     if (!s.username.empty()) {
         cfg.credentials.username = s.username.c_str();
     }
@@ -293,7 +303,9 @@ void DeepDogMqttClient::Impl::OnMqttEvent(void* handler_args, esp_event_base_t b
 
 bool DeepDogMqttClient::Start(const DeepDogMqttSettings& settings) {
     settings_ = settings;
-    prefix_ = DeepDogMqttConfig::TopicPrefix(settings_.device_id);
+    const std::string root =
+        settings_.topic_root.empty() ? std::string(DEEP_DOG_MQTT_DEFAULT_TOPIC_ROOT) : settings_.topic_root;
+    prefix_ = root + "/" + settings_.device_id + "/";
     impl_->stopping.store(false, std::memory_order_release);
     impl_->retry_count = 0;
 
@@ -338,6 +350,23 @@ bool DeepDogMqttClient::Publish(const std::string& relative_topic, const std::st
         return false;
     }
     ESP_LOGD(TAG, "pub %s qos=%d retain=%d len=%u", topic.c_str(), qos, retain ? 1 : 0,
+             (unsigned)payload.size());
+    return true;
+}
+
+bool DeepDogMqttClient::PublishRaw(const std::string& topic, const std::string& payload, int qos,
+                                   bool retain) {
+    if (!IsConnected() || !impl_->handle || topic.empty()) {
+        return false;
+    }
+    const int msg_id =
+        esp_mqtt_client_publish(impl_->handle, topic.c_str(), payload.data(), static_cast<int>(payload.size()),
+                                qos, retain ? 1 : 0);
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "publish raw fail %s", topic.c_str());
+        return false;
+    }
+    ESP_LOGD(TAG, "pub raw %s qos=%d retain=%d len=%u", topic.c_str(), qos, retain ? 1 : 0,
              (unsigned)payload.size());
     return true;
 }

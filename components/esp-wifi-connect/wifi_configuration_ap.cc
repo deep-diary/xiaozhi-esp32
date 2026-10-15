@@ -219,17 +219,27 @@ void WifiConfigurationAp::StartAccessPoint()
         nvs_close(nvs);
     }
 
-    if (show_mqtt_broker_config_) {
+    if (show_mqtt_broker_config_ || show_deep_trace_config_) {
         nvs_handle_t mqtt_nvs;
         if (nvs_open("deep_dog_mqtt", NVS_READONLY, &mqtt_nvs) == ESP_OK) {
-            char host[128] = {0};
-            size_t host_size = sizeof(host);
-            if (nvs_get_str(mqtt_nvs, "broker_host", host, &host_size) == ESP_OK) {
-                mqtt_broker_host_ = host;
+            if (show_mqtt_broker_config_) {
+                char host[128] = {0};
+                size_t host_size = sizeof(host);
+                if (nvs_get_str(mqtt_nvs, "broker_host", host, &host_size) == ESP_OK) {
+                    mqtt_broker_host_ = host;
+                }
+                int32_t port = 0;
+                if (nvs_get_i32(mqtt_nvs, "broker_port", &port) == ESP_OK && port > 0) {
+                    mqtt_broker_port_ = port;
+                }
             }
-            int32_t port = 0;
-            if (nvs_get_i32(mqtt_nvs, "broker_port", &port) == ESP_OK && port > 0) {
-                mqtt_broker_port_ = port;
+            // [deep-dog] N03：deep-trace 服务器 API 地址
+            if (show_deep_trace_config_) {
+                char base[192] = {0};
+                size_t base_size = sizeof(base);
+                if (nvs_get_str(mqtt_nvs, "server_api_base", base, &base_size) == ESP_OK) {
+                    server_api_base_ = base;
+                }
             }
             nvs_close(mqtt_nvs);
         }
@@ -549,11 +559,15 @@ void WifiConfigurationAp::StartWebServer()
             cJSON_AddBoolToObject(json, "show_ota_config", this_->show_ota_config_);
             cJSON_AddBoolToObject(json, "show_sleep_config", this_->show_sleep_config_);
             cJSON_AddBoolToObject(json, "show_mqtt_broker_config", this_->show_mqtt_broker_config_);
+            cJSON_AddBoolToObject(json, "show_deep_trace_config", this_->show_deep_trace_config_);
             if (this_->show_mqtt_broker_config_) {
                 if (!this_->mqtt_broker_host_.empty()) {
                     cJSON_AddStringToObject(json, "broker_host", this_->mqtt_broker_host_.c_str());
                 }
                 cJSON_AddNumberToObject(json, "broker_port", this_->mqtt_broker_port_);
+            }
+            if (this_->show_deep_trace_config_ && !this_->server_api_base_.empty()) {
+                cJSON_AddStringToObject(json, "server_api_base", this_->server_api_base_.c_str());
             }
 
             // 发送JSON响应
@@ -704,6 +718,28 @@ void WifiConfigurationAp::StartWebServer()
                 }
             }
 
+            // [deep-dog] N03：保存 deep-trace 服务器 API 地址（NVS deep_dog_mqtt）
+            if (this_->show_deep_trace_config_) {
+                nvs_handle_t dt_nvs;
+                if (nvs_open("deep_dog_mqtt", NVS_READWRITE, &dt_nvs) == ESP_OK) {
+                    cJSON *server_api_base = cJSON_GetObjectItem(json, "server_api_base");
+                    if (cJSON_IsString(server_api_base) && server_api_base->valuestring) {
+                        this_->server_api_base_ = server_api_base->valuestring;
+                        esp_err_t dt_err = nvs_set_str(dt_nvs, "server_api_base", this_->server_api_base_.c_str());
+                        if (dt_err != ESP_OK) {
+                            ESP_LOGE(TAG, "Failed to save server_api_base: %d", dt_err);
+                        }
+                    }
+                    esp_err_t dt_err = nvs_commit(dt_nvs);
+                    if (dt_err != ESP_OK) {
+                        ESP_LOGE(TAG, "Failed to commit deep_dog_mqtt NVS: %d", dt_err);
+                    }
+                    nvs_close(dt_nvs);
+                } else {
+                    ESP_LOGE(TAG, "Failed to open deep_dog_mqtt NVS");
+                }
+            }
+
             // 提交更改
             err = nvs_commit(nvs);
             nvs_close(nvs);
@@ -719,9 +755,9 @@ void WifiConfigurationAp::StartWebServer()
             httpd_resp_set_hdr(req, "Connection", "close");
             httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
 
-            ESP_LOGI(TAG, "Saved settings: ota_url=%s, max_tx_power=%d, remember_bssid=%d, sleep_mode=%d, broker=%s:%d",
+            ESP_LOGI(TAG, "Saved settings: ota_url=%s, max_tx_power=%d, remember_bssid=%d, sleep_mode=%d, broker=%s:%d, server_api_base=%s",
                 this_->ota_url_.c_str(), this_->max_tx_power_, this_->remember_bssid_, this_->sleep_mode_,
-                this_->mqtt_broker_host_.c_str(), this_->mqtt_broker_port_);
+                this_->mqtt_broker_host_.c_str(), this_->mqtt_broker_port_, this_->server_api_base_.c_str());
             return ESP_OK;
         },
         .user_ctx = this

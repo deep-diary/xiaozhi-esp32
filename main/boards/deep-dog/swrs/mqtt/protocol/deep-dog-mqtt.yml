@@ -3,20 +3,31 @@
 
 protocol:
   id: deep-dog-mqtt
-  version: "0.1.2"
+  version: "0.2.0"
   product: deep-dog
   description: >
     Modular full-feature board MQTT contract. Topics are split by module;
-    trim via device/info.capabilities (e.g. disable dog for non-quadruped builds).
+    trim via info/device.capabilities (e.g. disable dog for non-quadruped builds).
     Stable device_id defaults to STA MAC compact (lowercase, no colons);
-    pairing uses pairing/status + pairing/cmd (see modules/00-pairing).
-  topic_prefix: "deepdiary/deep-dog/{device_id}"
+    pairing uses status/pairing + cmd/pairing (see modules/00-pairing).
+    Unified topic skeleton (interop-2, 2026-10): every topic collapses to
+    {prefix}/{device_id}/{kind}/{subject[/...]} with kind in info|status|cmd|event|result.
+    The legacy prefix deepdiary/deep-dog/{device_id} is DEPRECATED; the per-module
+    old->new migration table lives in ../interop/01-mqtt-contract.md section 5.
+  topic_prefix: "{prefix}/{device_id}"
+  topic_prefix_note: >
+    {prefix} is configurable and MUST be identical across all three ends (device,
+    cloud worker+API, frontend); default deep-trace. Precedence: pairing-issued value
+    > NVS > compile-time default. Device end uses compile macro
+    DEEP_DOG_MQTT_DEFAULT_TOPIC_ROOT plus NVS deep_dog_mqtt.topic_root. Cloud worker/API
+    reads env MQTT_TOPIC_ROOT. Frontend reads VITE_MQTT_TOPIC_ROOT. Changing {prefix}
+    is a breaking change requiring a coordinated three-end rollout.
   device_id:
     default: "dev_when_unbound_mac_when_bound"
     note: >
-      Unbound: device_id=dev (MQTT prefix deepdiary/deep-dog/dev/, RTSP path deep-dog/dev).
-      Bound: STA MAC compact aabbccddeeff; written to NVS on pairing/cmd bound.
-      NVS deep_dog_mqtt.device_id explicit override for lab only.
+      Device hardware identity used as the {device_id} topic segment: STA MAC compact
+      (lowercase, no colons, e.g. aabbccddeeff); stable and identical for both unbound
+      and bound states. NVS deep_dog_mqtt.device_id explicit override for lab only.
   payload: json
   conventions:
     cmd_qos: 1
@@ -24,6 +35,11 @@ protocol:
     timestamp_field: ts
     timestamp_unit: unix_seconds
     sparse_cmd: true  # only include keys to change
+  client_id:
+    format: "deep-dog-{device_id}-{random}"
+    note: >
+      Random suffix avoids broker session takeover when two clients share a
+      device_id prefix. See modules/00-pairing.
 
 broker:
   device_preferred: "mqtt://192.168.3.73:1883"
@@ -43,8 +59,9 @@ modules:
     impl: modules/00-pairing
     note: >
       Unbound devices stay silent on boot; pairing via MCP or hold1_tap2.
-      pairing/status with code during session or pro_pairing_mqtt NVS.
-      Device unbind via pairing/request; backend confirms pairing/cmd.
+      status/pairing with code during session or pro_pairing_mqtt NVS.
+      Device unbind via event/pairing/request (interop-2 also offers uplink HTTP);
+      backend confirms via cmd/pairing.
   device:
     status: defined
     required: true
@@ -60,7 +77,7 @@ modules:
     status: defined
     required: false
     impl: modules/04-face
-    note: "UI shares detail page with track (modules/04-face); topics stay face/*"
+    note: "UI shares detail page with track (modules/04-face); topics stay in the face family (status/face*, cmd/face, event/face/*)"
   imu:
     status: defined
     required: false
@@ -90,7 +107,7 @@ modules:
     required: false
     note: >
       Dual-source v0.1: onboard Bluepad32+BTstack Xbox BLE (source=bt) and PC MQTT
-      bridge (source=wifi, handle/input). Hub+App layering in swrs/input/;
+      bridge (source=wifi, cmd/handle/input). Hub+App layering in swrs/input/;
       keymap+profile (I08a/I08b) selects HandleApp class; press/hold + axis_bindings;
       profiles led_demo|gimbal|motor|dog|off.
     ref: main/boards/deep-dog/swrs/input/
@@ -98,7 +115,7 @@ modules:
   touch:
     status: defined
     required: false
-    note: "Driver + touch_mqtt; touch/status thresholds+calib; touch/cmd set/calibrate/reset"
+    note: "Driver + touch_mqtt; status/touch thresholds+calib; cmd/touch set/calibrate/reset"
     ref: main/boards/deep-dog/touch_btn/
   can:
     status: ready
@@ -118,11 +135,11 @@ modules:
     depends: [can]
     note: >
       Single-motor semantic control via DeepMotor (position/enable/MIT). Complements
-      can/* raw tunnel. Handle profile=motor catalog in swrs/motor/04 + I08b axes.
+      the raw CAN tunnel (cmd/can, status/can). Handle profile=motor catalog in swrs/motor/04 + I08b axes.
     ref: main/boards/deep-dog/motor/
     impl: modules/14-motor
   person:
-    status: reserved
+    status: ready
     required: false
     impl: V-P01
   track:
@@ -139,7 +156,7 @@ modules:
 
 topics:
   # ---- pairing ----
-  pairing/status:
+  status/pairing:
     module: pairing
     dir: uplink
     qos: 0
@@ -153,7 +170,7 @@ topics:
       ts: { type: int }
       ts_iso: { type: string, optional: true }
 
-  pairing/request:
+  event/pairing/request:
     module: pairing
     dir: uplink
     qos: 1
@@ -164,17 +181,17 @@ topics:
       device_id: { type: string }
       ts: { type: int }
 
-  pairing/cmd:
+  cmd/pairing:
     module: pairing
     dir: downlink
     qos: 1
     retain: false
     payload:
-      action: { type: string, note: "bound|unbind|start_pairing (unbound only, dev topic)" }
+      action: { type: string, note: "bound|unbind|start_pairing (unbound uses device_id=MAC)" }
       ts: { type: int }
 
   # ---- device ----
-  device/info:
+  info/device:
     module: device
     dir: uplink
     qos: 0
@@ -190,6 +207,8 @@ topics:
       mac: { type: string, optional: true }
       ip: { type: string, optional: true }
       http_port: { type: int, optional: true }
+      ws_mcp_port: { type: int, optional: true, note: "WebSocket MCP server port" }
+      ws_mcp_path: { type: string, optional: true, note: "WebSocket MCP server path, e.g. /mcp" }
       reset_reason:
         type: string
         optional: true
@@ -226,10 +245,11 @@ topics:
           can: { type: bool }
           arm: { type: bool, note: "机械臂占位" }
           uart: { type: bool }
+          ws_mcp: { type: bool, note: "WebSocket MCP server available" }
       ts: { type: int }
       ts_iso: { type: string, optional: true }
 
-  device/status:
+  status/device:
     module: device
     dir: uplink
     qos: 0
@@ -272,7 +292,7 @@ topics:
           warn:
             type: array
             items: { type: string }
-            note: "e.g. low_internal_heap (<32KiB free); clock_unsynced; motor faults stay in dog/status"
+            note: "e.g. low_internal_heap (<32KiB free); clock_unsynced; motor faults stay in status/dog"
       clock_synced:
         type: bool
         optional: true
@@ -293,8 +313,41 @@ topics:
       ts: { type: int }
       ts_iso: { type: string, optional: true }
 
+  # ---- telemetry (migrated into unified skeleton) ----
+  status/telemetry:
+    module: telemetry
+    dir: uplink
+    qos: 0
+    retain: false
+    when: periodic_throttled
+    topic:
+      template: "{prefix}/{device_id}/status/telemetry"
+      note: >
+        Migrated from the legacy cloud-assigned deep-trace/{home_code}/{work_unit_code}/telemetry
+        (that topic's 2nd segment was a work-unit code, conflicting with the {device_id} slot).
+        Device now publishes to {prefix}/{device_id}/status/telemetry; cloud ingest wildcard-subscribes
+        {prefix}/+/status/telemetry and maps device_id -> WorkUnit.
+        Source of {prefix}: HTTP pairing handshake `topics` or NVS deep_dog_mqtt.topic_root.
+        Empty => telemetry disabled. See modules/15-telemetry and ../interop/01-mqtt-contract.md 5.5.
+    impl: modules/15-telemetry
+    payload:
+      home_code: { type: string }
+      work_unit_code: { type: string }
+      device_program: { type: string, note: "e.g. esp_sparkbot" }
+      ts: { type: string, note: "ISO8601 with timezone" }
+      points:
+        type: object
+        note: "key=field_code; value=number or {value,unit}; must be numeric-convertible"
+        fields:
+          free_heap: { type: int }
+          min_free_heap: { type: int }
+          internal_free: { type: int }
+          psram_free: { type: int, optional: true }
+          rssi: { type: int }
+          uptime_s: { type: int }
+
   # ---- dog ----
-  dog/cmd:
+  cmd/dog:
     module: dog
     dir: downlink
     qos: 1
@@ -306,7 +359,7 @@ topics:
         values: [init, forward, back, stand, liedown, dance, stop_walk, disable]
       ts: { type: int }
 
-  dog/status:
+  status/dog:
     module: dog
     dir: uplink
     qos: 0
@@ -318,7 +371,7 @@ topics:
       ts: { type: int }
 
   # ---- stream ----
-  stream/cmd:
+  cmd/stream:
     module: stream
     dir: downlink
     qos: 1
@@ -337,7 +390,7 @@ topics:
         note: "only for take_photo; default 描述画面里有什么"
       ts: { type: int, optional: true }
 
-  stream/photo:
+  event/stream/photo:
     module: stream
     dir: uplink
     qos: 0
@@ -350,7 +403,7 @@ topics:
       elapsed_ms: { type: int }
       ts: { type: int }
 
-  stream/status:
+  status/stream:
     module: stream
     dir: uplink
     qos: 0
@@ -383,7 +436,7 @@ topics:
       ts_iso: { type: string, optional: true, note: "UTC ISO8601 for UI display" }
 
   # ---- face ----
-  face/cmd:
+  cmd/face:
     module: face
     dir: downlink
     qos: 1
@@ -395,7 +448,7 @@ topics:
         type: enum
         values: [clear_db, rename, delete_one, merge, refresh_immich, set_immich_config, ping_immich, refresh_status]
         optional: true
-        note: "clear_db= wipe all; merge=alias; refresh_status= force uplink face/status (UI sync); set_immich_config= NVS fdog_im; ping_immich= probe server/ping"
+        note: "clear_db= wipe all; merge=alias; refresh_status= force uplink status/face (UI sync); set_immich_config= NVS fdog_im; ping_immich= probe server/ping"
       local_id: { type: int, optional: true }
       target_local_id: { type: int, optional: true, note: "merge canonical target" }
       display_name: { type: string, optional: true, note: "rename" }
@@ -413,10 +466,10 @@ topics:
       detect_interval_ms:
         type: int
         optional: true
-        note: "clamped 200-5000; echoed in face/status"
+        note: "clamped 200-5000; echoed in status/face"
       ts: { type: int, optional: true }
 
-  face/status:
+  status/face:
     module: face
     dir: uplink
     qos: 0
@@ -454,7 +507,7 @@ topics:
           display_name: { type: string, optional: true }
       ts: { type: int }
 
-  face/registry:
+  status/face/registry:
     module: face
     dir: uplink
     qos: 0
@@ -478,7 +531,7 @@ topics:
           last_seen_at: { type: int, optional: true, note: "Unix sec, last successful recognition" }
       ts: { type: int }
 
-  face/immich/status:
+  status/face/immich:
     module: face
     dir: uplink
     qos: 0
@@ -497,19 +550,7 @@ topics:
       last_local_id: { type: int }
       ts: { type: int }
 
-  person/active:
-    module: face
-    dir: uplink
-    qos: 0
-    retain: true
-    when: primary_local_id_changes
-    payload:
-      local_id: { type: int }
-      display_name: { type: string, optional: true }
-      immich_person_id: { type: string, optional: true }
-      ts: { type: int }
-
-  face/thumb:
+  event/face/thumb:
     module: face
     dir: uplink
     qos: 0
@@ -525,7 +566,7 @@ topics:
       ts: { type: int }
 
   # ---- imu ----
-  imu/status:
+  status/imu:
     module: imu
     dir: uplink
     qos: 0
@@ -550,7 +591,7 @@ topics:
       roll: { type: float, note: "estimated from accel" }
       switches:
         type: object
-        note: "12 edge-pulse counts since previous imu/status frame (6 rot ± + 6 trans ±); 0 if none; all 0 when ok=false; body frame; no flip_* / no displacement"
+        note: "12 edge-pulse counts since previous status/imu frame (6 rot ± + 6 trans ±); 0 if none; all 0 when ok=false; body frame; no flip_* / no displacement"
         fields:
           rot_x_pos: { type: int, note: "gyro integrate +X axis past angle threshold" }
           rot_x_neg: { type: int, note: "gyro integrate -X axis past angle threshold" }
@@ -567,7 +608,7 @@ topics:
       ts: { type: int }
 
   # ---- led ----
-  led/cmd:
+  cmd/led:
     module: led
     dir: downlink
     qos: 1
@@ -587,7 +628,7 @@ topics:
       scroll_length: { type: int, optional: true }
       ts: { type: int }
 
-  led/status:
+  status/led:
     module: led
     dir: uplink
     qos: 0
@@ -609,7 +650,7 @@ topics:
       ts: { type: int }
 
   # ---- servo ----
-  servo/cmd:
+  cmd/servo:
     module: servo
     dir: downlink
     qos: 1
@@ -623,7 +664,7 @@ topics:
       type: { type: enum, values: [90, 180, 270, 360], optional: true }
       ts: { type: int }
 
-  servo/status:
+  status/servo:
     module: servo
     dir: uplink
     qos: 0
@@ -643,7 +684,7 @@ topics:
       ts: { type: int }
 
   # ---- gimbal ----
-  gimbal/cmd:
+  cmd/gimbal:
     module: gimbal
     dir: downlink
     qos: 1
@@ -682,7 +723,7 @@ topics:
       tilt_speed: { type: number, optional: true, note: "set_speed; deg/s" }
       ts: { type: int }
 
-  gimbal/status:
+  status/gimbal:
     module: gimbal
     dir: uplink
     qos: 0
@@ -702,7 +743,7 @@ topics:
 
   # ---- handle ----
   # Snapshot fields (status uplink + input downlink) share the same shape.
-  handle/cmd:
+  cmd/handle:
     module: handle
     dir: downlink
     qos: 1
@@ -768,7 +809,7 @@ topics:
           value = {id, optional motor_id|scale|deadzone}
       ts: { type: int }
 
-  handle/keymap:
+  status/handle/keymap:
     module: handle
     dir: uplink
     qos: 0
@@ -814,7 +855,7 @@ topics:
         optional: true
       ts: { type: int }
 
-  handle/input:
+  cmd/handle/input:
     module: handle
     dir: downlink
     qos: 0
@@ -872,7 +913,7 @@ topics:
           Optional DS4 onboard IMU (I07). Absent without HID full report.
           Body frame: +X right, +Y forward (light bar), +Z up;
           flat face-up => accel_z ≈ -1 g. gyro_* dps; accel_* g.
-          Not board imu/status. See I07.
+          Not board status/imu. See I07.
         fields:
           gyro_x: { type: float }
           gyro_y: { type: float }
@@ -883,7 +924,7 @@ topics:
       raw: { type: object, optional: true }
       ts: { type: int }
 
-  handle/status:
+  status/handle:
     module: handle
     dir: uplink
     qos: 0
@@ -950,7 +991,7 @@ topics:
       ts: { type: int }
 
   # ---- touch ----
-  touch/cmd:
+  cmd/touch:
     module: touch
     dir: downlink
     qos: 1
@@ -979,7 +1020,7 @@ topics:
       button_id: { type: int, optional: true, values: [1, 2, 3], note: "calibrate" }
       samples: { type: int, optional: true, default: 10, note: "calibrate" }
 
-  touch/status:
+  status/touch:
     module: touch
     dir: uplink
     qos: 0
@@ -1049,7 +1090,7 @@ topics:
       ts: { type: int }
 
   # ---- can (TWAI MQTT tunnel for web frame table) ----
-  can/cmd:
+  cmd/can:
     module: can
     dir: downlink
     qos: 1
@@ -1069,7 +1110,7 @@ topics:
       ext_only: { type: bool, optional: true }
       ts: { type: int }
 
-  can/status:
+  status/can:
     module: can
     dir: uplink
     qos: 0
@@ -1088,7 +1129,7 @@ topics:
       dropped: { type: int, optional: true }
       ts: { type: int }
 
-  can/frames:
+  status/can/frames:
     module: can
     dir: uplink
     qos: 0
@@ -1111,12 +1152,12 @@ topics:
       dropped: { type: int, optional: true }
       ts: { type: int }
 
-  can/tx:
+  cmd/can/tx:
     module: can
     dir: downlink
     qos: 1
     retain: false
-    note: "Inject frames only if can/status.allow_tx==true"
+    note: "Inject frames only if status/can.allow_tx==true"
     payload:
       frames:
         type: array
@@ -1130,7 +1171,7 @@ topics:
       ts: { type: int }
 
   # ---- motor (DeepMotor semantic control) ----
-  motor/cmd:
+  cmd/motor:
     module: motor
     dir: downlink
     qos: 1
@@ -1178,7 +1219,20 @@ topics:
           arguments: { type: object, optional: true }
       ts: { type: int, optional: true }
 
-  motor/tools:
+  cmd/motor/scan:
+    module: motor
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "Discovery scan; {started, range} to start a scan, or {event:'discovered', id, ...} to register"
+    payload:
+      started: { type: bool, optional: true, note: "start a discovery scan" }
+      range: { type: array, item: int, optional: true, note: "candidate motor ids to probe" }
+      event: { type: string, optional: true, note: "discovered" }
+      id: { type: int, optional: true, note: "discovered motor id" }
+      ts: { type: int, optional: true }
+
+  status/motor/tools:
     module: motor
     dir: uplink
     qos: 0
@@ -1188,12 +1242,12 @@ topics:
       tools: { type: array }
       ts: { type: int }
 
-  motor/mcp_result:
+  event/motor/mcp_result:
     module: motor
     dir: uplink
     qos: 0
     retain: false
-    note: "Result of motor/cmd mcp_call"
+    note: "Result of cmd/motor mcp_call"
     payload:
       name: { type: string }
       ok: { type: bool }
@@ -1202,7 +1256,19 @@ topics:
       error: { type: string, optional: true }
       ts: { type: int }
 
-  motor/status:
+  event/motor/scan:
+    module: motor
+    dir: uplink
+    qos: 0
+    retain: false
+    when: scan_discovery
+    note: "Discovery result frame (was motor/scan_result); pairs with cmd/motor/scan"
+    payload:
+      event: { type: string, note: "discovered" }
+      id: { type: int, note: "discovered motor id" }
+      ts: { type: int }
+
+  status/motor:
     module: motor
     dir: uplink
     qos: 0
@@ -1223,7 +1289,7 @@ topics:
           target_rad: { type: float, optional: true }
       ts: { type: int }
 
-  motor/teaching/snapshot:
+  event/motor/teaching:
     module: motor
     dir: uplink
     qos: 0
@@ -1242,7 +1308,7 @@ topics:
           vel: { type: float }
       ts: { type: int }
 
-  motor/teaching/status:
+  status/motor/teaching:
     module: motor
     dir: uplink
     qos: 0
@@ -1256,13 +1322,14 @@ topics:
       duration_ms: { type: int, optional: true }
       ts: { type: int }
 
-  # ---- reserved ----
-  person/active:
+  # ---- person ----
+  status/person/active:
     module: person
     dir: uplink
     qos: 0
     retain: true
-    status: draft
+    status: ready
+    when: primary_local_id_changes
     note: "Identity event for Face page / Kiosk; no separate Person entry card"
     payload:
       local_id: { type: int, optional: true }
@@ -1270,7 +1337,7 @@ topics:
       immich_person_id: { type: string, optional: true }
       ts: { type: int }
 
-  track/cmd:
+  cmd/track:
     module: track
     dir: downlink
     qos: 1
@@ -1278,12 +1345,12 @@ topics:
     status: ready
     note: >
       enable/disable tracking. If face detect off or no primary, accept enable
-      but track/status.following stays false.
+      but status/track.following stays false.
     payload:
       action: { type: enum, values: [enable, disable], optional: true }
       ts: { type: int }
 
-  track/status:
+  status/track:
     module: track
     dir: uplink
     qos: 0

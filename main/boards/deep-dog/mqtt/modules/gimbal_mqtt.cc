@@ -1,6 +1,7 @@
 #include "mqtt/modules/gimbal_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "gimbal/Gimbal.h"
 
 #include <cJSON.h>
@@ -133,7 +134,7 @@ void DeepDogGimbalMqtt::OnConnected() {
     }
 #endif
     if (client_) {
-        client_->Subscribe("gimbal/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("gimbal"), 1);
     }
     PublishStatus(true);
 }
@@ -157,7 +158,7 @@ void DeepDogGimbalMqtt::OnMessage(const std::string& topic, const std::string& p
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic != client_->Topic("gimbal/cmd")) {
+    if (topic != client_->Topic(deep_dog_topics::Cmd("gimbal"))) {
         return;
     }
 
@@ -294,7 +295,7 @@ bool DeepDogGimbalMqtt::PublishStatus(bool force) {
         if (!raw) {
             return false;
         }
-        const bool ok = client_->Publish("gimbal/status", raw, 0, true);
+        const bool ok = client_->Publish(deep_dog_topics::Status("gimbal"), raw, 0, true);
         cJSON_free(raw);
         return ok;
     }
@@ -321,7 +322,7 @@ bool DeepDogGimbalMqtt::PublishStatus(bool force) {
     if (!raw) {
         return false;
     }
-    const bool ok = client_->Publish("gimbal/status", raw, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("gimbal"), raw, 0, true);
     cJSON_free(raw);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();

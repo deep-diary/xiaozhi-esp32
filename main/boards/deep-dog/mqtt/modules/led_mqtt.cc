@@ -1,6 +1,7 @@
 #include "mqtt/modules/led_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "led/led_strip_control.h"
 #include "led/apps/led_app_dog.h"
 #include "config.h"
@@ -54,7 +55,7 @@ void DeepDogLedMqtt::OnConnected() {
         return;
     }
     if (client_) {
-        client_->Subscribe("led/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("led"), 1);
     }
     PublishStatus();
 }
@@ -71,7 +72,7 @@ void DeepDogLedMqtt::OnMessage(const std::string& topic, const std::string& payl
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic != client_->Topic("led/cmd")) {
+    if (topic != client_->Topic(deep_dog_topics::Cmd("led"))) {
         return;
     }
 
@@ -268,7 +269,7 @@ bool DeepDogLedMqtt::PublishStatus() {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("led/status", printed, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("led"), printed, 0, true);
     cJSON_free(printed);
     return ok;
 }

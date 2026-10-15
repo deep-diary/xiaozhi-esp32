@@ -38,6 +38,7 @@ public:
     void SetShowOtaConfig(bool show) { show_ota_config_ = show; }
     void SetShowSleepConfig(bool show) { show_sleep_config_ = show; }
     void SetShowMqttBrokerConfig(bool show) { show_mqtt_broker_config_ = show; }
+    void SetShowDeepTraceConfig(bool show) { show_deep_trace_config_ = show; }
     void Start();
     void Stop();
 #if !CONFIG_IDF_TARGET_ESP32P4
@@ -79,6 +80,9 @@ private:
     bool show_mqtt_broker_config_ = false;
     std::string mqtt_broker_host_;
     int mqtt_broker_port_ = 1883;
+    // [deep-dog] N03：deep-trace 服务器 API 地址（HTTP 配对用）
+    bool show_deep_trace_config_ = false;
+    std::string server_api_base_;
 
     // Callbacks
     std::function<void()> on_exit_requested_;

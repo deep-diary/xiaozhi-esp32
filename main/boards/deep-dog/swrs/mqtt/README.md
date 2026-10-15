@@ -27,6 +27,8 @@
 | 12 | [can](./modules/12-can.md) |
 | 13 | [person](./modules/13-person.md) |
 | 14 | [motor](./modules/14-motor.md)（单电机；MOT-03） |
+| 15 | [telemetry](./modules/15-telemetry.md)（deep-trace 遥测通道；**非模块前缀**） |
+| 16 | [http-pairing](./modules/16-http-pairing.md)（对接 deep-trace 服务器；与 00 共存） |
 
 IA：**入口卡 → 详情页**。卡上不做完整控制；模块 Topic 仅在详情页订阅。  
 **Face + Track 同页**：设备页只出「人脸」卡；`/modules/track` redirect 到 `/modules/face#track`。
@@ -45,7 +47,7 @@ Broker 地址：[vision/infra.md](../vision/infra.md)。推流能力依赖 [C02]
 
 源码：`main/boards/deep-dog/mqtt/`（`DEEP_DOG_MQTT_ENABLE`，默认 1）。
 
-NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password` / `bound` / `pair_code`。  
+NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password` / `bound` / `pair_code` / `server_api_base` / `telemetry_topic` / `home_code` / `work_unit_code` / `device_program`。  
 联调默认 broker `192.168.3.73:1883`（本机 Docker EMQX，`DeepServer/emqx/start.sh`；公共站可选 `broker.emqx.io:1883`，NVS 可覆盖）。**配网 AP 高级页**可改 `broker_host`/`broker_port`（见 [N03](../net/N03-wifi-portal-mqtt-broker.md)），免重编译。**未绑定**时 `device_id` 默认为 **`dev`**（Topic `deepdiary/deep-dog/dev/`、RTSP path `deep-dog/dev`）；**已绑定**后切换为 STA MAC 紧凑串（如 `aabbccddeeff`）。NVS 显式写入 `device_id` 可覆盖（仅联调）。绑定/解绑见 [00-pairing](./modules/00-pairing.md)。  
 Hub / ingest 内网走 `ws://192.168.3.73:8083/mqtt`，与设备本机 EMQX 为同一 broker（TCP 1883 与 WS 8083 互通）。MQTTX 可直连 `192.168.3.73:1883` 或 `ws://192.168.3.73:8083/mqtt`。
 

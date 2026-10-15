@@ -1,6 +1,7 @@
 #include "mqtt/modules/motor_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "config.h"
 #include "mcp_server.h"
 
@@ -213,7 +214,7 @@ void DeepDogMotorMqtt::PublishScanStarted(uint8_t id_min, uint8_t id_max) {
     char* s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (s) {
-        (void)client_->Publish("motor/scan_result", s, 0, false);
+        (void)client_->Publish(deep_dog_topics::Event("motor/scan"), s, 0, false);
         cJSON_free(s);
     }
 #endif
@@ -237,7 +238,7 @@ void DeepDogMotorMqtt::PublishScanDiscovered(uint8_t motor_id, const motor_statu
     char* s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (s) {
-        (void)client_->Publish("motor/scan_result", s, 0, false);
+        (void)client_->Publish(deep_dog_topics::Event("motor/scan"), s, 0, false);
         cJSON_free(s);
     }
 }
@@ -329,7 +330,7 @@ bool DeepDogMotorMqtt::PublishTools() {
     if (!s) {
         return false;
     }
-    const bool ok = client_->Publish("motor/tools", s, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("motor/tools"), s, 0, true);
     cJSON_free(s);
     return ok;
 #endif
@@ -363,7 +364,7 @@ void DeepDogMotorMqtt::PublishMcpResult(const char* tool_name, bool ok, const ch
     char* s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (s) {
-        (void)client_->Publish("motor/mcp_result", s, 0, false);
+        (void)client_->Publish(deep_dog_topics::Event("motor/mcp_result"), s, 0, false);
         cJSON_free(s);
     }
 #endif
@@ -409,7 +410,7 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
     if (!s) {
         return false;
     }
-    const bool ok = client_->Publish("motor/status", s, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("motor"), s, 0, true);
     cJSON_free(s);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();
@@ -435,7 +436,7 @@ bool DeepDogMotorMqtt::PublishTeachingSnapshot(uint8_t motor_id) {
     if (!json) {
         return false;
     }
-    const bool ok = client_->Publish("motor/teaching/snapshot", json, 0, false);
+    const bool ok = client_->Publish(deep_dog_topics::Event("motor/teaching"), json, 0, false);
     cJSON_free(json);
     if (ok) {
         ESP_LOGI(TAG, "motor/teaching/snapshot motor_id=%u", (unsigned)motor_id);
@@ -459,7 +460,7 @@ bool DeepDogMotorMqtt::PublishTeachingStatus() {
     if (!json) {
         return false;
     }
-    const bool ok = client_->Publish("motor/teaching/status", json, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("motor/teaching"), json, 0, true);
     cJSON_free(json);
     return ok;
 #endif
@@ -710,8 +711,8 @@ void DeepDogMotorMqtt::OnConnected() {
         motor_->setMotorDiscoveryCallback(&DeepDogMotorMqtt::OnMotorDiscovered, this);
         motor_->setMotorStatusNotifyCallback(&DeepDogMotorMqtt::OnMotorStatusUpdated, this);
     }
-    client_->Subscribe("motor/cmd", 1);
-    client_->Subscribe("motor/scan", 0);
+    client_->Subscribe(deep_dog_topics::Cmd("motor"), 1);
+    client_->Subscribe(deep_dog_topics::Cmd("motor/scan"), 0);
     PublishTools();
     PublishStatus(true);
     if (heartbeat_timer_) {
@@ -745,11 +746,11 @@ void DeepDogMotorMqtt::OnMessage(const std::string& topic, const std::string& pa
     if (!enabled_) {
         return;
     }
-    if (client_ && topic == client_->Topic("motor/cmd")) {
+    if (client_ && topic == client_->Topic(deep_dog_topics::Cmd("motor"))) {
         ApplyCmd(payload.c_str());
         return;
     }
-    if (client_ && topic == client_->Topic("motor/scan")) {
+    if (client_ && topic == client_->Topic(deep_dog_topics::Cmd("motor/scan"))) {
         DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
         if (motor) {
             PublishScanStarted(1, 127);

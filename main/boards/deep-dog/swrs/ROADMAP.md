@@ -44,7 +44,9 @@
 | **MOT-01** | CAN 硬件剖面 | [motor/01](./motor/01-can-hw-profile.md) | — | 本轮落地 |
 | **MOT-02** | CAN MQTT 透传 | [motor/02](./motor/02-can-mqtt.md) · [12-can](./mqtt/modules/12-can.md) | MOT-01、M01 | 本轮落地 |
 | **MOT-03** | 电机 MQTT | [motor/03](./motor/03-motor-mqtt.md) · [14-motor](./mqtt/modules/14-motor.md) | MOT-01、M01 | 本轮落地 |
-| **MOT-04/05** | motor catalog + 轴样例 | [motor/04](./motor/04-handle-motor-catalog.md) · [05](./motor/05-analog-axis-sample.md) | I08b、MOT-03 | 本轮落地 |
+| **MOT-04/05** | motor catalog + 轴样例 | [motor/04](./motor/04-handle-motor-catalog.md) · [05](./motor/05-handle-motor-catalog.md) | I08b、MOT-03 | 本轮落地 |
+| **DT-01** | deep-trace 遥测通道 | [mqtt/modules/15-telemetry](./mqtt/modules/15-telemetry.md) | M01 · 云端工位配置 | 本轮落地 |
+| **DT-02** | deep-trace HTTP 配对 | [mqtt/modules/16-http-pairing](./mqtt/modules/16-http-pairing.md) · [N03](./net/N03-wifi-portal-mqtt-broker.md) | M01 · 云端 144 | 本轮落地 |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |
 
 ## 依赖关系
@@ -58,6 +60,8 @@ M01 + modules/ ─────────────────────�
 M01 + input/ ────────────────────────────→ I-HANDLE（bt / wifi 双源；固件 planned）
 S05 ─────────────────────────────────────→ P01
 D9 (BMI270) ─────────────────────────────→ imu/status (modules/03-imu)
+M01 + 云端工位配置 ───────────────────────→ telemetry (DT-01)
+M01 + 云端 144 ──────────────────────────→ HTTP 配对 (DT-02)
 ```
 
 ## 视觉轨验收速查

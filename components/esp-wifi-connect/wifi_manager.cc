@@ -250,6 +250,7 @@ void WifiManager::StartConfigAp() {
     config_ap_->SetShowOtaConfig(config_.show_ota_config);
     config_ap_->SetShowSleepConfig(config_.show_sleep_config);
     config_ap_->SetShowMqttBrokerConfig(config_.show_mqtt_broker_config);
+    config_ap_->SetShowDeepTraceConfig(config_.show_deep_trace_config);
 
     // Web handler calls this when user submits config
     config_ap_->OnExitRequested([this]() {

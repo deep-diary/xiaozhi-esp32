@@ -2,6 +2,7 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
+#include "mqtt/mqtt_topics.h"
 
 #include "face_ai_bridge.h"
 #include "face_ai_config.h"
@@ -72,7 +73,7 @@ void DeepDogTrackMqtt::OnConnected() {
         return;
     }
     if (client_) {
-        client_->Subscribe("track/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("track"), 1);
     }
     last_fingerprint_.clear();
     PublishStatus(true);
@@ -96,7 +97,7 @@ void DeepDogTrackMqtt::OnMessage(const std::string& topic, const std::string& pa
     if (!module_enabled_ || !client_) {
         return;
     }
-    if (topic != client_->Topic("track/cmd")) {
+    if (topic != client_->Topic(deep_dog_topics::Cmd("track"))) {
         return;
     }
 
@@ -193,7 +194,7 @@ bool DeepDogTrackMqtt::PublishStatus(bool force) {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("track/status", printed, 0, false);
+    const bool ok = client_->Publish(deep_dog_topics::Status("track"), printed, 0, false);
     static int s_log = 0;
     if (s_log < 5 || force) {
         ESP_LOGI(TAG, "track/status enabled=%d following=%d err=%s pub=%d", user_tracking_ ? 1 : 0,

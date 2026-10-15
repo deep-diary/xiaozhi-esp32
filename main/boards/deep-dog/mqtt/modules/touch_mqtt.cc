@@ -1,6 +1,7 @@
 #include "mqtt/modules/touch_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "touch_btn/touch_button_controller.h"
 #include "touch_btn/touch_combo_recognizer.h"
 #include "touch_btn/touch_config.h"
@@ -101,7 +102,7 @@ void DeepDogTouchMqtt::OnConnected() {
         return;
     }
     if (client_) {
-        client_->Subscribe("touch/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("touch"), 1);
     }
     EnsurePollTimer();
     if (poll_timer_) {
@@ -143,7 +144,7 @@ void DeepDogTouchMqtt::OnMessage(const std::string& topic, const std::string& pa
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic != client_->Topic("touch/cmd")) {
+    if (topic != client_->Topic(deep_dog_topics::Cmd("touch"))) {
         return;
     }
     HandleCmd(payload);
@@ -393,7 +394,7 @@ bool DeepDogTouchMqtt::PublishStatus() {
     if (!printed) {
         return false;
     }
-    const bool pub_ok = client_->Publish("touch/status", printed, 0, true);
+    const bool pub_ok = client_->Publish(deep_dog_topics::Status("touch"), printed, 0, true);
     ESP_LOGD(TAG, "touch/status mask=0x%02x pub=%d", (unsigned)mask, pub_ok ? 1 : 0);
     cJSON_free(printed);
     return pub_ok;

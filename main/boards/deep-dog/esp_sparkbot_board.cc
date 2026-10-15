@@ -903,10 +903,11 @@ public:
     }
 #endif
 
-    // [deep-dog] N03：配网页高级项展示 OTA URL + 板级 MQTT broker
+    // [deep-dog] N03：配网页高级项展示 OTA URL + 板级 MQTT broker + deep-trace 服务器 API
     void CustomizeWifiManagerConfig(WifiManagerConfig& config) override {
         config.show_ota_config = true;
         config.show_mqtt_broker_config = true;
+        config.show_deep_trace_config = true;
     }
 
     void StartNetwork() override {

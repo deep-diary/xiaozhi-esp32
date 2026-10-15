@@ -49,6 +49,18 @@ void RegisterPairingMcpTools(McpServer& mcp_server, DeepDogMqtt* mqtt) {
         });
 
     mcp_server.AddTool(
+        "self.device.cancel_pairing",
+        "取消配对、停止添加设备。用户说「取消配对」「不配了」「停止配对」时调用。",
+        PropertyList(),
+        [mqtt](const PropertyList&) -> ReturnValue {
+            if (!mqtt->IsRunning()) {
+                return std::string("MQTT 未连接，请稍后重试");
+            }
+            mqtt->CancelPairing();
+            return std::string("已取消配对");
+        });
+
+    mcp_server.AddTool(
         "self.device.unbind",
         "解绑、删除设备、从账号移除。用户说「解绑」「删除设备」时调用。"
         "已绑定时向服务器发送解绑请求；未绑定时提示未绑定。",

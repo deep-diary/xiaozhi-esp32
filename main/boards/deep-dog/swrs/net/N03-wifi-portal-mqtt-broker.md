@@ -18,11 +18,15 @@
 | 项 | 约定 |
 |----|------|
 | 入口 | 配网 Web UI「高级」Tab |
-| 字段 | `broker_host`（必填语义）、`broker_port`（默认 1883） |
-| 持久化 | NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port`（与 `DeepDogMqttConfig::Save` 一致） |
+| 字段 | `broker_host`（必填语义）、`broker_port`（默认 1883）、`server_api_base`（deep-trace 服务器 API 地址，配对用，如 `https://<后端>/api/v1`） |
+| 持久化 | NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `server_api_base`（与 `DeepDogMqttConfig::Save` 一致） |
 | 生效 | 保存后按组件既有 advanced 流程（重启/提示）；下次 `DeepDogMqtt::Start` / 开机 `Load()` 读新地址 |
-| 编译默认 | 仍由 `DEEP_DOG_MQTT_DEFAULT_BROKER_*` 提供；NVS 非空则覆盖 |
+| 编译默认 | 仍由 `DEEP_DOG_MQTT_DEFAULT_BROKER_*` 提供；NVS 非空则覆盖。`server_api_base` 编译默认 `DEEP_DOG_MQTT_DEFAULT_SERVER_API_BASE`（**默认空**，生产由门户设置） |
 | 范围外 | username/password 本轮不进门户；小智云 MQTT 不改 |
+
+## 与配对的关系
+
+`server_api_base` 是 [HTTP 配对](../mqtt/modules/16-http-pairing.md) 的服务器基址；非空时触发配对优先走 HTTP，否则走 [MQTT 配对](../mqtt/modules/00-pairing.md)。
 
 ## 配网等待
 
@@ -34,7 +38,7 @@
 
 ## 验收
 
-- [ ] 高级页可见：Custom OTA URL + MQTT Broker/Port
-- [ ] 保存后 NVS `deep_dog_mqtt` 含新 host/port；重启串口 `dog_mqtt_cfg: broker …`
-- [ ] 配网模式不再卡约 30s（跳过 STA IP 等待）
-- [ ] 手填 `broker.emqx.io` 重启后不被 migrate 改掉
+- [x] 高级页可见：Custom OTA URL + MQTT Broker/Port + deep-trace 服务器 API 地址
+- [x] 保存后 NVS `deep_dog_mqtt` 含新 host/port/server_api_base；重启串口 `dog_mqtt_cfg: broker …` / `server_api_base=…`
+- [x] 配网模式不再卡约 30s（跳过 STA IP 等待）
+- [x] 手填 `broker.emqx.io` 重启后不被 migrate 改掉

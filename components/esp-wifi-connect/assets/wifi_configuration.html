@@ -320,6 +320,7 @@
         /* ========== Advanced rows ========== */
         #ota_url_row { margin-bottom: 16px; }
         #mqtt_broker_row { margin-bottom: 16px; }
+        #deep_trace_row { margin-bottom: 16px; }
         .field-inline {
             display: flex;
             align-items: center;
@@ -568,6 +569,12 @@
                     <input type="number" id="broker_port" name="broker_port" min="1" max="65535" style="width: 100%;">
                 </div>
 
+                <!-- deep-trace Server API (deep-dog, visibility controlled by show_deep_trace_config) -->
+                <div id="deep_trace_row" style="display: none;">
+                    <label for="server_api_base" data-lang="server_api_base">deep-trace Server API:</label>
+                    <input type="text" id="server_api_base" name="server_api_base" style="width: 100%;">
+                </div>
+
                 <!-- Max TX Power -->
                 <p class="field-inline">
                     <label for="max_tx_power" data-lang="max_tx_power" style="white-space: nowrap;">Wi-Fi Max TX Power:</label>
@@ -768,6 +775,7 @@
                 ota_url: 'Custom OTA URL:',
                 mqtt_broker_host: 'MQTT Broker:',
                 mqtt_broker_port: 'MQTT Port:',
+                server_api_base: 'deep-trace Server API:',
                 max_tx_power: 'Wi-Fi Max TX Power:',
                 remember_bssid: 'Remember BSSID when connecting to Wi-Fi',
                 sleep_mode: 'Enable Sleep Mode',
@@ -1321,6 +1329,7 @@
                 ota_url: '自定义 OTA 地址:',
                 mqtt_broker_host: 'MQTT Broker 地址:',
                 mqtt_broker_port: 'MQTT 端口:',
+                server_api_base: 'deep-trace 服务器 API 地址:',
                 max_tx_power: 'Wi-Fi 最大发射功率:',
                 remember_bssid: '连接 Wi-Fi 时记住 BSSID',
                 sleep_mode: '启用睡眠模式',
@@ -1678,6 +1687,7 @@
                 ota_url: document.getElementById('ota_url').value,
                 broker_host: document.getElementById('broker_host').value,
                 broker_port: parseInt(document.getElementById('broker_port').value || '1883', 10),
+                server_api_base: document.getElementById('server_api_base').value,
                 max_tx_power: parseInt(document.getElementById('max_tx_power').value),
                 remember_bssid: document.getElementById('remember_bssid').checked,
                 sleep_mode: document.getElementById('sleep_mode').checked
@@ -1752,6 +1762,8 @@
                     data.show_ota_config ? 'block' : 'none';
                 document.getElementById('mqtt_broker_row').style.display =
                     data.show_mqtt_broker_config ? 'block' : 'none';
+                document.getElementById('deep_trace_row').style.display =
+                    data.show_deep_trace_config ? 'block' : 'none';
                 document.getElementById('sleep_config_row').style.display =
                     data.show_sleep_config ? 'flex' : 'none';
                 if (data.ota_url) {
@@ -1762,6 +1774,9 @@
                 }
                 if (data.broker_port !== undefined) {
                     document.getElementById('broker_port').value = data.broker_port;
+                }
+                if (data.server_api_base !== undefined) {
+                    document.getElementById('server_api_base').value = data.server_api_base;
                 }
                 if (data.max_tx_power) {
                     document.getElementById('max_tx_power').value = data.max_tx_power;

@@ -2,6 +2,7 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
+#include "mqtt/mqtt_topics.h"
 
 #include "application.h"
 #include "board.h"
@@ -221,7 +222,7 @@ void DeepDogStreamMqtt::OnConnected() {
     }
     last_fingerprint_.clear();
     if (client_) {
-        client_->Subscribe("stream/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("stream"), 1);
     }
     PublishStatus(nullptr);
     if (poll_timer_) {
@@ -260,7 +261,7 @@ void DeepDogStreamMqtt::PublishPhotoResult(bool ok, const std::string& result, c
     if (!printed) {
         return;
     }
-    const bool pub = client_->Publish("stream/photo", printed, 0, false);
+    const bool pub = client_->Publish(deep_dog_topics::Event("stream/photo"), printed, 0, false);
     ESP_LOGI(TAG, "stream/photo ok=%d elapsed_ms=%d pub=%d err=%s", ok ? 1 : 0, elapsed_ms, pub ? 1 : 0,
              ok ? "" : (error ? error : ""));
     cJSON_free(printed);
@@ -347,7 +348,7 @@ void DeepDogStreamMqtt::OnMessage(const std::string& topic, const std::string& p
     if (!enabled_ || !client_) {
         return;
     }
-    if (topic != client_->Topic("stream/cmd")) {
+    if (topic != client_->Topic(deep_dog_topics::Cmd("stream"))) {
         return;
     }
 
@@ -505,7 +506,7 @@ bool DeepDogStreamMqtt::PublishStatus(const char* error_override) {
     if (!printed) {
         return false;
     }
-    const bool ok = client_->Publish("stream/status", printed, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("stream"), printed, 0, true);
     ESP_LOGI(TAG, "stream/status retain state=%s mode=%s ok=%d", VisionPushStatusStr(state),
              ProtocolModeStr(mode), ok ? 1 : 0);
     cJSON_free(printed);

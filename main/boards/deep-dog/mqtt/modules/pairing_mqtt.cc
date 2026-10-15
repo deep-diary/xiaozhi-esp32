@@ -1,6 +1,7 @@
 #include "mqtt/modules/pairing_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/mqtt_topics.h"
 #include "mqtt/mqtt_config.h"
 #include "application.h"
 #include "assets/lang_config.h"
@@ -84,7 +85,8 @@ void DeepDogPairingMqtt::SaveBoundState(bool bound) {
 }
 
 void DeepDogPairingMqtt::SetIdentityReloadCallback(std::function<void()> cb) {
-    identity_reload_cb_ = std::move(cb);
+    identity_reload_cb_ = cb;
+    http_pairing_.SetIdentityReloadCallback(cb);
 }
 
 void DeepDogPairingMqtt::EnsurePairCode() {
@@ -222,7 +224,7 @@ void DeepDogPairingMqtt::PublishStatus() {
     if (!raw) {
         return;
     }
-    client_->Publish("pairing/status", raw, 0, true);
+    client_->Publish(deep_dog_topics::Status("pairing"), raw, 0, true);
     cJSON_free(raw);
 }
 
@@ -244,7 +246,7 @@ void DeepDogPairingMqtt::PublishPairingRequest(const char* action) {
     if (!raw) {
         return;
     }
-    client_->Publish("pairing/request", raw, 1, false);
+    client_->Publish(deep_dog_topics::Event("pairing/request"), raw, 1, false);
     cJSON_free(raw);
     ESP_LOGI(TAG, "pairing/request action=%s", action);
 }
@@ -273,7 +275,21 @@ void DeepDogPairingMqtt::StartPairingSessionOrAnnounceBound() {
         ShowAlreadyBoundAlert();
         return;
     }
+    // 配置了 deep-trace 服务器 → 走 HTTP 配对（见 swrs/mqtt/modules/16-http-pairing）；
+    // 未配置 → 走既有 MQTT 配对。两条路径幂等共存。
+    const DeepDogMqttSettings settings = DeepDogMqttConfig::Load();
+    if (!settings.server_api_base.empty()) {
+        http_pairing_.Start();
+        return;
+    }
     StartPairingSession(true);
+}
+
+void DeepDogPairingMqtt::CancelPairing() {
+    http_pairing_.Cancel();
+    session_active_ = false;
+    StopReplayTimer();
+    ESP_LOGI(TAG, "pairing session canceled");
 }
 
 void DeepDogPairingMqtt::RequestUnbind() {
@@ -292,6 +308,7 @@ void DeepDogPairingMqtt::RequestUnbind() {
 
 void DeepDogPairingMqtt::ApplyBound(bool bound) {
     const bool was_bound = bound_;
+    http_pairing_.Cancel();
     SaveBoundState(bound);
     StopReplayTimer();
 
@@ -317,7 +334,7 @@ void DeepDogPairingMqtt::OnConnected() {
     connected_ = true;
     LoadBoundState();
     if (client_) {
-        client_->Subscribe("pairing/cmd", 1);
+        client_->Subscribe(deep_dog_topics::Cmd("pairing"), 1);
     }
 
     if (bound_) {
@@ -344,11 +361,12 @@ void DeepDogPairingMqtt::OnDisconnected() {
 }
 
 void DeepDogPairingMqtt::Stop() {
+    http_pairing_.Cancel();
     OnDisconnected();
 }
 
 void DeepDogPairingMqtt::OnMessage(const std::string& topic, const std::string& payload) {
-    if (!client_ || topic != client_->Topic("pairing/cmd")) {
+    if (!client_ || topic != client_->Topic(deep_dog_topics::Cmd("pairing"))) {
         return;
     }
     cJSON* root = cJSON_Parse(payload.c_str());
