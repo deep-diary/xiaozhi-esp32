@@ -6,7 +6,7 @@
 | capabilities | （核心模块，随客户端上线；页头始终可用） |
 | 路由建议 | `/device/:deviceId/modules/device`（可选；也可仅用设备页页头） |
 | 契约 | ready（字段已定） |
-| YAML | `topics.device/info`、`device/status` |
+| YAML | `topics.info/device`、`status/device` |
 | 路线图 | 随 MQTT 客户端 |
 
 ## 入口卡文案
@@ -16,15 +16,15 @@
 
 ## 详情页目标
 
-展示完整 `device/info` 与心跳 `device/status`；无下行 cmd（v0.1）。
+展示完整 `info/device` 与心跳 `status/device`；无下行 cmd（v0.1）。
 
 ## 边界
 
 | 归属 | Topic | 内容 |
 |------|-------|------|
-| 静态/半静态元数据 | `device/info`（retain） | 固件、芯片、能力、复位原因、电量能力位 |
-| 运行时心跳 | `device/status` | 在线、内存分项、WiFi、系统级 `health.warn` |
-| 电机 / 姿态故障 | [`dog/status`](./07-dog.md) | `has_fault`、电机明细；**不**并入 `device/status` |
+| 静态/半静态元数据 | `info/device`（retain） | 固件、芯片、能力、复位原因、电量能力位 |
+| 运行时心跳 | `status/device` | 在线、内存分项、WiFi、系统级 `health.warn` |
+| 电机 / 姿态故障 | [`status/dog`](./07-dog.md) | `has_fault`、电机明细；**不**并入 `status/device` |
 
 电量：当前板级无 ADC/PMIC，`power.supported=false`，不发伪数值。未来有采样时再发 `level_pct` / `charging`。
 
@@ -32,14 +32,14 @@
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
-| `device/info` | ↑ | 0 | true |
-| `device/status` | ↑ | 0 | false |
+| `info/device` | ↑ | 0 | true |
+| `status/device` | ↑ | 0 | false |
 
-前缀：`deepdiary/deep-dog/{device_id}/`。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
 
 **`device_id` 语义**：生产默认 = STA MAC 紧凑串（小写无冒号）；与 Topic 前缀一致。添加设备 / 配对见 [00-pairing](./00-pairing.md)，勿要求用户手输本字段。
 
-## 字段表 · `device/info`
+## 字段表 · `info/device`
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -64,7 +64,7 @@
 
 WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 
-## 字段表 · `device/status`
+## 字段表 · `status/device`
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -84,7 +84,7 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 | `tasks[]` | array | 否 | `{ name, prio, stack_hwm, state, stack_domain?, stack_used_est? }`；按 `stack_hwm` **升序**（余量最小=最紧张在前） |
 | `ts` / `ts_iso` | int / string | 是 / 否 | 时间戳 |
 
-## 样例 JSON · `device/info`
+## 样例 JSON · `info/device`
 
 ```json
 {
@@ -112,7 +112,7 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 
 `device_id` 恒为 STA MAC 紧凑串（未绑定/绑定一致，无 `dev`）；联调如需改前缀，仅通过 NVS `device_id` override 临时覆盖（见 [00-pairing](./00-pairing.md)）。
 
-## 样例 JSON · `device/status`
+## 样例 JSON · `status/device`
 
 ```json
 {
@@ -158,16 +158,16 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 ## Steps（前端）
 
 - **Step 1** 进入页（或设备页页头复用同一数据源）。
-- **Step 2** 确保已订阅 `device/info`（可与设备页共享连接状态）。
+- **Step 2** 确保已订阅 `info/device`（可与设备页共享连接状态）。
 - **Step 3** 渲染字段表 + capabilities 开关一览（只读）；展示 `power.supported`（当前为不支持电量）。
-- **Step 4** 订阅 `device/status`：显示 online/uptime、RSSI、`mem` 摘要、`health.ok` / `warn`。
+- **Step 4** 订阅 `status/device`：显示 online/uptime、RSSI、`mem` 摘要、`health.ok` / `warn`。
 - **Step 5** 电机故障勿从本 Topic 推断；有 `capabilities.dog` 时看 [`07-dog`](./07-dog.md)。
 - **Step 6** 离页时若本页独占订阅则退订。
 
 ## 固件实现
 
-- 上线/重连后 publish `device/info`（retain）。
-- 周期 publish `device/status`（建议 ~0.2 Hz，现 5s）。
+- 上线/重连后 publish `info/device`（retain）。
+- 周期 publish `status/device`（建议 ~0.2 Hz，现 5s）。
 - `capabilities.*` 与编译宏 `DEEP_DOG_*_ENABLE` 对齐。
 - `ext_pins` 反映 `config.h` 中 `DEEP_DOG_EXT_PIN_MODE`（成对引出脚）；前端用 `mode` 切换 can/uart/pwm/led 等页面，用 `capabilities.motor` vs `dog` 区分单电机与四足；`mode=led` 时 DIN=`gpio_a`，须 `capabilities.led` 才出灯带卡。
 - **运行时可配置（[CFG-02](../../config/CFG-02-ext-pin-runtime-mode.md)）**：`mode` 表示**当前生效**模式；另有可选 `supported_modes`（本固件编入的白名单，前端据此禁用不可选项）、`pending_mode`（已下发待重启生效）、`apply_policy`（v1 固定 `restart`）。旧固件无这三字段时按"编译期固定模式"处理。

@@ -12,6 +12,7 @@
 #include "face_ai_bridge.h"
 #include "face_ai_config.h"
 #include "immich_client.h"
+#include "mqtt/mqtt_config.h"
 #include "vision/vision_config.h"
 #include "vision/vision_frame_hub.h"
 #include "vision/vision_types.h"
@@ -400,6 +401,10 @@ static esp_err_t ApiStatusHandler(httpd_req_t* req) {
         snprintf(push_url, sizeof(push_url), "%s", u.c_str());
     }
     char buf[768];
+    // REQ-IOT-310 §6：播放地址随设备唯一编码生成（不再用编译期常量拼 deep-dog/dev）
+    const std::string device_id = DeepDogMqttConfig::Load().device_id;
+    const std::string play_url = DeepDogMqttConfig::PublicHlsUrlForDeviceId(device_id);
+    const std::string lan_play_url = DeepDogMqttConfig::LanHlsUrlForDeviceId(device_id);
     snprintf(buf, sizeof(buf),
              "{\"mode\":\"%s\",\"publish\":\"%s\",\"stream_clients\":%d,\"has_jpeg\":%s,\"port\":%u,"
              "\"push_status\":\"%s\",\"push_url\":\"%s\","
@@ -407,7 +412,7 @@ static esp_err_t ApiStatusHandler(httpd_req_t* req) {
              "\"face_ai_compiled\":%s,\"dog_initialized\":%s}",
              ModeToStr(srv->GetCaptureMode()), ModeToStr(srv->GetCaptureMode()), srv->StreamClientCount(),
              srv->HasJpegFrame() ? "true" : "false", (unsigned)srv->Port(), push_status, push_url,
-             DEEP_DOG_VISION_PUBLIC_PLAY_URL, DEEP_DOG_VISION_LAN_PLAY_URL,
+             play_url.c_str(), lan_play_url.c_str(),
 #if DEEP_DOG_FACE_AI_ENABLE
              "true",
 #else

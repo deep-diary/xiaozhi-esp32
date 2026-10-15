@@ -13,10 +13,39 @@ constexpr const char* kNvsNamespace = "deep_dog_iomode";
 constexpr const char* kKeyActive = "active";
 constexpr const char* kKeyPending = "pending";
 
-/** 顺序即 supported_modes 上报顺序 */
+/**
+ * 运行时白名单 = **本固件实际编入**的引出脚模式（CFG-02）。
+ *
+ * 随 board_features.h 的 `*_ENABLE` 编译开关裁剪：裁掉某栈后，该模式自动从
+ * `supported_modes` 消失，前端据此禁用不可选项，`SetPendingMode()` 也会拒绝它
+ * —— 避免"白名单广告了没编进去的模式，下发被接受但启动只能回滚"。
+ *
+ * `NONE`（两脚空闲）不依赖任何外设栈，恒可用，且是启动失败时的兜底模式。
+ * 顺序即 `supported_modes` 上报顺序。
+ */
 const deep_dog_ext_pin_mode_t kSupportedModes[] = {
-    DEEP_DOG_EXT_PIN_CAN,  DEEP_DOG_EXT_PIN_PWM,  DEEP_DOG_EXT_PIN_LED, DEEP_DOG_EXT_PIN_UART,
-    DEEP_DOG_EXT_PIN_RS485, DEEP_DOG_EXT_PIN_IO,  DEEP_DOG_EXT_PIN_AD,  DEEP_DOG_EXT_PIN_NONE,
+#if DEEP_DOG_CAN_ENABLE
+    DEEP_DOG_EXT_PIN_CAN,
+#endif
+#if DEEP_DOG_GIMBAL_ENABLE || DEEP_DOG_SERVO_ENABLE
+    DEEP_DOG_EXT_PIN_PWM,
+#endif
+#if DEEP_DOG_LED_ENABLE
+    DEEP_DOG_EXT_PIN_LED,
+#endif
+#if DEEP_DOG_UART_ENABLE
+    DEEP_DOG_EXT_PIN_UART,
+#endif
+#if DEEP_DOG_RS485_ENABLE
+    DEEP_DOG_EXT_PIN_RS485,
+#endif
+#if DEEP_DOG_IO_ENABLE
+    DEEP_DOG_EXT_PIN_IO,
+#endif
+#if DEEP_DOG_AD_ENABLE
+    DEEP_DOG_EXT_PIN_AD,
+#endif
+    DEEP_DOG_EXT_PIN_NONE,
 };
 
 struct ModeName {

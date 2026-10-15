@@ -15,8 +15,8 @@
 
 #include <cstdint>
 
-/** 注册 can 模块数据点（传入模块内部状态的只读指针） */
-void CanDataPoints_Register(const bool* tunnel, const bool* allow_tx, const uint32_t* dropped);
+/** 注册 can 模块数据点（传入模块内部状态指针；`tunnel`/`allow_tx` 为可写点） */
+void CanDataPoints_Register(bool* tunnel, bool* allow_tx, const uint32_t* dropped);
 
 const DataModuleDef* CanDataPoints_GetModuleDef();
 

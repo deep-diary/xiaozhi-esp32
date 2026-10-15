@@ -1,5 +1,6 @@
 #include "vision/rtsp_jpeg_pusher.h"
 
+#include "mqtt/mqtt_config.h"
 #include "vision/vision_config.h"
 
 #include <esp_log.h>
@@ -270,9 +271,16 @@ bool RtspJpegPusher::Connect() {
         url_copy = url_;
     }
     if (url_copy.empty()) {
-        char built[160];
+#ifdef DEEP_DOG_VISION_STREAM_PATH
+        const std::string fallback_path = DEEP_DOG_VISION_STREAM_PATH;
+#else
+        // REQ-IOT-310 §6：路径随设备唯一编码（MAC），与公布 URL / MediaMTX path 一致
+        const std::string fallback_path =
+            DeepDogMqttConfig::StreamPathForDeviceId(DeepDogMqttConfig::Load().device_id);
+#endif
+        char built[192];
         snprintf(built, sizeof(built), "rtsp://%s:%u/%s", DEEP_DOG_VISION_RTSP_HOST,
-                 static_cast<unsigned>(DEEP_DOG_VISION_RTSP_PORT), DEEP_DOG_VISION_STREAM_PATH);
+                 static_cast<unsigned>(DEEP_DOG_VISION_RTSP_PORT), fallback_path.c_str());
         url_copy = built;
         std::lock_guard<std::mutex> lock(mu_);
         url_ = url_copy;

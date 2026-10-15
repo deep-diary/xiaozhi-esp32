@@ -377,6 +377,27 @@ dp_register_module("motor", kMotorDataPoints, DP_ARRAY_SIZE(kMotorDataPoints),
 
 每个点自带单位等元信息——这些元信息通过 `info/schema` 发布，不重复出现在每个 telemetry 包中。
 
+### 3.7 写入通道（MQTT `cmd/<module>`）
+
+数据点的**写入**统一经 MQTT `cmd/<module>`（kind=`cmd`，见 [01-mqtt-contract §3.1](./01-mqtt-contract.md)）：
+
+- **报文**：标准信封（§4），**业务字段 = 待写数据点的扁平键值**：
+  `key` = 数据点名（`id` 去掉 `module.` 前缀；子实例为 `<sub>_<point>`），`value` = 目标值。
+- **示例**（写 `led.brightness=128`、`led.mode=2`）：
+
+  ```json
+  { "schema": "deep-trace.cmd.v1", "ts_iso": "...", "device_id": "1051db8118fc",
+    "data": { "brightness": 128, "mode": 2 } }
+  ```
+
+- **设备侧处理**：registry 解析 `data` 每个字段 → 匹配 `module.<field>` 数据点 →
+  **统一校验**（access：`ro` 忽略；type；enum；min/max）→ 调用写回调；
+  未匹配到数据点的字段**静默忽略**（留给模块自身的业务处理）。
+- **兼容策略**：模块原有的 `cmd/<module>` 业务处理**保持不变**；registry 只负责
+  **已声明为数据点**的字段，二者按字段名分工（同名时 registry 为幂等设值）。
+- **回执**：不单独 ack；写入效果由 `status/<module>`（retain）反映。
+- 仅 `access = rw` 的点可写；`wo` 点可写但不上报。
+
 ---
 
 ## 4. Schema 自动发现

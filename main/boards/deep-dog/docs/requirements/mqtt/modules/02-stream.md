@@ -6,7 +6,7 @@
 | capabilities | `stream` |
 | 路由建议 | `/device/:deviceId/modules/stream` |
 | 契约 | ready |
-| YAML | `stream/cmd`、`stream/status`、`stream/photo` |
+| YAML | `cmd/stream`、`status/stream`、`event/stream/photo` |
 | 路线图 | **V-C03**（原 M02） |
 | 依赖 | [C02 推流](../../vision/client/C02-device-push-stream.md)、[infra](../../vision/infra.md) |
 
@@ -18,19 +18,19 @@
 ## 详情页目标
 
 1. 显示 `state` / `mode` / `url`（外网 HLS）/ `lan_url` / `push_url` / `error`；start / stop；嵌 HLS 或外链 `url`。  
-2. **人脸叠加（推荐）**：若 `capabilities.face`，同页订 `face/status`；UI 开关「显示人脸框 / 显示人名」。  
-3. **跟踪（推荐）**：若 `capabilities.track`，同页订 `track/status`，开关发 `track/cmd`；可 `#track` 锚点。  
-4. **拍照视觉解释（推荐）**：局域网优先 WS MCP `self.camera.take_photo`；否则 `stream/cmd` `take_photo` → `stream/photo`（与推流并存，不改 mode）。  
-5. **人脸 MCP（推荐）**：若 `capabilities.face`，同页经 WS MCP `self.face.*`（`set_mode` 等），超时降级 MQTT `face/cmd`；订 `face/status` 叠层。
+2. **人脸叠加（推荐）**：若 `capabilities.face`，同页订 `status/face`；UI 开关「显示人脸框 / 显示人名」。  
+3. **跟踪（推荐）**：若 `capabilities.track`，同页订 `status/track`，开关发 `cmd/track`；可 `#track` 锚点。  
+4. **拍照视觉解释（推荐）**：局域网优先 WS MCP `self.camera.take_photo`；否则 `cmd/stream` `take_photo` → `event/stream/photo`（与推流并存，不改 mode）。  
+5. **人脸 MCP（推荐）**：若 `capabilities.face`，同页经 WS MCP `self.face.*`（`set_mode` 等），超时降级 MQTT `cmd/face`；订 `status/face` 叠层。
 
 ## 边界
 
 | 归属 | Topic / API | 内容 |
 |------|-------------|------|
-| 远程开关 + 推流态 | `stream/cmd`、`stream/status` | 本模块 |
+| 远程开关 + 推流态 | `cmd/stream`、`status/stream` | 本模块 |
 | 局域网 MJPEG 预览 | HTTP `/stream` + `/api/status` | `mode=stream` 时本机页用；网页优先 `url` HLS |
-| 人脸框 / 人名 | [`face/status`](./04-face.md) | 推流时可并存；坐标像素相对 `w`×`h` |
-| 跟踪目标 | [`track/status`](./05-track.md) | UI 宿主为本页，非 Face 页 |
+| 人脸框 / 人名 | [`status/face`](./04-face.md) | 推流时可并存；坐标像素相对 `w`×`h` |
+| 跟踪目标 | [`status/track`](./05-track.md) | UI 宿主为本页，非 Face 页 |
 | Immich 轮播 / 打招呼 | [`04-face`](./04-face.md) | 不在本页做 Kiosk |
 
 设备推 **局域网 RTSP**；网页播 **外网 HLS**（`url`）。勿把 `push_url` 当浏览器播放地址。
@@ -39,13 +39,13 @@
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
-| `stream/status` | ↑ | 0 | true |
-| `stream/cmd` | ↓ | 1 | false |
-| `stream/photo` | ↑ | 0 | false |
+| `status/stream` | ↑ | 0 | true |
+| `cmd/stream` | ↓ | 1 | false |
+| `event/stream/photo` | ↑ | 0 | false |
 
-前缀：`deepdiary/deep-dog/{device_id}/`。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
 
-## 字段表 · `stream/cmd`
+## 字段表 · `cmd/stream`
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -60,11 +60,11 @@
 { "action": "take_photo", "question": "画面里有什么？简单描述。", "ts": 1710000000 }
 ```
 
-异步执行，约数秒；结果走 `stream/photo`（不改推流 `mode`）。并发第二次会 `ok=false, error=busy`。需设备已配置 Explain URL（曾连小智云下发 vision）。
+异步执行，约数秒；结果走 `event/stream/photo`（不改推流 `mode`）。并发第二次会 `ok=false, error=busy`。需设备已配置 Explain URL（曾连小智云下发 vision）。
 
 **局域网优先**：同页可经 WS MCP `self.camera.take_photo` 同步返回（不占 MQTT 侧 `dog_stream_photo` 任务栈）。MQTT `take_photo` 在 internal SRAM 紧张时可能 `error=task_fail`（固件已将任务栈迁至 PSRAM）。
 
-## 字段表 · `stream/photo`
+## 字段表 · `event/stream/photo`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -74,7 +74,7 @@
 | `elapsed_ms` | int | 耗时 |
 | `ts` | int | Unix 秒 |
 
-## 字段表 · `stream/status`
+## 字段表 · `status/stream`
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -144,7 +144,7 @@
 { "action": "stop", "ts": 1710000000 }
 ```
 
-## 样例 JSON · `stream/status`
+## 样例 JSON · `status/stream`
 
 **空闲**
 
@@ -224,11 +224,11 @@
 ## Steps（前端）
 
 - **Step 1** 若 `capabilities.stream !== true`：不渲染入口卡；直链本页则提示不可用。
-- **Step 2** mount：订阅 `stream/status`（retain）；若有 `face` → 订 `face/status`；若有 `track` → 订 `track/status`。
+- **Step 2** mount：订阅 `status/stream`（retain）；若有 `face` → 订 `status/face`；若有 `track` → 订 `status/track`。
 - **Step 3** 渲染 `state`/`mode`/`error`；播放器用 **`url`（外网 HLS）**；可附链 `lan_url`；`push_url` 仅调试。
-- **Step 4** 叠加层开关：显示人脸框 / 人名 / 跟踪十字（用 `faces[]` 与 `track/status.target`，像素/`w`/`h` 归一化到播放器）。
+- **Step 4** 叠加层开关：显示人脸框 / 人名 / 跟踪十字（用 `faces[]` 与 `status/track.target`，像素/`w`/`h` 归一化到播放器）。
 - **Step 5** `state===idle|error` 可发 start；`streaming|starting` 可发 stop；`starting` loading。
-- **Step 6** 发布 `stream/cmd`；跟踪用 `track/cmd`；人脸总开关可链 Face 页或本页发 `face/cmd`。
+- **Step 6** 发布 `cmd/stream`；跟踪用 `cmd/track`；人脸总开关可链 Face 页或本页发 `cmd/face`。
 - **Step 7** 时间优先 `ts_iso`；`error` 非空 toast。
 - **Step 8** unmount：退订本页所订 Topic。
 
@@ -245,7 +245,7 @@
 
 - [ ] MQTTX 可开关推流
 - [ ] status 与真实 push 一致（含 `lan_url`/`push_url`）
-- [ ] 推流中 `face/status` 可有框（人脸已开时）
+- [ ] 推流中 `status/face` 可有框（人脸已开时）
 - [ ] 错误 action 不崩溃，`error` 有码
 
 ## 验收（前端）

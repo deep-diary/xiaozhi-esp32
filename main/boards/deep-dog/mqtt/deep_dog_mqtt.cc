@@ -128,6 +128,19 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
 }
 
 void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& payload) {
+    // Phase D：数据点统一写入 —— cmd/<module> 的扁平字段交由 registry 校验写入；
+    // 未匹配到数据点的字段静默忽略（留给各模块自身的业务处理）。
+    {
+        static const std::string kCmdPrefix = "cmd/";
+        const size_t pos = topic.find(kCmdPrefix);
+        if (pos != std::string::npos) {
+            const std::string subject = topic.substr(pos + kCmdPrefix.size());
+            // 仅处理一级 subject（cmd/<module>）；子级/ACK（can/tx、handle/input、*/ack）不属数据点
+            if (!subject.empty() && subject.find('/') == std::string::npos) {
+                DataPointRegistry::Instance().HandleCmdMessage(subject, payload);
+            }
+        }
+    }
     pairing.OnMessage(topic, payload);
     stream.OnMessage(topic, payload);
     face.OnMessage(topic, payload);

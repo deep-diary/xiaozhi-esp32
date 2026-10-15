@@ -48,6 +48,9 @@
 
 > CFG-02 后：`*_ENABLE=1` 只表示「编入固件」，**不再要求**与 `EXT_PIN_MODE` 匹配；
 > 真正决定初始化哪个栈的是运行时生效模式（`ext_pin/`）。
+> 反过来，把某栈 `*_ENABLE` 改回 `0` 仍可裁剪省 flash —— 该模式会自动从
+> `device/info.ext_pins.supported_modes` 白名单消失（前端随之禁用、下发返回 `E_UNSUPPORTED_MODE`），
+> 所以裁剪只需改 `board_features.h` 一处（白名单是条件编译的）。
 
 **灯带不在 38/48 上时**：在 `config.h` 里 `#define DEEP_DOG_LED_STRIP_GPIO GPIO_NUM_xx` 即可；仍用 `LED_ENABLE=1`，**不要**改用 `IO_ENABLE`。
 

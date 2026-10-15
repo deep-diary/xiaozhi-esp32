@@ -67,9 +67,9 @@
 
 | Topic | 方向 | QoS | retain | 频率 |
 |-------|------|-----|--------|------|
-| `deepdiary/deep-dog/{deviceId}/imu/status` | ↑ | 0 | **false** | ~10 Hz |
+| `{prefix}/{device_id}/status/imu` | ↑ | 0 | **false** | ~10 Hz |
 
-默认 `deviceId=dev` → 全路径：
+示例 `device_id=aabbccddeeff` → 全路径：
 
 `deepdiary/deep-dog/dev/imu/status`
 

@@ -21,25 +21,18 @@
 #define DEEP_DOG_VISION_RTSP_PORT 8554
 #endif
 
-/** 流路径，对应 infra：deep-dog/<device_id>；联调用 deep-dog/dev */
-#ifndef DEEP_DOG_VISION_STREAM_PATH
-#define DEEP_DOG_VISION_STREAM_PATH "deep-dog/dev"
-#endif
+/**
+ * 流路径（对应 infra：`deep-dog/<device_id>`）。
+ * REQ-IOT-310 §6：**默认按设备唯一编码（STA MAC）生成**，与公布的 RTSP/HLS URL、MediaMTX path 一致。
+ * 若部署要求固定路径（如 MediaMTX 未开 `all_others`、只放行 `deep-dog/dev`），
+ * 在板级/构建配置里**显式定义** `DEEP_DOG_VISION_STREAM_PATH` 覆盖。
+ */
 
 /**
- * 网页可播地址（外网 HLS）。MQTT stream/status.url 用此值，便于前端直接打开。
- * 设备仍向局域网 RTSP 推流；外网只拉 HLS（见 vision/infra.md）。
+ * 注：外网/局域网播放地址不再用编译期常量拼装（那会与设备标识脱钩）；
+ * 统一由 `DeepDogMqttConfig::PublicHlsUrlForDeviceId()` / `RtspPushUrlForDeviceId()` 按 device_id 生成，
+ * 见 `mqtt/mqtt_config.cc`。
  */
-#ifndef DEEP_DOG_VISION_PUBLIC_PLAY_URL
-#define DEEP_DOG_VISION_PUBLIC_PLAY_URL \
-    "https://live.deep-diary.com/" DEEP_DOG_VISION_STREAM_PATH "/index.m3u8"
-#endif
-
-/** 局域网 HLS（同一 MediaMTX）；浏览器需跟 cookie 302 */
-#ifndef DEEP_DOG_VISION_LAN_PLAY_URL
-#define DEEP_DOG_VISION_LAN_PLAY_URL \
-    "http://" DEEP_DOG_VISION_RTSP_HOST ":8888/" DEEP_DOG_VISION_STREAM_PATH "/index.m3u8"
-#endif
 /**
  * RTSP 推流编码：1=esp_h264 软编（默认，网页 HLS 前置）；0=回退 RTP/JPEG。
  * JPEG 路径仍保留编译，改此宏即可切回。

@@ -688,7 +688,8 @@ void DataPointRegistry::HandleCmdMessage(const std::string& module_name, const s
 
     auto it = impl_->module_index.find(module_name);
     if (it == impl_->module_index.end()) {
-        ESP_LOGW(TAG, "HandleCmdMessage: unknown module '%s'", module_name.c_str());
+        // 多数模块不在数据点体系内（pairing/stream/face/track/config/motor…），静默跳过
+        ESP_LOGD(TAG, "HandleCmdMessage: module '%s' not in registry, skip", module_name.c_str());
         return;
     }
 
