@@ -11,6 +11,7 @@
 #include "ws-mcp/ws_mcp_config.h"
 #if DEEP_DOG_WS_MCP_ENABLE
 #include "ws-mcp/deep_dog_ws_mcp_server.h"
+#include "http-server/datapoint_http.h"
 #endif
 #include "settings.h"
 #include "touch_btn/touch_button_controller.h"
@@ -132,6 +133,7 @@
 #include "face_ai_bridge.h"
 #include "face_greet.h"
 #endif
+#include "config_center/config_manager.h"
 #include "mqtt/memory_report.h"
 #include "mqtt/mqtt_config.h"
 #if DEEP_DOG_MQTT_ENABLE
@@ -141,6 +143,7 @@
 #include "face_mcp.h"
 #include "board_diagnostics_mcp.h"
 #endif
+#include "ws-mcp/datapoint_mcp.h"
 #endif
 
 #define TAG "deep_dog"
@@ -739,6 +742,13 @@ private:
                 Application::GetInstance().RegisterMcpBroadcastCallback([ws_ptr](const std::string& payload) {
                     ws_ptr->BroadcastMessage(payload);
                 });
+                // 在 WS MCP 的 httpd 上挂载数据点 REST 端点（复用同一 httpd，避免额外内存）
+                if (RegisterDataPointHttpEndpoints(ws_mcp.HttpdHandle())) {
+                    ESP_LOGI(TAG, "data point REST: http://<ip>:%u/api/datapoints/*",
+                             (unsigned)ws_mcp.Port());
+                } else {
+                    ESP_LOGW(TAG, "RegisterDataPointHttpEndpoints failed");
+                }
 #if DEEP_DOG_MQTT_ENABLE
                 if (board_mqtt_) {
                     board_mqtt_->SetWsMcpEndpoint(ws_mcp.Port(), ws_mcp.Path());
@@ -749,6 +759,8 @@ private:
             }
         }
 #endif
+        // 数据点自动生成 MCP get/set 工具（在所有模块注册完数据点后调用）
+        RegisterDataPointMcpTools(McpServer::GetInstance());
 #if DEEP_DOG_FACE_AI_ENABLE
 #if DEEP_DOG_FACE_AI_DEFAULT_ENABLED
         if (DeepDogMemoryWaitInternalReady("face_ai", DEEP_DOG_BOOT_MIN_INTERNAL_FREE,
@@ -910,6 +922,15 @@ public:
         config.show_deep_trace_config = true;
     }
 
+    // [CFG-01] 初始化统一配置中心：加载缓存 + 启动同步任务（网络就绪后调用）
+    void InitConfigCenter() {
+        auto& cfg = config_center::ConfigManager::GetInstance();
+        cfg.Init();
+        cfg.Start();
+        ESP_LOGI(TAG, "config center started ver=%d remote=%d", cfg.config_version(),
+                 cfg.has_remote_config() ? 1 : 0);
+    }
+
     void StartNetwork() override {
 #if DEEP_DOG_HANDLE_ENABLE && DEEP_DOG_HANDLE_BT_ENABLE
         // HCI 需要大块 INTERNAL|DMA；idle 后再启常 NO_MEM。先起 BT 占住 DMA。
@@ -964,6 +985,8 @@ public:
                 }
             }
         }
+        // [CFG-01] 统一配置中心：加载 NVS 缓存 + 启动后台同步（需网络就绪）
+        InitConfigCenter();
 #if DEEP_DOG_IMU_ENABLE
         InitializeImu();
 #endif
@@ -1001,6 +1024,13 @@ public:
                 Application::GetInstance().RegisterMcpBroadcastCallback([ws_ptr](const std::string& payload) {
                     ws_ptr->BroadcastMessage(payload);
                 });
+                // 在 WS MCP 的 httpd 上挂载数据点 REST 端点（复用同一 httpd，避免额外内存）
+                if (RegisterDataPointHttpEndpoints(ws_mcp_boot.HttpdHandle())) {
+                    ESP_LOGI(TAG, "data point REST: http://<ip>:%u/api/datapoints/*",
+                             (unsigned)ws_mcp_boot.Port());
+                } else {
+                    ESP_LOGW(TAG, "RegisterDataPointHttpEndpoints failed");
+                }
 #if DEEP_DOG_MQTT_ENABLE
                 if (board_mqtt_) {
                     board_mqtt_->SetWsMcpEndpoint(ws_mcp_boot.Port(), ws_mcp_boot.Path());

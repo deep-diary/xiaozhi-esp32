@@ -1,7 +1,7 @@
 # 01 · MQTT 标准接口契约
 
 > 契约版本：`interop-2`（2026-10）——**统一命名空间**定稿
-> 前缀与字段真源：[../mqtt/protocol/deep-dog-mqtt.yml](../mqtt/protocol/deep-dog-mqtt.yml)
+> 前缀与字段真源：[deep-dog-mqtt.yml](../../swrs/mqtt/protocol/deep-dog-mqtt.yml)
 > 关联：[00-architecture-review.md](./00-architecture-review.md) · [02-ws-contract.md](./02-ws-contract.md) · [03-http-api-contract.md](./03-http-api-contract.md)
 
 **本版决议（已拍板）**：
@@ -89,6 +89,22 @@ deep-trace/aabbccddeeff/event/stream/photo
 
 - `ack` 不单列 kind，作为 `cmd/{subject}/ack` 存在于 `cmd` 命名空间（设备→端）。
 - **禁止**：语义不明后缀（`frames`/`tx`/`input`/`photo`/`active`/`request` 等，一律归入上述 kind + `subject`）。
+- **真源**：kind 语义以 `swrs/mqtt/protocol/deep-dog-mqtt.yml` 的 `protocol.kinds` 为准；本节为其人读镜像。
+
+#### 3.1.1 `result` 与 `telemetry` 的边界（易混淆，重点澄清）
+
+`telemetry` **不是**独立 kind，它是 `status` 的**流式子类**（走 `status/telemetry`）。它与 `result` 语义层级不同，**不可互相替代**：
+
+| 维度 | `status/telemetry`（kind=`status`） | `result/<subject>`（kind=`result`） |
+|------|-----------------------------------|-----------------------------------|
+| 本质 | 持续流式：设备"现在怎么样" | 离散应答：某次操作的"产出是什么" |
+| 触发 | 周期 / 变化时**自动**产生 | 由某个 `cmd` 或动作**触发** |
+| 时效 | 高频、可采样、**可丢** | 一次性、结构化、**不可丢** |
+| 位置 | `status/telemetry`（kind=status） | `result/<subject>`（独立 kind） |
+| 消费方 | 时序库 / 实时图表（ingest 落库） | 调用方 / 测试框架 / 日志 |
+| 典型数据 | 温度、电压、加速度、内存占用 | 扫描结果、诊断报告、工位测试结果 |
+
+> 判据一句话：**状态随时间连续演化 → `status`（telemetry）；某次操作的结果 → `result`**。
 
 ### 3.2 subject 分级
 
@@ -307,11 +323,27 @@ sequenceDiagram
 
 ## 9. 迁移与待办清单
 
-- [ ] 设备端 `mqtt_config.cc` 前缀改为 `{prefix}`（可配置），topic 名统一为 `{kind}/{subject}` 结构（§5 全表）。
-- [ ] 设备端新增 `cmd/#` 单条通配订阅，并在弃用期内同时保留旧主题订阅。
+- [x] 设备端 `mqtt_config.cc` 前缀改为 `{prefix}`（可配置），topic 名统一为 `{kind}/{subject}` 结构（§5 全表）。
+- [x] 设备端新增 `cmd/#` 单条通配订阅，并在弃用期内同时保留旧主题订阅。
 - [ ] 设备端命令执行后上行 `cmd/{subject}/ack`（含 `corr_id`）。
-- [ ] 云端 `mqtt_standard.py` 前缀读 `MQTT_TOPIC_ROOT`；`unified_mqtt_ingest` 去掉 `pairing` 通道。
-- [ ] 新增设备面 HTTP 解绑接口（[03-http-api-contract.md §B.3](./03-http-api-contract.md)）。
-- [ ] 前端 `mqttUnified.js` / `homeDevices.js` 统一到同一前缀构造器（读 `VITE_MQTT_TOPIC_ROOT`）。
-- [ ] `deep-dog-mqtt.yml` 全面重写为新主题（旧主题标注 `deprecated`）；删除 `person/active` 重复键。
-- [ ] 三端 CI 校验：topic 常量集合与契约一致。
+- [x] 云端 `mqtt_standard.py` 前缀读 `MQTT_TOPIC_ROOT`；`unified_mqtt_ingest` 去掉 `pairing` 通道。
+- [x] 新增设备面 HTTP 解绑接口（[03-http-api-contract.md §B.3](./03-http-api-contract.md)）。
+- [x] 前端 `mqttUnified.js` / `homeDevices.js` 统一到同一前缀构造器（读 `VITE_MQTT_TOPIC_ROOT`）。
+- [x] `deep-dog-mqtt.yml` 全面重写为新主题（旧主题标注 `deprecated`）；删除 `person/active` 重复键。
+- [x] 三端 CI 校验：topic 常量集合与契约一致（后端 `devices/tests/test_mqtt_standard.py`）。
+- [x] **统一信封（§4）三端落地**：设备端 `mqtt/modules/envelope.h`（`Wrap` 接管业务 JSON → `{schema,ts_iso,device_id,data}`）；云端 `devices/mqtt_standard.py::unwrap_payload`（telemetry/face registry ingest 解包）；前端 `iot/mqttUnified.js::unwrapPayload`（各模块 composable 解包）。旧扁平报文三端均兼容。
+
+### 9.1 信封上线记录（2026-10-15）
+
+- 设备端：14 个 `mqtt/modules/*.cc` 全部改为信封上行；真机（MAC `1051db8118fc`）编译烧录后经 broker 抓包确认 `info|status|event` 均含 `schema/ts_iso/device_id/data`。
+- 云端：`ingest_telemetry_payload` 与 `sync_face_registry` 入口解包，信封报文落库正常，扁平报文仍可解析（幂等去重）。
+- 前端：`unwrapPayload` 接入 15 个 composable + CAN 工作台；`npm run build` 通过。
+- 模拟器：`edge/sparkbot/sim/sim_device_unified.py` 上行与 `ack` 均信封化。
+
+### 9.2 下行 cmd 信封对齐（2026-10-15）
+
+- 设备端：`mqtt/modules/envelope.h::ParseBusiness` 入站解包（信封取 `data`、旧扁平回退根）；11 个模块的 `cmd` 处理器（led/servo/touch/track/stream/gimbal/face/handle/pairing/can/motor）改用 `ParseBusiness`，业务字段按 §4.2 收敛进 `data`。
+- 云端：`devices/mqtt_publish.py::publish_unified_cmd` / `_publish_pairing_cmd_once` 下行改为 `{schema,ts_iso,device_id,msg_id,data:{...}}` 信封（业务字段含 `module` 收进 `data`）；已加单测断言。
+- 前端：`iot/mqttUnified.js::buildCmdEnvelope` + `deviceIdFromTopic`；14 个 composable 与 CAN 工作台的下行 `cmd` 发布体信封化。
+- 兼容：三端对本端收到的旧扁平报文均保留回退解析（弃用期）。
+- 真机验证（MAC `1051db8118fc`）：向 `{p}/cmd/face` 先发信封 `{data:{action:"refresh_status"}}` 再发旧扁平 `{action:"refresh_status"}`，设备日志各出现一次 `dog_mqtt_face: face/cmd refresh_status`，证实 **`data` 信封与根回退两条路径均可执行**。

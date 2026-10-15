@@ -2,10 +2,12 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_topics.h"
+#include "mqtt/modules/envelope.h"
 #include "config.h"
 #include "can/can_config.h"
 #include "can/can_frame_hub.h"
 #include "can/ESP32-TWAI-CAN.hpp"
+#include "mqtt/modules/can_datapoints.h"
 
 #include <cJSON.h>
 #include <esp_log.h>
@@ -186,11 +188,10 @@ void DeepDogCanMqtt::FlushFrames() {
     cJSON_AddItemToObject(root, "frames", batch);
     cJSON_AddNumberToObject(root, "dropped", static_cast<double>(dropped));
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* s = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (s) {
-        client_->Publish(deep_dog_topics::Status("can/frames"), s, 0, false);
-        cJSON_free(s);
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (!payload.empty()) {
+        client_->Publish(deep_dog_topics::Status("can/frames"), payload, 0, false);
         last_flush_us_ = esp_timer_get_time();
     }
 }
@@ -213,18 +214,20 @@ bool DeepDogCanMqtt::PublishStatus(bool force) {
     cJSON_AddNumberToObject(root, "bus_err", static_cast<double>(ESP32Can.busErrCounter()));
     cJSON_AddNumberToObject(root, "dropped", static_cast<double>(dropped_));
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* s = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!s) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("can"), s, 0, true);
-    cJSON_free(s);
-    return ok;
+    return client_->Publish(deep_dog_topics::Status("can"), payload, 0, true);
+}
+
+void DeepDogCanMqtt::RegisterDataPoints() {
+    CanDataPoints_Register(&tunnel_, &allow_tx_, &dropped_);
 }
 
 void DeepDogCanMqtt::ApplyCmd(const char* json) {
-    cJSON* root = cJSON_Parse(json);
+    cJSON* root = deep_dog_envelope::ParseBusiness(json);
     if (!root) {
         return;
     }
@@ -264,7 +267,7 @@ void DeepDogCanMqtt::HandleTx(const char* json) {
         ESP_LOGW(TAG, "can/tx rejected (allow_tx=false)");
         return;
     }
-    cJSON* root = cJSON_Parse(json);
+    cJSON* root = deep_dog_envelope::ParseBusiness(json);
     if (!root) {
         return;
     }
@@ -358,6 +361,7 @@ void DeepDogCanMqtt::OnDisconnected() {}
 void DeepDogCanMqtt::Stop() {}
 void DeepDogCanMqtt::OnMessage(const std::string&, const std::string&) {}
 bool DeepDogCanMqtt::PublishStatus(bool) { return false; }
+void DeepDogCanMqtt::RegisterDataPoints() {}
 void DeepDogCanMqtt::FlushTimerCb(void*) {}
 void DeepDogCanMqtt::FrameListener(const CanFrame*, int, void*) {}
 void DeepDogCanMqtt::OnFrame(const CanFrame*, bool) {}

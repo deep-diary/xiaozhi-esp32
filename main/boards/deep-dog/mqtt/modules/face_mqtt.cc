@@ -2,6 +2,7 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/modules/device_mqtt.h"
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/mqtt_topics.h"
 
@@ -309,7 +310,7 @@ void DeepDogFaceMqtt::OnMessage(const std::string& topic, const std::string& pay
     ESP_LOGW(TAG, "face/cmd ignored (face_ai disabled at compile)");
     return;
 #else
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         ESP_LOGW(TAG, "face/cmd invalid_json");
         return;
@@ -430,12 +431,12 @@ void DeepDogFaceMqtt::PublishPersonActiveSpeaker(int local_id, const char* displ
         cJSON_AddNumberToObject(root, "local_id", 0);
     }
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (printed) {
-        client_->Publish(deep_dog_topics::Status("person/active"), printed, 0, true);
-        cJSON_free(printed);
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
+        return;
     }
+    client_->Publish(deep_dog_topics::Status("person/active"), payload, 0, true);
 }
 
 void DeepDogFaceMqtt::MaybePublishPersonActive(const DeepDogFaceSnapshot& snap) {
@@ -473,7 +474,13 @@ bool DeepDogFaceMqtt::PublishRegistry(bool force) {
         return false;
     }
 #if !DEEP_DOG_FACE_AI_ENABLE
-    return client_->Publish(deep_dog_topics::Status("face/registry"), "{\"version\":1,\"count\":0,\"entries\":[],\"ts\":0}", 0, true);
+    cJSON* root = cJSON_Parse("{\"version\":1,\"count\":0,\"entries\":[],\"ts\":0}");
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
+        return false;
+    }
+    return client_->Publish(deep_dog_topics::Status("face/registry"), payload, 0, true);
 #else
     auto buf = std::make_unique<char[]>(DEEP_DOG_FACE_REGISTRY_JSON_BUF);
     const size_t n = DeepDogFaceControlFormatRegistryJson(buf.get(), DEEP_DOG_FACE_REGISTRY_JSON_BUF);
@@ -481,12 +488,18 @@ bool DeepDogFaceMqtt::PublishRegistry(bool force) {
         ESP_LOGW(TAG, "PublishRegistry: FormatRegistryJson returned 0 (recognizer not ready or buf too small?)");
         return false;
     }
-    const std::string payload(buf.get(), n);
-    if (!force && last_registry_fp_ == payload) {
+    const std::string registry = std::string(buf.get(), n);
+    if (!force && last_registry_fp_ == registry) {
         return true;
     }
-    last_registry_fp_ = payload;
-    return client_->Publish(deep_dog_topics::Status("face/registry"), payload.c_str(), 0, true);
+    last_registry_fp_ = registry;
+    cJSON* root = cJSON_Parse(registry.c_str());
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
+        return false;
+    }
+    return client_->Publish(deep_dog_topics::Status("face/registry"), payload, 0, true);
 #endif
 }
 
@@ -495,11 +508,15 @@ bool DeepDogFaceMqtt::PublishImmichStatus(bool force) {
         return false;
     }
 #if !DEEP_DOG_FACE_IMMICH_ENABLE
-    return client_->Publish(deep_dog_topics::Status("face/immich"),
-                            "{\"configured\":false,\"url\":\"\",\"key_len\":0,\"delete_asset\":0,"
-                            "\"server_ok\":false,\"server_http\":0,\"ping_ms\":-1,\"inflight\":0,"
-                            "\"last\":\"disabled\",\"last_local_id\":0,\"ts\":0}",
-                            0, true);
+    cJSON* root = cJSON_Parse("{\"configured\":false,\"url\":\"\",\"key_len\":0,\"delete_asset\":0,"
+                              "\"server_ok\":false,\"server_http\":0,\"ping_ms\":-1,\"inflight\":0,"
+                              "\"last\":\"disabled\",\"last_local_id\":0,\"ts\":0}");
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
+        return false;
+    }
+    return client_->Publish(deep_dog_topics::Status("face/immich"), payload, 0, true);
 #else
     char buf[768];
     const size_t n = DeepDogImmichFormatStatusJson(buf, sizeof(buf));
@@ -510,7 +527,13 @@ bool DeepDogFaceMqtt::PublishImmichStatus(bool force) {
         return true;
     }
     last_immich_fp_ = buf;
-    return client_->Publish(deep_dog_topics::Status("face/immich"), buf, 0, true);
+    cJSON* root = cJSON_Parse(buf);
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
+        return false;
+    }
+    return client_->Publish(deep_dog_topics::Status("face/immich"), payload, 0, true);
 #endif
 }
 
@@ -531,14 +554,12 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
     cJSON_AddNumberToObject(root, "h", 0);
     cJSON_AddItemToObject(root, "faces", cJSON_CreateArray());
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("face"), printed, 0, false);
-    cJSON_free(printed);
-    return ok;
+    return client_->Publish(deep_dog_topics::Status("face"), payload, 0, false);
 #else
     DeepDogFaceSnapshot snap{};
     DeepDogFaceControlCopySnapshot(&snap);
@@ -619,13 +640,12 @@ bool DeepDogFaceMqtt::PublishStatus(bool force) {
     cJSON_AddNumberToObject(root, "greet_gap_sec", DeepDogFaceGreetGetGapSec());
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("face"), printed, 0, false);
-    cJSON_free(printed);
+    const bool ok = client_->Publish(deep_dog_topics::Status("face"), payload, 0, false);
     MaybePublishPersonActive(snap);
     return ok;
 #endif

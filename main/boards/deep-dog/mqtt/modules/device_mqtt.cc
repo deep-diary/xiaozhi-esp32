@@ -1,5 +1,7 @@
 #include "mqtt/modules/device_mqtt.h"
 
+#include "mqtt/modules/device_datapoints.h"
+#include "mqtt/modules/envelope.h"
 #include "mqtt/memory_report.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
@@ -82,6 +84,9 @@ const char* ResetReasonString() {
 }  // namespace
 
 DeepDogDeviceMqtt::DeepDogDeviceMqtt(DeepDogMqttClient* client) : client_(client) {
+    // 注册 device 模块核心数据点到全局 Registry（device 总是存在）
+    DeviceDataPoints_Register(client);
+
     esp_timer_create_args_t args = {
         .callback = &DeepDogDeviceMqtt::StatusTimerCb,
         .arg = this,
@@ -189,14 +194,13 @@ bool DeepDogDeviceMqtt::PublishInfo() {
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", IsoTs(ts).c_str());
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaInfo(), s.device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Info("device"), printed, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Info("device"), payload, 0, true);
     ESP_LOGI(TAG, "device/info retain ok=%d", ok ? 1 : 0);
-    cJSON_free(printed);
     return ok;
 }
 
@@ -256,12 +260,11 @@ bool DeepDogDeviceMqtt::PublishStatus() {
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", IsoTs(ts).c_str());
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("device"), printed, 0, false);
-    cJSON_free(printed);
+    const bool ok = client_->Publish(deep_dog_topics::Status("device"), payload, 0, false);
     return ok;
 }

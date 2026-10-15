@@ -153,7 +153,58 @@ Body: { "device_id": "...", "reason"?: "user" }
 | POST | `/edge/nodes/register` | 边缘节点注册（幂等） |
 | POST | `/edge/nodes/heartbeat` | 节点心跳 |
 
-### C.5 其它
+### C.5 配置中心（`devices/urls.py` → `devices/config/urls.py`，CFG-01）
+
+> 后端实现：`deep-trace/backend/devices/config/`；契约与需求见 [CFG-01](../../swrs/config/CFG-01-unified-config-center.md)。
+> 设备面接口用 **HMAC 设备自签名**（非 Token），管理面用 Token。
+
+**设备面**（HMAC；开发期 `DEVICE_AUTH_REQUIRED=False` 可放行）
+
+| Method | Path | 用途 |
+|--------|------|------|
+| POST | `/devices/register` | 首次注册，返回 `device_secret`（无鉴权） |
+| POST | `/devices/config/pull` | 拉取配置（携带本地版本号） |
+| POST | `/devices/config/ack` | 配置生效确认 |
+
+签名规则（`devices/config/auth.py`）：
+
+```
+Header: X-Device-Id / X-Device-Timestamp / X-Device-Signature(base64)
+Base  : "{METHOD}\n{path}\n{timestamp}\n{body_sha256_hex}"
+Key   : hex_decode(device_secret)
+算法   : HMAC-SHA256
+```
+
+`pull` 请求/响应：
+
+```jsonc
+// 请求
+{ "current_config_version": 0, "current_fingerprint": "", "schema_versions": ["device.config.v1"], "ttl_s": 300 }
+// 200 变更
+{ "schema_version": "device.config.v1", "config_version": 1, "fingerprint": "<64hex>",
+  "issued_at": "...", "ttl_s": 300, "config": { /* connectivity/modules/features/runtime */ } }
+// 200 未变更（304 语义，简化体）
+{ "config_version": 1, "ttl_s": 300, "next_poll_s": 300 }
+```
+
+**管理面**（Token）
+
+| Method | Path | 用途 |
+|--------|------|------|
+| GET/POST | `/config/templates/` | 模板列表 / 新建 |
+| GET/PUT/PATCH/DELETE | `/config/templates/{pk}` | 模板详情 / 更新 / 删除 |
+| GET | `/config/devices/` | 设备配置列表 |
+| GET/PATCH | `/config/devices/{device_id}/` | 设备配置详情 / 覆盖 |
+| GET | `/config/devices/{device_id}/versions` | 版本历史 |
+| POST | `/config/devices/{device_id}/rollback` | 回滚 |
+| POST | `/config/bulk/push` | 批量下发 |
+
+**错误码**：`CFG_001` 网络超时 · `CFG_002` schema 不兼容 · `CFG_003` 指纹错误 · `CFG_004` 字段校验失败 · `CFG_005` 设备未注册 · `CFG_006` 鉴权失败 · `CFG_007` 注册失败
+
+> ⚠️ **待确认（接口审计）**：现有文档 B 段示例指向 `deep-trace-com`，而 CFG-01 实现落在 `deep-trace`。
+> 需与团队确认设备 `server_api_base` 最终指向哪个后端仓库，避免双仓分裂。
+
+### C.6 其它
 
 - **organization**：`groups` / `enterprises` / `areas` / `process-segments` / `virtual-lines` / `production-lines` / `work-units` / `line-work-units` / `products`（Router），自定义 action：`work-units/{code}/cmd`（→ 发布 `deep-trace/{uuid}/cmd/{module}`）、`modules`、`kpi`、`oee` 等（`organization/urls.py:17-30`、`views.py:1198`）。
 - **metadata**：`data-types`、`work-unit-bindings`、`config/test-points`、`customers`、`config/module-specs` 等（`metadata/urls.py:17-34`）。

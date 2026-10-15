@@ -6,6 +6,7 @@
 |----|------|------|
 | V-C01 | [C01-stream-server-verify.md](./C01-stream-server-verify.md) | 基建可达；完整推拉请在稳定 LAN 复验 |
 | V-C02 | [C02-device-push-stream.md](./C02-device-push-stream.md) | **固件已实现**；实机长稳待勾 |
+| V-C05 | [C05-rtsp-udp-transport.md](./C05-rtsp-udp-transport.md) | 方案评估文档；当前阶段不建议实施 |
 
 MQTT 规格已归 **[swrs/mqtt/](../../mqtt/)**（入口卡 + 模块详情页）：
 

@@ -3,6 +3,7 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/mqtt_topics.h"
+#include "mqtt/modules/envelope.h"
 #include "net/deep_dog_sntp.h"
 
 #include <cJSON.h>
@@ -163,12 +164,11 @@ void DeepDogTelemetryMqtt::Publish() {
         AddPoint(points, "rssi", ap.rssi, "dBm");
     }
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return;
     }
-    const bool ok = client_->PublishRaw(topic_, printed, 0, false);
+    const bool ok = client_->PublishRaw(topic_, payload, 0, false);
     ESP_LOGD(TAG, "telemetry publish ok=%d topic=%s", ok ? 1 : 0, topic_.c_str());
-    cJSON_free(printed);
 }

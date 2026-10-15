@@ -1,5 +1,6 @@
 #include "config.h"
 #include "http-server/deep_dog_http_server.h"
+#include "http-server/datapoint_http.h"
 
 #if DEEP_DOG_DOG_ENABLE
 #include "dog/dog_control.h"
@@ -1038,6 +1039,8 @@ bool DeepDogHttpServer::Start() {
     /* 须满足 max_open_sockets + 3 <= CONFIG_LWIP_MAX_SOCKETS（常见为 10 → 最多 7） */
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
+    // 允许通配符 URI（如 /api/datapoints/module/xxx）；默认 NULL 仅精确匹配
+    config.uri_match_fn = httpd_uri_match_wildcard;
     /* 死掉的 /stream 客户端若无发送超时会永久占住 dog_mjpeg worker */
     config.send_wait_timeout = 2;
     config.recv_wait_timeout = 2;
@@ -1093,6 +1096,11 @@ bool DeepDogHttpServer::Start() {
         server_ = nullptr;
         ESP_LOGE(TAG, "register uri failed");
         return false;
+    }
+
+    // 注册数据点统一端点
+    if (!RegisterDataPointHttpEndpoints(server_)) {
+        ESP_LOGW(TAG, "RegisterDataPointHttpEndpoints failed (non-fatal)");
     }
 
     LogHttpAccessUrls();

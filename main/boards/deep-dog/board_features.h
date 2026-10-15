@@ -18,10 +18,10 @@
 
 /* -------- 引出脚外设（须 config.h EXT_PIN_MODE 匹配；A/B 默认 38/48） -------- */
 #ifndef DEEP_DOG_CAN_ENABLE
-#define DEEP_DOG_CAN_ENABLE 0
+#define DEEP_DOG_CAN_ENABLE 1
 #endif
 #ifndef DEEP_DOG_MOTOR_ENABLE
-#define DEEP_DOG_MOTOR_ENABLE 0
+#define DEEP_DOG_MOTOR_ENABLE 1
 #endif
 #ifndef DEEP_DOG_UART_ENABLE
 #define DEEP_DOG_UART_ENABLE 0
@@ -73,6 +73,9 @@
 #ifndef DEEP_DOG_IMU_ENABLE
 #define DEEP_DOG_IMU_ENABLE 1
 #endif
+/* 注意：独立 HTTP server 与 WS MCP 并存会耗尽 internal 内存（实测 free_int≈12KB、
+ * largest≈3.8KB，两者 httpd_start 均失败：ESP_ERR_HTTPD_TASK）。
+ * 故默认关闭；数据点 REST 端点复用 WS MCP 的 httpd（见 deep_dog_ws_mcp_server）。 */
 #ifndef DEEP_DOG_HTTP_SERVER_ENABLE
 #define DEEP_DOG_HTTP_SERVER_ENABLE 0
 #endif

@@ -170,6 +170,7 @@ WiFi SSID/信道放在 **status**（可漫游），不写入 retain info。
 - 周期 publish `device/status`（建议 ~0.2 Hz，现 5s）。
 - `capabilities.*` 与编译宏 `DEEP_DOG_*_ENABLE` 对齐。
 - `ext_pins` 反映 `config.h` 中 `DEEP_DOG_EXT_PIN_MODE`（成对引出脚）；前端用 `mode` 切换 can/uart/pwm/led 等页面，用 `capabilities.motor` vs `dog` 区分单电机与四足；`mode=led` 时 DIN=`gpio_a`，须 `capabilities.led` 才出灯带卡。
+- **运行时可配置（[CFG-02](../../config/CFG-02-ext-pin-runtime-mode.md)）**：`mode` 表示**当前生效**模式；另有可选 `supported_modes`（本固件编入的白名单，前端据此禁用不可选项）、`pending_mode`（已下发待重启生效）、`apply_policy`（v1 固定 `restart`）。旧固件无这三字段时按"编译期固定模式"处理。
 - `mem.*` 用 `heap_caps_get_*`；`health.warn` 含 `low_internal_heap` 当 internal free &lt; 32768。
 - `clock_synced`：`DeepDogClockIsSynced()`；WiFi 已连且未同步时 `health.warn` 含 `clock_unsynced`。SNTP 见 [N01](../../net/N01-sntp-clock-sync.md)。
 - `power`：当前固定 `{ "supported": false }`。

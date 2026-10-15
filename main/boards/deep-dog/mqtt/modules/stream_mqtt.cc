@@ -1,6 +1,7 @@
 #include "mqtt/modules/stream_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/mqtt_topics.h"
 
@@ -256,15 +257,14 @@ void DeepDogStreamMqtt::PublishPhotoResult(bool ok, const std::string& result, c
     }
     cJSON_AddNumberToObject(root, "elapsed_ms", elapsed_ms);
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaEvent(), client_->settings().device_id);
+    if (payload.empty()) {
         return;
     }
-    const bool pub = client_->Publish(deep_dog_topics::Event("stream/photo"), printed, 0, false);
+    const bool pub = client_->Publish(deep_dog_topics::Event("stream/photo"), payload, 0, false);
     ESP_LOGI(TAG, "stream/photo ok=%d elapsed_ms=%d pub=%d err=%s", ok ? 1 : 0, elapsed_ms, pub ? 1 : 0,
              ok ? "" : (error ? error : ""));
-    cJSON_free(printed);
 }
 
 void DeepDogStreamMqtt::TakePhotoTask(void* arg) {
@@ -352,7 +352,7 @@ void DeepDogStreamMqtt::OnMessage(const std::string& topic, const std::string& p
         return;
     }
 
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         last_error_ = "invalid_json";
         PublishStatus(last_error_.c_str());
@@ -501,14 +501,13 @@ bool DeepDogStreamMqtt::PublishStatus(const char* error_override) {
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
     cJSON_AddStringToObject(root, "ts_iso", ts_iso.c_str());
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("stream"), printed, 0, true);
+    const bool ok = client_->Publish(deep_dog_topics::Status("stream"), payload, 0, true);
     ESP_LOGI(TAG, "stream/status retain state=%s mode=%s ok=%d", VisionPushStatusStr(state),
              ProtocolModeStr(mode), ok ? 1 : 0);
-    cJSON_free(printed);
     return ok;
 }

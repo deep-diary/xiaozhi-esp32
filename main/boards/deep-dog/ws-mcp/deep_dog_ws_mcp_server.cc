@@ -88,6 +88,8 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
     config.server_port = port_;
     config.max_open_sockets = 7;
     config.ctrl_port = 32770;
+    // 允许通配符 URI（如 /api/datapoints/module/xxx）；默认 NULL 仅精确匹配
+    config.uri_match_fn = httpd_uri_match_wildcard;
 
     httpd_uri_t ws_uri = {
         .uri = DEEP_DOG_WS_MCP_PATH,

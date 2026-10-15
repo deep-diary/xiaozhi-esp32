@@ -31,6 +31,9 @@ public:
 
     bool PublishStatus();
 
+    /** 注册 imu 数据点到统一 Registry（Phase 4） */
+    void RegisterDataPoints();
+
 private:
     static void TimerCb(void* arg);
 

@@ -3,6 +3,7 @@
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_topics.h"
 #include "mqtt/mqtt_config.h"
+#include "mqtt/modules/envelope.h"
 #include "application.h"
 #include "assets/lang_config.h"
 #include "settings.h"
@@ -219,13 +220,12 @@ void DeepDogPairingMqtt::PublishStatus() {
     }
     const int64_t ts = UnixTs();
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(ts));
-    char* raw = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!raw) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return;
     }
-    client_->Publish(deep_dog_topics::Status("pairing"), raw, 0, true);
-    cJSON_free(raw);
+    client_->Publish(deep_dog_topics::Status("pairing"), payload, 0, true);
 }
 
 void DeepDogPairingMqtt::PublishPairingRequest(const char* action) {
@@ -241,13 +241,12 @@ void DeepDogPairingMqtt::PublishPairingRequest(const char* action) {
     cJSON_AddStringToObject(root, "action", action);
     cJSON_AddStringToObject(root, "device_id", device_id.c_str());
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* raw = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!raw) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaEvent(), client_->settings().device_id);
+    if (payload.empty()) {
         return;
     }
-    client_->Publish(deep_dog_topics::Event("pairing/request"), raw, 1, false);
-    cJSON_free(raw);
+    client_->Publish(deep_dog_topics::Event("pairing/request"), payload, 1, false);
     ESP_LOGI(TAG, "pairing/request action=%s", action);
 }
 
@@ -369,7 +368,7 @@ void DeepDogPairingMqtt::OnMessage(const std::string& topic, const std::string& 
     if (!client_ || topic != client_->Topic(deep_dog_topics::Cmd("pairing"))) {
         return;
     }
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         ESP_LOGW(TAG, "pairing/cmd bad json");
         return;

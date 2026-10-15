@@ -1,6 +1,7 @@
 #include "mqtt/modules/gimbal_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_topics.h"
 #include "gimbal/Gimbal.h"
 
@@ -172,7 +173,7 @@ void DeepDogGimbalMqtt::OnMessage(const std::string& topic, const std::string& p
     }
     Gimbal_t* g = DeepDogGimbalGet();
 
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         ESP_LOGW(TAG, "gimbal/cmd invalid_json");
         return;
@@ -290,14 +291,12 @@ bool DeepDogGimbalMqtt::PublishStatus(bool force) {
         cJSON* root = cJSON_CreateObject();
         cJSON_AddBoolToObject(root, "ready", false);
         cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-        char* raw = cJSON_PrintUnformatted(root);
-        cJSON_Delete(root);
-        if (!raw) {
+        const std::string payload =
+            deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+        if (payload.empty()) {
             return false;
         }
-        const bool ok = client_->Publish(deep_dog_topics::Status("gimbal"), raw, 0, true);
-        cJSON_free(raw);
-        return ok;
+        return client_->Publish(deep_dog_topics::Status("gimbal"), payload, 0, true);
     }
 
     cJSON* root = cJSON_CreateObject();
@@ -317,13 +316,12 @@ bool DeepDogGimbalMqtt::PublishStatus(bool force) {
     cJSON_AddItemToArray(lim_tilt, cJSON_CreateNumber(st.lim_tilt_max));
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* raw = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!raw) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("gimbal"), raw, 0, true);
-    cJSON_free(raw);
+    const bool ok = client_->Publish(deep_dog_topics::Status("gimbal"), payload, 0, true);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();
         pending_publish_ = false;

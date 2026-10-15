@@ -24,6 +24,9 @@ public:
 
     bool PublishStatus(bool force = true);
 
+    /** 注册 can 数据点到统一 Registry（Phase 4；需访问模块内部状态） */
+    void RegisterDataPoints();
+
 private:
     static void FlushTimerCb(void* arg);
     static void FrameListener(const CanFrame* frame, int is_tx, void* ctx);

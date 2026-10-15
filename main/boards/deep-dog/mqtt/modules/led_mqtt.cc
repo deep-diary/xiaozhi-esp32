@@ -1,7 +1,10 @@
 #include "mqtt/modules/led_mqtt.h"
 
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_topics.h"
+#include "mqtt/datapoint_registry.h"
+#include "mqtt/modules/led_datapoints.h"
 #include "led/led_strip_control.h"
 #include "led/apps/led_app_dog.h"
 #include "config.h"
@@ -47,6 +50,16 @@ void DeepDogLedMqtt::SetControl(LedStripControl* ctrl) {
             }
         });
     }
+
+    // 注册 LED 模块数据点到全局 Registry
+    // （即使 enabled=false 也注册，schema 中会显示该模块存在但状态由 ok 字段表达）
+    const DataPointDef* defs = nullptr;
+    size_t count = 0;
+    LedDataPoints_GetDefs(control_, &defs, &count);
+    const DataModuleDef* mod_def = LedDataPoints_GetModuleDef();
+    if (defs && count > 0 && mod_def) {
+        DataPointRegistry::Instance().RegisterModule(*mod_def);
+    }
 }
 
 void DeepDogLedMqtt::OnConnected() {
@@ -86,7 +99,7 @@ void DeepDogLedMqtt::OnMessage(const std::string& topic, const std::string& payl
         return;
     }
 
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         ESP_LOGW(TAG, "led/cmd invalid_json");
         return;
@@ -264,12 +277,11 @@ bool DeepDogLedMqtt::PublishStatus() {
 #endif
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("led"), printed, 0, true);
-    cJSON_free(printed);
+    const bool ok = client_->Publish(deep_dog_topics::Status("led"), payload, 0, true);
     return ok;
 }

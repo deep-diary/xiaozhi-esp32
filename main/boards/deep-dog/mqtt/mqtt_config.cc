@@ -1,5 +1,6 @@
 #include "mqtt/mqtt_config.h"
 
+#include "config_center/config_manager.h"
 #include "settings.h"
 #include "vision/vision_config.h"
 
@@ -124,6 +125,37 @@ DeepDogMqttSettings DeepDogMqttConfig::Load() {
         Settings writable("deep_dog_mqtt", true);
         writable.SetString("broker_host", s.broker_host);
         writable.SetInt("broker_port", s.broker_port);
+    }
+    // [CFG-01] 配置中心优先：若已从服务器/缓存加载，覆盖旧 NVS 值
+    {
+        auto& ccm = config_center::ConfigManager::GetInstance();
+        if (ccm.config_version() > 0 || ccm.has_remote_config()) {
+            const auto& m = ccm.config().mqtt;
+            if (!m.broker_host.empty()) {
+                s.broker_host = m.broker_host;
+            }
+            if (m.broker_port > 0) {
+                s.broker_port = m.broker_port;
+            }
+            s.use_tls = m.use_tls;
+            if (!m.username.empty()) {
+                s.username = m.username;
+            }
+            if (!m.password.empty()) {
+                s.password = m.password;
+            }
+            if (!m.topic_root.empty()) {
+                s.topic_root = m.topic_root;
+                SetTopicRoot(s.topic_root);
+            }
+            if (m.keepalive_s > 0) {
+                s.keepalive_s = m.keepalive_s;
+            }
+            const auto& a = ccm.config().api_server;
+            if (!a.base_url.empty()) {
+                s.server_api_base = a.base_url;
+            }
+        }
     }
     ESP_LOGI(TAG, "broker %s:%d tls=%d bound=%d device_id=%s server_api_base=%s telemetry=%s", s.broker_host.c_str(),
              s.broker_port, s.use_tls ? 1 : 0, bound ? 1 : 0, s.device_id.c_str(), s.server_api_base.c_str(),

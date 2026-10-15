@@ -16,6 +16,13 @@
 #include "mqtt/modules/gimbal_mqtt.h"
 #include "mqtt/modules/can_mqtt.h"
 #include "mqtt/modules/motor_mqtt.h"
+#include "mqtt/modules/config_mqtt.h"
+#include "mqtt/datapoint_registry.h"
+#include "mqtt/modules/system_datapoints.h"
+#include "mqtt/modules/gimbal_datapoints.h"
+#include "mqtt/modules/servo_datapoints.h"
+#include "mqtt/modules/touch_datapoints.h"
+#include "mqtt/modules/handle_datapoints.h"
 #include "touch_btn/touch_event_hub.h"
 #include "handle/handle_event_hub.h"
 #include "handle/handle_config.h"
@@ -63,6 +70,7 @@ struct DeepDogMqtt::Impl {
     DeepDogGimbalMqtt gimbal{&client};
     DeepDogCanMqtt can{&client};
     DeepDogMotorMqtt motor{&client};
+    DeepDogConfigMqtt config{&client};
     VisionFrameHub* hub = nullptr;
     DeepDogHttpServer* http = nullptr;
     TouchEventHub* touch_hub = nullptr;
@@ -98,6 +106,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         gimbal.OnConnected();
         can.OnConnected();
         motor.OnConnected();
+        config.OnConnected();
     } else {
         device.OnDisconnected();
         pairing.OnDisconnected();
@@ -113,6 +122,7 @@ void DeepDogMqtt::Impl::OnConnection(bool connected) {
         gimbal.OnDisconnected();
         can.OnDisconnected();
         motor.OnDisconnected();
+        config.OnDisconnected();
     }
 }
 
@@ -128,6 +138,7 @@ void DeepDogMqtt::Impl::OnMessage(const std::string& topic, const std::string& p
     gimbal.OnMessage(topic, payload);
     can.OnMessage(topic, payload);
     motor.OnMessage(topic, payload);
+    config.OnMessage(topic, payload);
 }
 
 void DeepDogMqtt::Impl::OnClockSynced() {
@@ -143,6 +154,9 @@ void DeepDogMqtt::Impl::OnClockSynced() {
 }
 
 DeepDogMqtt::DeepDogMqtt() : impl_(std::make_unique<Impl>()) {
+    // 注册 system 模块数据点（总是存在，纯观测）
+    SystemDataPoints_Register();
+
     impl_->pairing.SetIdentityReloadCallback([this]() { ReloadDeviceIdentity(); });
 #if DEEP_DOG_FACE_AI_ENABLE
     DeepDogFaceControlInit();
@@ -329,6 +343,7 @@ void DeepDogMqtt::Impl::ApplyVisionStreamUrl(const DeepDogMqttSettings& settings
 void DeepDogMqtt::Impl::StopModulesForReload() {
     motor.Stop();
     can.Stop();
+    config.Stop();
     gimbal.Stop();
     servo.Stop();
     led.Stop();
@@ -454,7 +469,42 @@ bool DeepDogMqtt::Start() {
     impl_->can.SetEnabled(caps.can);
     impl_->motor.SetEnabled(caps.motor);
 
-    impl_->client.SetConnectionCallback([this](bool c) { impl_->OnConnection(c); });
+    // Phase 3：注册 gimbal/servo/touch/handle 数据点（幂等）
+    static bool s_phase3_registered = false;
+    if (!s_phase3_registered) {
+        s_phase3_registered = true;
+#if DEEP_DOG_GIMBAL_ENABLE
+        GimbalDataPoints_Register();
+#endif
+#if DEEP_DOG_SERVO_ENABLE
+        ServoDataPoints_Register();
+#endif
+        TouchDataPoints_Register(impl_->touch_hub, impl_->touch_ctrl);
+#if DEEP_DOG_HANDLE_ENABLE
+        HandleDataPoints_Register(impl_->handle_hub);
+#endif
+    }
+
+    // Phase 4：注册 can/imu 数据点（幂等；motor 在电机就绪后懒注册）
+    static bool s_phase4_registered = false;
+    if (!s_phase4_registered) {
+        s_phase4_registered = true;
+#if DEEP_DOG_CAN_ENABLE
+        impl_->can.RegisterDataPoints();
+#endif
+        impl_->imu.RegisterDataPoints();
+        impl_->motor.RegisterDataPoints();  // 首次尝试；电机未就绪时后续由 status 懒注册
+    }
+
+    impl_->client.SetConnectionCallback([this](bool c) {
+        if (c) {
+            DataPointRegistry::Instance().SetMqttClient(&impl_->client);
+            DataPointRegistry::Instance().OnMqttConnected();
+        } else {
+            DataPointRegistry::Instance().OnMqttDisconnected();
+        }
+        impl_->OnConnection(c);
+    });
     impl_->client.SetMessageCallback(
         [this](const std::string& t, const std::string& p) { impl_->OnMessage(t, p); });
 

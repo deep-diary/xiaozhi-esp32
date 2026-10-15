@@ -13,7 +13,7 @@ protocol:
     Unified topic skeleton (interop-2, 2026-10): every topic collapses to
     {prefix}/{device_id}/{kind}/{subject[/...]} with kind in info|status|cmd|event|result.
     The legacy prefix deepdiary/deep-dog/{device_id} is DEPRECATED; the per-module
-    old->new migration table lives in ../interop/01-mqtt-contract.md section 5.
+    old->new migration table lives in docs/interface/01-mqtt-contract.md section 5.
   topic_prefix: "{prefix}/{device_id}"
   topic_prefix_note: >
     {prefix} is configurable and MUST be identical across all three ends (device,
@@ -35,6 +35,45 @@ protocol:
     timestamp_field: ts
     timestamp_unit: unix_seconds
     sparse_cmd: true  # only include keys to change
+  # ---- kind 语义词汇表（真源；禁止自造 kind） ----
+  kinds:
+    info:
+      direction: device_to_peer
+      qos: 0
+      retain: true
+      semantics: "上线快照：静态/准静态元数据，晚订阅者必须能拿到"
+      examples: ["info/device", "info/schema"]
+    status:
+      direction: device_to_peer
+      qos: 0
+      retain: "per_subject"  # 快照型 true / 流式型 false，判据见 01-mqtt-contract 3.3
+      semantics: "当前状态：心跳 / 实时值 / 快照；telemetry 是本 kind 的流式子类"
+      examples: ["status/led", "status/imu", "status/telemetry", "status/face/registry"]
+    cmd:
+      direction: peer_to_device
+      qos: 1
+      retain: false
+      semantics: "命令下发；应答固定为 cmd/{subject}/ack（不单列 kind）"
+      examples: ["cmd/led", "cmd/motor", "cmd/led/ack"]
+    event:
+      direction: device_to_peer
+      qos: 0
+      retain: false
+      semantics: "一次性事件：某时刻发生、过期无意义"
+      examples: ["event/stream/photo", "event/touch/tap"]
+    result:
+      direction: device_to_peer
+      qos: 0
+      retain: false
+      semantics: "操作结果帧：对应某次 cmd/action 的离散产出，不可丢"
+      examples: ["result/motor/scan", "result/fct"]
+  kind_boundary_note: >
+    result 与 telemetry 语义层级不同，不可互相替代：
+    - telemetry 是「持续流式的 status」——周期/变化时自动产生，走 status/telemetry，
+      属 kind=status 的流式子类，可采样、可丢，消费方为时序库/实时图表。
+    - result 是「离散应答的产出」——由某个 cmd 或动作触发，走 result/<subject>，
+      属独立 kind，一次性、结构化、不可丢，消费方为调用方/测试框架。
+    判据一句话：状态随时间连续演化 → status(telemetry)；某次操作的结果 → result。
   client_id:
     format: "deep-dog-{device_id}-{random}"
     note: >
@@ -153,6 +192,14 @@ modules:
       MQTT ready with actuator=none (no real pan). No separate device-page entry card.
       Frontend: /modules/face#track; /modules/track redirects there. Device reads face
       snapshot in-process; optional gimbal/dog actuators later.
+  config:
+    status: ready
+    required: false
+    impl: CFG-01
+    doc: ../config/CFG-01-unified-config-center.md
+    note: >
+      Unified config center notify channel. Downlink cmd/config triggers an immediate
+      HTTP config pull; periodic HTTP poll is the fallback. No device-page entry card.
 
 topics:
   # ---- pairing ----
@@ -223,11 +270,23 @@ topics:
       ext_pins:
         type: object
         optional: true
-        note: "自由引出脚 GPIO38/48 成对模式；前端据此切换 can/uart/pwm/led 等页面"
+        note: "自由引出脚 GPIO38/48 成对模式；前端据此切换 can/uart/pwm/led 等页面。运行时可配置见 CFG-02"
         fields:
-          mode: { type: string, note: "none|can|uart|rs485|pwm|io|ad|led" }
+          mode: { type: string, note: "当前生效模式：none|can|uart|rs485|pwm|io|ad|led" }
           gpio_a: { type: int, note: "DEEP_DOG_EXT_PIN_A_GPIO；mode=led 时为 WS2812 DIN" }
           gpio_b: { type: int, note: "DEEP_DOG_EXT_PIN_B_GPIO；mode=led 时空闲保留" }
+          supported_modes:
+            type: array
+            optional: true
+            note: "本固件实际编入的模式白名单（CFG-02）；前端据此禁用不可选项；旧固件无此字段"
+          pending_mode:
+            type: string
+            optional: true
+            note: "已下发、待重启生效的模式（CFG-02）；无待生效时省略或 null"
+          apply_policy:
+            type: string
+            optional: true
+            note: "模式生效策略；v1 固定 restart（重启生效）"
       capabilities:
         type: object
         fields:
@@ -328,7 +387,7 @@ topics:
         Device now publishes to {prefix}/{device_id}/status/telemetry; cloud ingest wildcard-subscribes
         {prefix}/+/status/telemetry and maps device_id -> WorkUnit.
         Source of {prefix}: HTTP pairing handshake `topics` or NVS deep_dog_mqtt.topic_root.
-        Empty => telemetry disabled. See modules/15-telemetry and ../interop/01-mqtt-contract.md 5.5.
+        Empty => telemetry disabled. See modules/15-telemetry and docs/interface/01-mqtt-contract.md 5.5.
     impl: modules/15-telemetry
     payload:
       home_code: { type: string }
@@ -1329,6 +1388,32 @@ topics:
     qos: 0
     retain: true
     status: ready
+
+  # ---- config (CFG-01 统一配置中心) ----
+  cmd/config:
+    module: config
+    dir: downlink
+    qos: 1
+    retain: false
+    note: "配置变更通知：设备收到后立即触发一次 HTTP config/pull"
+    payload:
+      action: { type: string, note: "refresh" }
+      config_version: { type: int, optional: true }
+      reason: { type: string, optional: true, note: "template_updated|manual_update|bulk_push" }
+      ts: { type: int, optional: true }
+
+  cmd/config/ack:
+    module: config
+    dir: uplink
+    qos: 0
+    retain: false
+    note: "收到 cmd/config 后的即时回执（真正的生效回执走 HTTP ack）"
+    payload:
+      action: { type: string }
+      result: { type: string, note: "accepted|unsupported" }
+      config_version: { type: int }
+      has_remote_config: { type: bool }
+      ts_iso: { type: string }
     when: primary_local_id_changes
     note: "Identity event for Face page / Kiosk; no separate Person entry card"
     payload:

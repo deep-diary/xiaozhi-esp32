@@ -1,5 +1,6 @@
 #include "mqtt/modules/imu_mqtt.h"
 
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/mqtt_topics.h"
@@ -8,6 +9,7 @@
 #include "sensor/imu_sensor.h"
 #include "sensor/imu_switch.h"
 #endif
+#include "mqtt/modules/imu_datapoints.h"
 
 #include <cJSON.h>
 #include <esp_log.h>
@@ -94,6 +96,14 @@ void DeepDogImuMqtt::Stop() {
     OnDisconnected();
 }
 
+void DeepDogImuMqtt::RegisterDataPoints() {
+#if DEEP_DOG_IMU_ENABLE
+    ImuDataPoints_Register(sensor_, switch_hub_);
+#else
+    ImuDataPoints_Register(nullptr, nullptr);
+#endif
+}
+
 bool DeepDogImuMqtt::PublishStatus() {
     if (!enabled_ || !client_ || !client_->IsConnected()) {
         return false;
@@ -158,12 +168,12 @@ bool DeepDogImuMqtt::PublishStatus() {
     cJSON_AddItemToObject(root, "switches", switches);
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool pub_ok = client_->Publish(deep_dog_topics::Status("imu"), printed, 0, false);
+    const bool pub_ok = client_->Publish(deep_dog_topics::Status("imu"), payload, 0, false);
     static int s_log = 0;
     int switch_sum = 0;
     for (int i = 0; i < kDeepDogImuSwitchCount; ++i) {
@@ -179,7 +189,6 @@ bool DeepDogImuMqtt::PublishStatus() {
         ESP_LOGI(TAG, "imu/status ok=%d accel_g=%.2f pub=%d", ok ? 1 : 0, accel_g, pub_ok ? 1 : 0);
     }
     ++s_log;
-    cJSON_free(printed);
     return pub_ok;
 #else
     const float accel_g = std::sqrt(ax * ax + ay * ay + az * az);
@@ -204,13 +213,12 @@ bool DeepDogImuMqtt::PublishStatus() {
     }
     cJSON_AddItemToObject(root, "switches", switches);
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool pub_ok = client_->Publish(deep_dog_topics::Status("imu"), printed, 0, false);
-    cJSON_free(printed);
+    const bool pub_ok = client_->Publish(deep_dog_topics::Status("imu"), payload, 0, false);
     return pub_ok;
 #endif
 }

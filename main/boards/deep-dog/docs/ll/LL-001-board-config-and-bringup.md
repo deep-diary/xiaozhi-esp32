@@ -119,3 +119,77 @@
   改默认值的同时，把**旧地址加入 migrate 列表**（`mqtt_config.cc` 的 `if (s.broker_host == "...")` 分支），保证 NVS 存有旧值的设备也能切到新地址；或清 NVS 命名空间 `deep_dog_mqtt`。
 
 - **相关文件**：`main/boards/deep-dog/mqtt/mqtt_config.h`、`main/boards/deep-dog/mqtt/mqtt_config.cc`
+
+---
+
+## LL-001-6 Windows 下 CMake 报 `WinError 32`（文件被占用），configure 失败
+
+- **现象**：
+  `idf.py reconfigure` / `build` 在配置阶段失败：
+
+  ```
+  CMake Error at .../tools/cmake/component.cmake:256 (message):
+    PermissionError: [WinError 32]
+  -- Configuring incomplete, errors occurred!
+  ```
+
+  注意它出现在**配置阶段**、且指向 `component.cmake`，容易误判为组件或 CMake 脚本错误。
+
+- **根因**：
+  Windows 文件锁：上一轮的 `idf.py monitor` / `idf.py build` 的 python 子进程尚未完全退出，
+  仍占用 `build/` 目录内的文件（如 `CMakeCache.txt`、`.obj`），CMake 无法删除/重写。
+
+- **正确做法**：
+  ```powershell
+  # 确认没有残留的 python / idf_monitor 进程
+  Get-Process python -ErrorAction SilentlyContinue
+  # 稍候几秒（等子进程真正退出）后重试，通常无需 clean
+  idf.py build
+  ```
+  Agent 场景下，`Stop-Process` 结束 monitor 后**留出几秒**再做下一次 build；
+  不要一见 `WinError 32` 就 `fullclean`（多数情况下重试即可）。
+
+- **相关文件**：无（环境/流程问题）；与 LL-001-2（串口占用）同源，但表现是 `build/` 目录文件锁。
+
+---
+
+## LL-001-7 `ext_pins` 模式（PWM/CAN）决定 gimbal/servo 是否被编译启用
+
+- **现象**：
+  某个板级模块"没生效"——日志里没有它的数据点注册 / MCP 工具 / status 发布；
+  启动日志可见 `ext_pins mode=can A=38 B=48 can=1 motor=1 dog=0 arm=0 servo=0 gimbal=0 led=0`。
+
+- **根因**：
+  38/48 引出脚在同一时刻只能作一种用途。`board_features.h` 在 **PWM 不可用**（如 CAN 模式）时
+  强制 `DEEP_DOG_SERVO_ENABLE=0` / `DEEP_DOG_GIMBAL_ENABLE=0`，相关代码被**编译期裁剪**，
+  因此运行时既无日志也无功能（不是运行时 bug）。
+
+- **正确做法**：
+  排查"某模块为何不生效"时，**先看启动日志的两行**：
+  `deep_dog: ext_pins mode=... servo=? gimbal=?` 与
+  `dog_mqtt: board MQTT started ... servo=? gimbal=?`。
+  确认当前模式与预期一致；若确需 PWM 模式，修改 `ext_pins` 模式配置后 `idf.py reconfigure` 重编。
+
+- **相关文件**：`main/boards/deep-dog/board_features.h`（引出脚 PWM/CAN 互斥与裁剪逻辑，约 120-130 行）、`main/boards/deep-dog/config.json`
+
+---
+
+## LL-001-8 板级源文件用了 `DEEP_DOG_*_ENABLE` 却没 include `config.h`，宏恒为 0
+
+- **现象**：
+  新增的 `mqtt/modules/*_datapoints.cc` 里 `#if DEEP_DOG_XXX_ENABLE` 分支**永远走不到**，
+  运行期该模块数据点**静默不注册**（无编译错误、无任何日志，功能"少了一块"）。
+
+- **根因**：
+  `DEEP_DOG_*_ENABLE` 由 `board_features.h` 定义，而 `board_features.h` **只被 `config.h` include**。
+  若源文件只 include 了领域头（如 `motor/motor_config.h`、`sensor/imu_config.h`）而**没** include `config.h`，
+  该宏就是未定义 → C 预处理器把 `#if DEEP_DOG_XXX_ENABLE` 当作 `0`，于是走了禁用分支。
+
+- **正确做法**：
+  任何使用 `DEEP_DOG_*_ENABLE` 的板级 `.cc`，显式加：
+  ```cpp
+  #include "config.h"   // 提供 board_features.h 中的 DEEP_DOG_*_ENABLE
+  ```
+  同理，用到 `DEEP_DOG_*_AVAILABLE` 的源文件也应确保经 `config.h` 引入（`config.h` 定义 `*_AVAILABLE` 后再 include `board_features.h`）。
+
+- **相关文件**：`main/boards/deep-dog/config.h`（第 97 行 include `board_features.h`）、`main/boards/deep-dog/board_features.h`、`main/boards/deep-dog/mqtt/modules/motor_datapoints.cc`

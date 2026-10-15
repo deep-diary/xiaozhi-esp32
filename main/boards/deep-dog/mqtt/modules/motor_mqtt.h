@@ -26,6 +26,9 @@ public:
 
     bool PublishStatus(bool force = true);
 
+    /** 懒注册 motor 数据点（电机就绪后展开子实例；幂等） */
+    void RegisterDataPoints();
+
 #if DEEP_DOG_MOTOR_ENABLE
     static void OnMotorDiscovered(uint8_t motor_id, const motor_status_t& status, void* user_data);
 #endif

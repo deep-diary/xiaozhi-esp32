@@ -123,7 +123,7 @@ graph LR
 
 ### 4.1 唯一契约真源 + CI 校验（D5）
 
-- 以 `swrs/interop/` + `deep-dog-mqtt.yml` 为跨端唯一真源。
+- 以 `docs/interface/` + `deep-dog-mqtt.yml` 为跨端唯一真源。
 - 两端 CI 各加一条单测：断言主题常量集合与契约文档/YAML 一致，不一致即失败。
 
 ### 4.2 统一命名空间（D1/D2/D3）
@@ -179,7 +179,7 @@ graph LR
 | 信封 | 含 `schema`+`ts_iso`+`device_id`；命令含 `msg_id`；应答含 `corr_id`；业务字段在 `data` |
 | QoS/retain | 符合 [01 §3.3](./01-mqtt-contract.md) 判据 |
 | 版本 | `schema` 版本递增规则明确；新字段可选、不破坏旧端 |
-| 真源 | 已写入 `swrs/interop/` 与 `deep-dog-mqtt.yml` |
+| 真源 | 已写入 `docs/interface/` 与 `deep-dog-mqtt.yml` |
 | 安全 | 不透传密钥；鉴权模型明确；WS 边界清晰 |
 | 幂等 | 命令类接口说明幂等性与重放影响 |
 
@@ -229,7 +229,7 @@ graph LR
 
 ## 7. 验收标准
 
-- [ ] `swrs/interop/` 五份文档就绪并被两端引用；`deep-dog-mqtt.yml` 完成新主题重写。
+- [ ] `docs/interface/` 五份文档就绪并被两端引用；`deep-dog-mqtt.yml` 完成新主题重写。
 - [ ] D1~D6 全部落地或有明确阶段计划。
 - [ ] 配对仅剩 HTTP 单一来源；`pairing` ingest 退役并验证遥测/人脸库/测试结果无回归。
 - [ ] 三端前缀均可配置；改配置即整体换前缀。

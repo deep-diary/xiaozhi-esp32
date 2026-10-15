@@ -1,5 +1,6 @@
 #include "mqtt/modules/servo_mqtt.h"
 
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_topics.h"
 #include "servo/servo_control.h"
@@ -143,7 +144,7 @@ void DeepDogServoMqtt::OnMessage(const std::string& topic, const std::string& pa
     ESP_LOGW(TAG, "servo/cmd ignored (servo disabled)");
     return;
 #else
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         ESP_LOGW(TAG, "servo/cmd invalid_json");
         return;
@@ -256,13 +257,12 @@ bool DeepDogServoMqtt::PublishStatus(bool force) {
     }
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* raw = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!raw) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("servo"), raw, 0, true);
-    cJSON_free(raw);
+    const bool ok = client_->Publish(deep_dog_topics::Status("servo"), payload, 0, true);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();
         pending_publish_ = false;

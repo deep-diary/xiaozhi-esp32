@@ -9,7 +9,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | **权威顺序** | [ROADMAP.md](./ROADMAP.md) |
 | **架构图集** | [architecture/](./architecture/index.html)（HTML + Mermaid；宏观→机制） |
 | **MQTT** | [mqtt/](./mqtt/)（M01 总览 + modules 前端详情页 + YAML） |
-| **跨端接口契约** | [interop/](./interop/)（设备 ⇄ deep-trace：MQTT/WS/HTTP 标准接口 + 架构审查建议） |
+| **跨端接口契约** | [docs/interface/](../docs/interface/)（设备 ⇄ deep-trace：MQTT/WS/HTTP 标准接口 + 架构审查建议） |
 | **控制输入** | [input/](./input/)（手柄双源；I-HANDLE；I08b 轴映射） |
 | **电机 / CAN** | [motor/](./motor/)（单电机联调；MOT） |
 
@@ -30,13 +30,14 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | [ROADMAP.md](./ROADMAP.md) | 可追溯总表 |
 | [architecture/](./architecture/index.html) | 板卡系统架构图集（Mermaid） |
 | [mqtt/](./mqtt/) | MQTT：M01、frontend、modules、YAML |
-| [interop/](./interop/) | **跨端接口契约**（deep-dog ⇄ deep-trace-com）：架构审查 + MQTT/WS/HTTP 标准接口 |
+| [docs/interface/](../docs/interface/) | **跨端接口契约**（deep-dog ⇄ deep-trace-com）：架构审查 + MQTT/WS/HTTP 标准接口 |
 | [input/](./input/) | 控制输入（手柄双源：Bluepad32 / PC MQTT 桥） |
 | [motor/](./motor/) | CAN / 单电机调试（MOT；手柄 catalog 见 04） |
 | [dog/](./dog/) | 四足运动 |
 | [vision/](./vision/) | HTTP / Immich / MediaMTX / Kiosk |
 | [vision/infra.md](./vision/infra.md) | MediaMTX、EMQX、Immich（无明文密钥） |
 | [net/](./net/) | SNTP（N01）· STA DHCP 寻址（N02）· 配网页 MQTT Broker（N03） |
+| [config/](./config/) | 统一配置中心（CFG-01）· 38/48 引出脚运行时可配置（CFG-02） |
 
 ## 交付序号（摘要）
 
@@ -53,6 +54,9 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | V-C04 | 云台 MQTT | [modules/09-gimbal](./mqtt/modules/09-gimbal.md) | 本轮联调 |
 | **DT-01** | deep-trace 遥测通道 | [modules/15-telemetry](./mqtt/modules/15-telemetry.md) | 本轮落地 |
 | **DT-02** | deep-trace HTTP 配对 | [modules/16-http-pairing](./mqtt/modules/16-http-pairing.md) · [N03](./net/N03-wifi-portal-mqtt-broker.md) | 本轮落地 |
+| **CFG-01** | 统一配置中心 | [config/CFG-01](./config/CFG-01-unified-config-center.md) | 本轮落地 |
+| **CFG-02** | 38/48 引出脚运行时可配置 | [config/CFG-02](./config/CFG-02-ext-pin-runtime-mode.md) | 需求就绪 |
+| **DP-00/01/02** | 数据点归一化（Data Point Registry） | [docs/interface/04-datapoint-registry](../docs/interface/04-datapoint-registry.md) | 架构就绪，待排期 |
 | V-P01 | Kiosk | 更后 |
 
 ## 约定

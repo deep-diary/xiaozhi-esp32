@@ -2,8 +2,10 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_topics.h"
+#include "mqtt/modules/envelope.h"
 #include "config.h"
 #include "mcp_server.h"
+#include "mqtt/modules/motor_datapoints.h"
 
 #if DEEP_DOG_MOTOR_ENABLE
 #include "motor/deep_motor.h"
@@ -211,11 +213,10 @@ void DeepDogMotorMqtt::PublishScanStarted(uint8_t id_min, uint8_t id_max) {
     cJSON_AddItemToArray(range, cJSON_CreateNumber(id_min));
     cJSON_AddItemToArray(range, cJSON_CreateNumber(id_max));
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* s = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (s) {
-        (void)client_->Publish(deep_dog_topics::Event("motor/scan"), s, 0, false);
-        cJSON_free(s);
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaEvent(), client_->settings().device_id);
+    if (!payload.empty()) {
+        (void)client_->Publish(deep_dog_topics::Event("motor/scan"), payload, 0, false);
     }
 #endif
 }
@@ -235,11 +236,10 @@ void DeepDogMotorMqtt::PublishScanDiscovered(uint8_t motor_id, const motor_statu
         cJSON_AddStringToObject(root, "mcu_uid_hex", uid_hex);
     }
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* s = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (s) {
-        (void)client_->Publish(deep_dog_topics::Event("motor/scan"), s, 0, false);
-        cJSON_free(s);
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaEvent(), client_->settings().device_id);
+    if (!payload.empty()) {
+        (void)client_->Publish(deep_dog_topics::Event("motor/scan"), payload, 0, false);
     }
 }
 
@@ -325,14 +325,12 @@ bool DeepDogMotorMqtt::PublishTools() {
     mcp.AppendToolsToJsonArray(tools, "self.motor.");
     mcp.AppendToolsToJsonArray(tools, "self.can.");
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* s = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!s) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("motor/tools"), s, 0, true);
-    cJSON_free(s);
-    return ok;
+    return client_->Publish(deep_dog_topics::Status("motor/tools"), payload, 0, true);
 #endif
 }
 
@@ -361,11 +359,24 @@ void DeepDogMotorMqtt::PublishMcpResult(const char* tool_name, bool ok, const ch
         cJSON_AddStringToObject(root, "error", error);
     }
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* s = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (s) {
-        (void)client_->Publish(deep_dog_topics::Event("motor/mcp_result"), s, 0, false);
-        cJSON_free(s);
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaEvent(), client_->settings().device_id);
+    if (!payload.empty()) {
+        (void)client_->Publish(deep_dog_topics::Event("motor/mcp_result"), payload, 0, false);
+    }
+#endif
+}
+
+void DeepDogMotorMqtt::RegisterDataPoints() {
+#if !DEEP_DOG_MOTOR_ENABLE
+    return;
+#else
+    static bool s_done = false;
+    if (s_done) {
+        return;
+    }
+    if (MotorDataPoints_Register()) {
+        s_done = true;
     }
 #endif
 }
@@ -378,6 +389,7 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
     if (!enabled_ || !connected_ || !client_) {
         return false;
     }
+    RegisterDataPoints();  // 电机就绪后懒注册数据点（幂等）
     DeepMotor* motor = motor_ ? motor_ : DeepDogMotorGet();
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", motor != nullptr);
@@ -405,13 +417,12 @@ bool DeepDogMotorMqtt::PublishStatus(bool force) {
         }
     }
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
-    char* s = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!s) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("motor"), s, 0, true);
-    cJSON_free(s);
+    const bool ok = client_->Publish(deep_dog_topics::Status("motor"), payload, 0, true);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();
         pending_publish_ = false;
@@ -436,8 +447,17 @@ bool DeepDogMotorMqtt::PublishTeachingSnapshot(uint8_t motor_id) {
     if (!json) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Event("motor/teaching"), json, 0, false);
+    cJSON* data = cJSON_Parse(json);
     cJSON_free(json);
+    if (!data) {
+        return false;
+    }
+    const std::string payload =
+        deep_dog_envelope::Wrap(data, deep_dog_envelope::SchemaEvent(), client_->settings().device_id);
+    if (payload.empty()) {
+        return false;
+    }
+    const bool ok = client_->Publish(deep_dog_topics::Event("motor/teaching"), payload, 0, false);
     if (ok) {
         ESP_LOGI(TAG, "motor/teaching/snapshot motor_id=%u", (unsigned)motor_id);
     }
@@ -460,9 +480,17 @@ bool DeepDogMotorMqtt::PublishTeachingStatus() {
     if (!json) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("motor/teaching"), json, 0, true);
+    cJSON* data = cJSON_Parse(json);
     cJSON_free(json);
-    return ok;
+    if (!data) {
+        return false;
+    }
+    const std::string payload =
+        deep_dog_envelope::Wrap(data, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
+        return false;
+    }
+    return client_->Publish(deep_dog_topics::Status("motor/teaching"), payload, 0, true);
 #endif
 }
 
@@ -475,7 +503,7 @@ void DeepDogMotorMqtt::ApplyCmd(const char* json) {
         ESP_LOGW(TAG, "motor/cmd ignored (no DeepMotor)");
         return;
     }
-    cJSON* root = cJSON_Parse(json);
+    cJSON* root = deep_dog_envelope::ParseBusiness(json);
     if (!root) {
         return;
     }

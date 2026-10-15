@@ -47,6 +47,11 @@
 | **MOT-04/05** | motor catalog + 轴样例 | [motor/04](./motor/04-handle-motor-catalog.md) · [05](./motor/05-handle-motor-catalog.md) | I08b、MOT-03 | 本轮落地 |
 | **DT-01** | deep-trace 遥测通道 | [mqtt/modules/15-telemetry](./mqtt/modules/15-telemetry.md) | M01 · 云端工位配置 | 本轮落地 |
 | **DT-02** | deep-trace HTTP 配对 | [mqtt/modules/16-http-pairing](./mqtt/modules/16-http-pairing.md) · [N03](./net/N03-wifi-portal-mqtt-broker.md) | M01 · 云端 144 | 本轮落地 |
+| **CFG-01** | 统一配置中心（设备端） | [config/CFG-01](./config/CFG-01-unified-config-center.md) | DT-02 · N03 | **本轮落地** |
+| **CFG-02** | 38/48 引出脚运行时可配置 | [config/CFG-02](./config/CFG-02-ext-pin-runtime-mode.md) | CFG-01 · MOT-01 · M01 | 需求就绪（待实现；体积实测 +22KB） |
+| **DP-00** | 数据点归一化框架 | [docs/interface/04-datapoint-registry](../docs/interface/04-datapoint-registry.md) Phase 0–1 | interop-2 · M01 | 架构就绪，待排期 |
+| **DP-01** | 核心模块迁移（device/system/led/servo） | 同上 Phase 2–3 | DP-00 | 待排期 |
+| **DP-02** | 全模块迁移 + HTTP/MCP 归一化 | 同上 Phase 4–6 | DP-01 | 待排期 |
 | V-P01 | Kiosk / 对话 | [vision/product/P01](./vision/product/P01-kiosk-personalization.md) | S05 | 更后 |
 
 ## 依赖关系

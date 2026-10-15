@@ -37,7 +37,7 @@ Servo_writeTimed(servo, angle, duration_ms);
 
 ## 开关
 
-- `config.h`：`DEEP_DOG_EXT_PIN_MODE = DEEP_DOG_EXT_PIN_PWM`（默认）
+- `config.h`：`DEEP_DOG_EXT_PIN_MODE = DEEP_DOG_EXT_PIN_PWM`（云台/舵机剖面；当前板默认 `CAN`，见 [FEATURE_FLAGS](../FEATURE_FLAGS.md)）
 - `board_features.h`：`DEEP_DOG_SERVO_ENABLE=1`（默认）；`GIMBAL_ENABLE=0`
 
 协议与前端步骤：[swrs/mqtt/modules/10-servo.md](../swrs/mqtt/modules/10-servo.md)。

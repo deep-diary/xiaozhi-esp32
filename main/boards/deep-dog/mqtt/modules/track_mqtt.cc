@@ -1,6 +1,7 @@
 #include "mqtt/modules/track_mqtt.h"
 
 #include "mqtt/mqtt_client.h"
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_config.h"
 #include "mqtt/mqtt_topics.h"
 
@@ -101,7 +102,7 @@ void DeepDogTrackMqtt::OnMessage(const std::string& topic, const std::string& pa
         return;
     }
 
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         ESP_LOGW(TAG, "track/cmd invalid_json");
         return;
@@ -189,18 +190,17 @@ bool DeepDogTrackMqtt::PublishStatus(bool force) {
     cJSON_AddStringToObject(root, "error", err ? err : "");
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("track"), printed, 0, false);
+    const bool ok = client_->Publish(deep_dog_topics::Status("track"), payload, 0, false);
     static int s_log = 0;
     if (s_log < 5 || force) {
         ESP_LOGI(TAG, "track/status enabled=%d following=%d err=%s pub=%d", user_tracking_ ? 1 : 0,
                  following ? 1 : 0, err, ok ? 1 : 0);
     }
     ++s_log;
-    cJSON_free(printed);
     return ok;
 }

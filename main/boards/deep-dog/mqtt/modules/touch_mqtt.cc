@@ -1,5 +1,6 @@
 #include "mqtt/modules/touch_mqtt.h"
 
+#include "mqtt/modules/envelope.h"
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_topics.h"
 #include "touch_btn/touch_button_controller.h"
@@ -155,7 +156,7 @@ void DeepDogTouchMqtt::HandleCmd(const std::string& payload) {
         ESP_LOGW(TAG, "touch/cmd ignored (no controller)");
         return;
     }
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         ESP_LOGW(TAG, "touch/cmd invalid_json");
         return;
@@ -389,13 +390,12 @@ bool DeepDogTouchMqtt::PublishStatus() {
 
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool pub_ok = client_->Publish(deep_dog_topics::Status("touch"), printed, 0, true);
+    const bool pub_ok = client_->Publish(deep_dog_topics::Status("touch"), payload, 0, true);
     ESP_LOGD(TAG, "touch/status mask=0x%02x pub=%d", (unsigned)mask, pub_ok ? 1 : 0);
-    cJSON_free(printed);
     return pub_ok;
 }

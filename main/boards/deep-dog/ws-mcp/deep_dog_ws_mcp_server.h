@@ -27,6 +27,9 @@ public:
     uint16_t Port() const { return port_; }
     const char* Path() const { return DEEP_DOG_WS_MCP_PATH; }
 
+    /** 底层 httpd 句柄（供板层挂载额外 REST 路由，如 /api/datapoints/... ，省内存） */
+    void* HttpdHandle() const { return server_handle_; }
+
     size_t GetClientCount() const;
     void BroadcastMessage(const std::string& message);
 
@@ -53,6 +56,7 @@ public:
     bool IsRunning() const { return false; }
     uint16_t Port() const { return DEEP_DOG_WS_MCP_PORT; }
     const char* Path() const { return DEEP_DOG_WS_MCP_PATH; }
+    void* HttpdHandle() const { return nullptr; }
     size_t GetClientCount() const { return 0; }
     void BroadcastMessage(const std::string&) {}
 };

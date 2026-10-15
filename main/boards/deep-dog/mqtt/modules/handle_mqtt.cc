@@ -2,6 +2,7 @@
 
 #include "mqtt/mqtt_client.h"
 #include "mqtt/mqtt_topics.h"
+#include "mqtt/modules/envelope.h"
 #include "handle/handle_config.h"
 #include "handle/keymap_store.h"
 #include "handle/sources/handle_bt.h"
@@ -202,7 +203,7 @@ bool DeepDogHandleMqtt::ParseSnapshotJson(const std::string& payload, HandleSnap
     if (!out) {
         return false;
     }
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         return false;
     }
@@ -385,7 +386,7 @@ void DeepDogHandleMqtt::HandleInput(const std::string& payload) {
 }
 
 void DeepDogHandleMqtt::HandleCmd(const std::string& payload) {
-    cJSON* root = cJSON_Parse(payload.c_str());
+    cJSON* root = deep_dog_envelope::ParseBusiness(payload);
     if (!root) {
         return;
     }
@@ -508,14 +509,12 @@ bool DeepDogHandleMqtt::PublishKeymap() {
     if (!root) {
         return false;
     }
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("handle/keymap"), printed, 0, true);
-    cJSON_free(printed);
-    return ok;
+    return client_->Publish(deep_dog_topics::Status("handle/keymap"), payload, 0, true);
 }
 
 bool DeepDogHandleMqtt::PublishOutput(int led_r, int led_g, int led_b, float rumble_strong,
@@ -543,13 +542,12 @@ bool DeepDogHandleMqtt::PublishOutput(int led_r, int led_g, int led_b, float rum
     }
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaEvent(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Cmd("handle"), printed, 1, false);
-    cJSON_free(printed);
+    const bool ok = client_->Publish(deep_dog_topics::Cmd("handle"), payload, 1, false);
     if (ok) {
         ESP_LOGI(TAG, "published handle/cmd output rumble=%.2f/%.2f duration=%d", s, w,
                  duration_ms);
@@ -649,13 +647,12 @@ bool DeepDogHandleMqtt::PublishStatus() {
 
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
 
-    char* printed = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!printed) {
+    const std::string payload =
+        deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);
+    if (payload.empty()) {
         return false;
     }
-    const bool ok = client_->Publish(deep_dog_topics::Status("handle"), printed, 0, false);
-    cJSON_free(printed);
+    const bool ok = client_->Publish(deep_dog_topics::Status("handle"), payload, 0, false);
     if (ok) {
         last_publish_us_ = esp_timer_get_time();
     }
