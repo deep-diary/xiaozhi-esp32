@@ -72,6 +72,23 @@
 > `bus_state`（1=RUNNING、2=BUS-OFF）与 `rx_fps`，不要用心跳有无来判断。
 > 固件对 Bus-Off 有**自动恢复**（周期 `DEEP_DOG_CAN_HEALTH_CHECK_MS`，见 `can/can_config.h`）。
 
+## 发送测试帧 + 周期健康日志（CAN 侧自检，不经 MQTT）
+
+心跳帧只证明「上行链路」；要验证「对端能否收到我们发的帧」，用**真正写总线**的发送测试帧：
+
+| 项 | 值 |
+|----|----|
+| 周期 | `DEEP_DOG_CAN_TX_TEST_MS`（`can/can_config.h`，**默认 `1000`**，`0` = 关闭；⚠️ 总线上无人 ACK 时该帧每次失败都会把 TEC 顶满导致 Bus-Off 风暴，现象是"本节点一接入总线，PCAN 就偶发红闪"） |
+| ID | `DEEP_DOG_CAN_TX_TEST_ID`（默认 `0x1F000002`，与心跳 `0x1F000000` 区分） |
+| 帧型 | `DEEP_DOG_CAN_TX_TEST_EXT`（默认 `1`=扩展 / `0`=标准） |
+| data | `seq(4B 大端) + uptime_s(4B 大端)` |
+
+- 写成功 → 镜像到 `status/can/frames`（`dir:"tx"`）并计入 `status/can.tx_total`；
+- 串口每次打印 `CAN TX test #N id=0x… sent/FAILED`（不依赖 MQTT）。
+
+**周期健康日志**（不经 MQTT，串口直读）：每 `DEEP_DOG_CAN_HEALTH_LOG_MS`（默认 `5000`）打印
+`CAN health: state= rx_fps= rx_total= tx_total= rx_err= tx_err= bus_err= bus_off= recover=`。
+
 ## 样例 JSON
 
 **cmd（开透传 + 节流）**

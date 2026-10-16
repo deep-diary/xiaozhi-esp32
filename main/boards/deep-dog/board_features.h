@@ -32,6 +32,19 @@
 
 #if DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_CAN_COMM
 #define DEEP_DOG_MOTOR_ENABLE 0
+/* CAN 透传联调期让出 internal RAM：人脸识别是 S09/F-10 家族最大 internal 消耗，默认关掉。
+ * 需要人脸时：改剖面，或 -DDEEP_DOG_FACE_AI_ENABLE=1 覆盖（下面的 #ifndef 不会覆盖本行）。 */
+#define DEEP_DOG_FACE_AI_ENABLE 0
+/* 单模式编译（CAN 剖面）：38/48 上其它外设栈一律不编入，避免引入无关变量
+ * （引脚重配 / LEDC·RMT 外设 / 常驻任务 / 内存），换外设改剖面重编即可。
+ * 注意：裁掉后 device/info.ext_pins.supported_modes 白名单会相应缩小（前端随之禁用该模式）。 */
+#define DEEP_DOG_UART_ENABLE 0
+#define DEEP_DOG_RS485_ENABLE 0
+#define DEEP_DOG_IO_ENABLE 0
+#define DEEP_DOG_AD_ENABLE 0
+#define DEEP_DOG_LED_ENABLE 0
+#define DEEP_DOG_SERVO_ENABLE 0
+#define DEEP_DOG_GIMBAL_ENABLE 0
 #elif DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_MOTOR
 #define DEEP_DOG_MOTOR_ENABLE 1
 #elif DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_DOG

@@ -37,6 +37,8 @@
   （计数在 `can/can_frame_hub.cc`，与 tunnel/节流无关）
 - Bus-Off 自动恢复：板级 `CanRxTask` 按 `DEEP_DOG_CAN_HEALTH_CHECK_MS` 轮询 → `recover()` + `restart()`
 - 限速默认：`max_hz=100`（匹配 20ms 周期帧总线）
+- **发送测试帧**（真正写总线，验证对端收没收）：`DEEP_DOG_CAN_TX_TEST_MS`（默认 1000）/ `_ID`（0x1F000002）/ `_EXT`（1）
+- **周期健康日志**（不经 MQTT，串口直读）：`DEEP_DOG_CAN_HEALTH_LOG_MS`（默认 5000）
 - 门控：`#if DEEP_DOG_CAN_ENABLE`
 
 ## 验收

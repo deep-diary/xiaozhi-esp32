@@ -179,7 +179,9 @@ void DeepDogCanMqtt::EmitHeartbeat() {
     frame.data[5] = static_cast<uint8_t>(uptime_s >> 16);
     frame.data[6] = static_cast<uint8_t>(uptime_s >> 8);
     frame.data[7] = static_cast<uint8_t>(uptime_s);
-    DeepDogCanNotifyFrame(&frame, 0);
+    // 直接走自身回调，不经 DeepDogCanNotifyFrame —— 否则这条**不写总线**的合成帧会被计入
+    // 链路统计 rx_total/rx_fps，让「总线收帧速率」偏大。
+    OnFrame(&frame, false);
 }
 
 void DeepDogCanMqtt::FrameListener(const CanFrame* frame, int is_tx, void* ctx) {

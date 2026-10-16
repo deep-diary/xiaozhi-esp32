@@ -119,6 +119,21 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
   `id=0x1F000000`，仅走 MQTT 透传、**不写总线**，用于区分「透传链路故障」与「总线无报文」；`0` = 关闭）
 - **`DEEP_DOG_CAN_HEALTH_CHECK_MS`**（`can/can_config.h`，**默认 1000**：轮询 TWAI 状态，
   Bus-Off 自动 `recover()` + `restart()`；次数上报 `status/can.bus_off_count` / `recover_count`）
+- **`DEEP_DOG_CAN_TX_TEST_MS`**（`can/can_config.h`，**默认 1000**：每 1s **真正往总线写**一条
+  `DEEP_DOG_CAN_TX_TEST_ID`（默认 `0x1F000002`，扩展帧）的周期帧，用于验证对端能否收到；
+  `0` = 关闭。⚠️ 总线上无人 ACK 时每次失败都会把 TEC 顶满 → Bus-Off 风暴（现象：本节点一接入
+  总线，PCAN 就偶发红闪）。与 MQTT 心跳区别：心跳**不写总线**）
+- **`DEEP_DOG_CAN_HEALTH_LOG_MS`**（`can/can_config.h`，**默认 5000**：每 5s 串口打印
+  `CAN health: state/rx_fps/rx_total/tx_total/rx_err/tx_err/bus_err/bus_off/recover`，不经 MQTT；
+  联调结束可设 `0` 关闭）
+- **调试期让内存 + 单模式编译（CFG-03 剖面预设）**：`DEEP_DOG_PROFILE=CAN_COMM` 时自动关掉
+  `DEEP_DOG_FACE_AI_ENABLE`（人脸识别，S09/F-10 家族最大 internal 消耗）、并**裁掉 38/48 上其它外设栈**
+  （`UART/RS485/IO/AD/LED/SERVO/GIMBAL` = 0），只编 CAN 栈 —— 避免无关外设（引脚重配 / LEDC·RMT /
+  常驻任务 / 内存）引入干扰；换外设改剖面重编即可。需要人脸时改剖面或 `-DDEEP_DOG_FACE_AI_ENABLE=1` 覆盖。
+  ⚠️ 裁掉后 `device/info.ext_pins.supported_modes` 白名单缩小，前端会相应禁用这些模式。
+- **`DEEP_DOG_CAN_LISTEN_ONLY`**（`can/can_config.h`，**默认 0**）：诊断开关，设 1 时控制器进入
+  `TWAI_MODE_LISTEN_ONLY` —— **不发 ACK / 不发 error flag，物理上不干扰总线**，用于隔离
+  「本节点是否在干扰总线」与「接收链路是否正常」（该模式下写总线一律失败，仅作诊断）。
 - CAN 透传默认值：`tunnel=true`、`allow_tx=true`、`ext_only=false`、`max_hz=100`（`mqtt/modules/can_mqtt.h`
   成员初值，**联调剖面**；`allow_tx=true` 表示网页可注入原始帧，`ext_only=false` 表示标准帧也上报，
   量产/正式版本须改回 `allow_tx=false`、`ext_only=true`）

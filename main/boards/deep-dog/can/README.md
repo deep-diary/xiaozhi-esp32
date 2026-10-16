@@ -131,6 +131,36 @@ MQTT 侧（`mqtt/modules/can_mqtt.*`）默认每 **2000 ms** 注入一条**模�
   （`twai_start`）回到总线。次数上报为 `bus_off_count` / `recover_count`。
 - 判总线健康请用 `bus_state`（1=RUNNING / 2=BUS-OFF）+ `rx_fps`，**不要看心跳有无**（心跳不写总线）。
 
+### 诊断：LISTEN_ONLY（只听，不干扰总线）
+
+`DEEP_DOG_CAN_LISTEN_ONLY`（`can_config.h`，默认 0）：设 1 时控制器以 `TWAI_MODE_LISTEN_ONLY` 启动 ——
+**不发 ACK、不发 error flag**，因此**物理上不可能干扰总线**（写总线一律失败）。
+用于隔离两类问题：「本节点是否在干扰总线」与「接收链路是否正常」：
+
+- 只听模式下 PCAN 恢复全绿、且本节点仍能收到满速帧 → 干扰源就是本节点的**发送通路**（含 ACK 位）。
+- 只听模式下 PCAN 仍红闪 → 红闪与本节点无关（查其它节点）。
+
+### 联调自检：CAN **发送**测试帧 + 周期健康日志
+
+前面那两条都是「MQTT 侧」的自检；下面两条是**纯 CAN 侧**（不经 MQTT，串口即可看），用于
+「对端到底收没收到我们发的帧」。
+
+- **TX 测试帧（真正写总线）**：板级 `CanRxTask` 每 `DEEP_DOG_CAN_TX_TEST_MS`（`can_config.h`，
+  **默认 `1000`**即每 1s 一条；`0` = 关闭）写一条帧：
+  | 项 | 值 |
+  |----|----|
+  | ID | `DEEP_DOG_CAN_TX_TEST_ID`（默认 `0x1F000002`，与 MQTT 心跳 `0x1F000000` 区分） |
+  | 帧型 | `DEEP_DOG_CAN_TX_TEST_EXT`（默认 `1` = 29 位扩展；`0` = 11 位标准） |
+  | data | `seq(4B 大端) + uptime_s(4B 大端)`，DLC=8 |
+  写成功会**镜像**到 MQTT `status/can/frames`（`dir:"tx"`）并计入 `tx_total`；串口每次打印
+  `CAN TX test #N id=0x... sent/FAILED`。**注意**：这是往真实总线注帧，`FAILED` 连续出现说明
+  发送得不到 ACK（对端未应答 / 物理层问题）。
+- **周期健康日志（不经 MQTT）**：每 `DEEP_DOG_CAN_HEALTH_LOG_MS`（**默认 `5000`**；`0` = 关闭）打印一行：
+  ```text
+  CAN health: state=1 rx_fps=12.4 rx_total=2049 tx_total=13 rx_err=128 tx_err=0 bus_err=6801896 bus_off=0 recover=0
+  ```
+  其中 `rx_fps` 由板级按日志周期窗口计算（= 该窗口内 `rx_total` 增量 / 周期）。
+
 ---
 
 ## 在 deep-dog 中的角色

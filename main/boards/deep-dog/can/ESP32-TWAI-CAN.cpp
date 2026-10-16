@@ -1,4 +1,5 @@
 #include "config.h"
+#include "can/can_config.h"
 /* deep-dog feature gate: whole-file */
 #if DEEP_DOG_CAN_ENABLE
 
@@ -235,6 +236,10 @@ bool TwaiCAN::begin(TwaiSpeed              twaiSpeed,
                                           .intr_flags     = ESP_INTR_FLAG_LEVEL1,
                                     #endif
                                           .general_flags  = {0}};
+#if DEEP_DOG_CAN_LISTEN_ONLY
+        // [deep-dog] 诊断：只听模式（不发 ACK / 不发 error flag），用于隔离「本节点是否干扰总线」
+        g_config.mode = TWAI_MODE_LISTEN_ONLY;
+#endif
         // clang-format off
         twai_timing_config_t t_config[TWAI_SPEED_SIZE] = {
             #if (SOC_TWAI_BRP_MAX > 256)
@@ -259,9 +264,34 @@ bool TwaiCAN::begin(TwaiSpeed              twaiSpeed,
 
         twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
+#if DEEP_DOG_CAN_TIMING_875
+        // [deep-dog] 1 Mbps 改用 **87.5% 采样点**（8 Tq：tseg_1=6, tseg_2=1），与 CiA 建议、
+        // PCAN 等多数对端默认一致。IDF 默认的 1MBITS 是 75%（tseg_1=5,tseg_2=2）；
+        // 采样点与总线其余节点不一致时，典型症状是「**能收到、发不出去**」——
+        // 发送时在本节点采样点读 ACK 槽读成隐性 → ACK 错误 → TEC +8 → 顶到 256 → Bus-Off。
+        twai_timing_config_t t_1m_875 = {
+            .clk_src = TWAI_CLK_SRC_DEFAULT,
+            .quanta_resolution_hz = 8000000,  // Tq = 125ns
+            .brp = 0,
+            .prop_seg = 0,
+            .tseg_1 = 6,   // 采样点 = (1+6)/8 = 87.5%
+            .tseg_2 = 1,   // 1+6+1 = 8 Tq = 1µs @1Mbps
+            .sjw = 1,
+            .ssp_offset = 0,
+            .triple_sampling = false,
+        };
+#endif
+
         if(!gConfig) gConfig = &g_config;
-        if(!tConfig) tConfig = &t_config[speed];
         if(!fConfig) fConfig = &f_config;
+        if(!tConfig) {
+            tConfig = &t_config[speed];
+#if DEEP_DOG_CAN_TIMING_875
+            if(speed == TWAI_SPEED_1000KBPS) {
+                tConfig = &t_1m_875;
+            }
+#endif
+        }
 
         // Install TWAI driver
         if(twai_driver_install(gConfig, tConfig, fConfig) == ESP_OK) {

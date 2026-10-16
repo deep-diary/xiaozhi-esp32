@@ -38,11 +38,56 @@
 #endif
 
 /**
+ * CAN 1 Mbps 采样点：**默认 0** = 用 IDF `TWAI_TIMING_CONFIG_1MBITS()`，即
+ * **75% 采样点 / Tq=125ns / 8Tq**（tseg_1=5, tseg_2=2）—— 实测与 PCAN 配置一致，故保持默认。
+ * 1 = 换成 87.5%（8Tq：tseg_1=6, tseg_2=1），仅当对端确为 87.5% 时才需要。
+ * 采样点不一致时，典型症状是「能收到、发不出去」（发送读 ACK 槽出错 → TEC 顶满 → Bus-Off）。
+ */
+#ifndef DEEP_DOG_CAN_TIMING_875
+#define DEEP_DOG_CAN_TIMING_875 0
+#endif
+
+/**
+ * **LISTEN_ONLY 诊断模式**：1 = 控制器只听（`TWAI_MODE_LISTEN_ONLY`）——
+ * **不发 ACK、不发 error flag**，物理上不可能干扰总线。
+ * 用于隔离「本节点是否在干扰总线」与「接收链路是否正常」；
+ * 该模式下写总线一律失败（`writeFrame` 返回 false），仅作诊断用。
+ */
+#ifndef DEEP_DOG_CAN_LISTEN_ONLY
+#define DEEP_DOG_CAN_LISTEN_ONLY 0
+#endif
+
+/**
  * CAN 总线健康检查周期（ms）：轮询 TWAI 状态，Bus-Off / Stopped 时自恢复。
  * TWAI 进入 Bus-Off 后不会自愈，必须 twai_initiate_recovery + twai_start，否则永久收不到帧。
  */
 #ifndef DEEP_DOG_CAN_HEALTH_CHECK_MS
 #define DEEP_DOG_CAN_HEALTH_CHECK_MS 1000
+#endif
+
+/**
+ * CAN **周期发送帧**：真正往总线写帧（与 MQTT 心跳 0x1F000000 不同，后者不写总线）。
+ * 周期 ms，**默认 1000**（设备正常按 1 帧/s 外发）；0 = 关闭。
+ * ⚠️ 若总线上无人 ACK（或总线被某节点重传风暴占满），发送会失败并退避（见板级 CanRxTask），
+ *    持续失败时 TEC 会顶满 → Bus-Off。
+ */
+#ifndef DEEP_DOG_CAN_TX_TEST_MS
+#define DEEP_DOG_CAN_TX_TEST_MS 1000
+#endif
+#ifndef DEEP_DOG_CAN_TX_TEST_ID
+#define DEEP_DOG_CAN_TX_TEST_ID 0x1F000002UL
+#endif
+/** 1 = 29 位扩展帧；0 = 11 位标准帧（对端只认标准帧时用 0） */
+#ifndef DEEP_DOG_CAN_TX_TEST_EXT
+#define DEEP_DOG_CAN_TX_TEST_EXT 1
+#endif
+
+/**
+ * CAN 周期健康日志（串口直读，**不经 MQTT**）：state/rx_fps/rx_total/tx_total/rx_err/tx_err/
+ * bus_err/bus_off/recover。周期 ms，**默认 5000**；0 = 关闭（联调结束可关）。
+ */
+#ifndef DEEP_DOG_CAN_HEALTH_LOG_MS
+#define DEEP_DOG_CAN_HEALTH_LOG_MS 5000
 #endif
 
 /** TWAI 队列深度（增大可降低高频下发 send timeout） */

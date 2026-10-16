@@ -141,9 +141,11 @@
 #if DEEP_DOG_MQTT_ENABLE
 #include "mqtt/deep_dog_mqtt.h"
 #include "pairing/pairing_mcp.h"
+// [deep-dog] 板级诊断 MCP 与 FACE_AI 无关：原先误置于 #if DEEP_DOG_FACE_AI_ENABLE 内，
+// 关掉人脸（CFG-03 CAN_COMM 剖面）会因调用点缺声明而编译失败。
+#include "board_diagnostics_mcp.h"
 #if DEEP_DOG_FACE_AI_ENABLE
 #include "face_mcp.h"
-#include "board_diagnostics_mcp.h"
 #endif
 #include "ws-mcp/datapoint_mcp.h"
 #endif
@@ -351,6 +353,15 @@ private:
         CanFrame frame;
         uint32_t next_health_ms = 0;
         uint32_t recover_attempts = 0;
+#if DEEP_DOG_CAN_TX_TEST_MS > 0
+        uint32_t next_tx_test_ms = 0;
+        uint32_t tx_test_seq = 0;
+        uint32_t tx_fail_streak = 0;  // 连续发送不健康次数 → 指数退避
+#endif
+#if DEEP_DOG_CAN_HEALTH_LOG_MS > 0
+        uint32_t next_health_log_ms = 0;
+        uint32_t last_log_rx_total = 0;
+#endif
         while (1) {
             if (ESP32Can.readFrame(&frame, 50)) {
                 DeepDogCanNotifyFrame(&frame, 0);
@@ -411,6 +422,70 @@ private:
                     ESP_LOGI(TAG, "CAN back to RUNNING after %lu recovery attempt(s)", (unsigned long)recover_attempts);
                     recover_attempts = 0;
                 }
+
+#if DEEP_DOG_CAN_HEALTH_LOG_MS > 0
+                // 周期健康日志：串口直读，不依赖 MQTT（便于设备离线时仍能看 CAN 健康）
+                if ((int32_t)(now_ms - next_health_log_ms) >= 0) {
+                    next_health_log_ms = now_ms + DEEP_DOG_CAN_HEALTH_LOG_MS;
+                    DeepDogCanHubStats hs {};
+                    DeepDogCanGetStats(&hs);
+                    const uint32_t rx_delta = hs.rx_frames - last_log_rx_total;
+                    last_log_rx_total = hs.rx_frames;
+                    ESP_LOGI(TAG,
+                             "CAN health: state=%lu rx_fps=%.1f rx_total=%lu tx_total=%lu rx_err=%lu tx_err=%lu "
+                             "bus_err=%lu bus_off=%lu recover=%lu",
+                             (unsigned long)can_state, (double)rx_delta * 1000.0 / DEEP_DOG_CAN_HEALTH_LOG_MS,
+                             (unsigned long)hs.rx_frames, (unsigned long)hs.tx_frames,
+                             (unsigned long)ESP32Can.rxErrorCounter(), (unsigned long)ESP32Can.txErrorCounter(),
+                             (unsigned long)ESP32Can.busErrCounter(), (unsigned long)hs.bus_off_events,
+                             (unsigned long)hs.recover_count);
+                }
+#endif
+
+#if DEEP_DOG_CAN_TX_TEST_MS > 0
+                // 周期发送（默认 1s 一条）：真正写总线。
+                // **退避门控**：仅 RUNNING 时发；发送不健康（TEC≥96 或写失败）则指数退避（2/4/8/16s）。
+                // 目的：避免「发→TEC 顶满→Bus-Off→1s 后恢复→再发」的自激循环持续污染总线
+                //      （现象：本节点一接入，PCAN 就红闪、整条总线报文几乎停摆）。
+                if ((int32_t)(now_ms - next_tx_test_ms) >= 0) {
+                    if (can_state != TWAI_STATE_RUNNING) {
+                        next_tx_test_ms = now_ms + 1000;  // 不在总线上：本次跳过，1s 后再看
+                    } else {
+                        CanFrame tx {};
+                        tx.identifier = DEEP_DOG_CAN_TX_TEST_ID;
+                        tx.extd = DEEP_DOG_CAN_TX_TEST_EXT ? 1 : 0;
+                        tx.rtr = 0;
+                        tx.data_length_code = 8;
+                        const uint32_t seq = ++tx_test_seq;
+                        const uint32_t up_s = now_ms / 1000;
+                        tx.data[0] = static_cast<uint8_t>(seq >> 24);
+                        tx.data[1] = static_cast<uint8_t>(seq >> 16);
+                        tx.data[2] = static_cast<uint8_t>(seq >> 8);
+                        tx.data[3] = static_cast<uint8_t>(seq);
+                        tx.data[4] = static_cast<uint8_t>(up_s >> 24);
+                        tx.data[5] = static_cast<uint8_t>(up_s >> 16);
+                        tx.data[6] = static_cast<uint8_t>(up_s >> 8);
+                        tx.data[7] = static_cast<uint8_t>(up_s);
+                        const bool queued = ESP32Can.writeFrame(tx, 20);
+                        const uint32_t tec = ESP32Can.txErrorCounter();
+                        if (queued && tec < 96) {
+                            tx_fail_streak = 0;
+                            next_tx_test_ms = now_ms + DEEP_DOG_CAN_TX_TEST_MS;
+                            ESP_LOGW(TAG, "CAN TX test #%lu id=0x%08lX ext=%d sent", (unsigned long)seq,
+                                     (unsigned long)tx.identifier, (int)tx.extd);
+                            DeepDogCanNotifyFrame(&tx, 1);  // 镜像到 status/can/frames + tx_total
+                        } else {
+                            ++tx_fail_streak;
+                            const uint32_t shift = tx_fail_streak > 4 ? 4 : tx_fail_streak;
+                            const uint32_t backoff = 1000u << shift;  // 2/4/8/16s，封顶 16s
+                            next_tx_test_ms = now_ms + backoff;
+                            ESP_LOGW(TAG, "CAN TX test #%lu queued=%d tec=%lu → backoff %lums (streak=%lu)",
+                                     (unsigned long)seq, queued ? 1 : 0, (unsigned long)tec, (unsigned long)backoff,
+                                     (unsigned long)tx_fail_streak);
+                        }
+                    }
+                }
+#endif
             }
             vTaskDelay(pdMS_TO_TICKS(1));
         }
