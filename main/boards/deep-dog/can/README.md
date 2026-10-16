@@ -121,6 +121,16 @@ MQTT 侧（`mqtt/modules/can_mqtt.*`）默认每 **2000 ms** 注入一条**模�
 周期宏 `DEEP_DOG_CAN_HEARTBEAT_MS`（`can_config.h`，`0` = 关闭）；联调期 `tunnel` / `allow_tx` 默认开启，
 详见 [`../docs/requirements/mqtt/modules/12-can.md`](../docs/requirements/mqtt/modules/12-can.md)。
 
+### 链路质量与 Bus-Off 自动恢复
+
+- **速度指标**：`status/can.rx_fps` = 最近窗口从总线读到的帧数/秒（`rx_total`/`tx_total` 为累计）。
+  与是否开 tunnel/节流无关，用于量化物理层：显著低于总线实际帧率即丢帧/信号异常。
+- **Bus-Off 自动恢复**：TWAI 进入 Bus-Off 后**不会自愈**。板级 `CanRxTask` 按
+  `DEEP_DOG_CAN_HEALTH_CHECK_MS`（`can_config.h`，默认 1000ms）轮询状态：
+  `BUS_OFF` → `recover()`（`twai_initiate_recovery`）；恢复后会停在 `STOPPED` → 再 `restart()`
+  （`twai_start`）回到总线。次数上报为 `bus_off_count` / `recover_count`。
+- 判总线健康请用 `bus_state`（1=RUNNING / 2=BUS-OFF）+ `rx_fps`，**不要看心跳有无**（心跳不写总线）。
+
 ---
 
 ## 在 deep-dog 中的角色

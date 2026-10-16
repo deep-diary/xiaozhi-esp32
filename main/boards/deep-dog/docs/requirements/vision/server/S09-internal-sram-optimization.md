@@ -6,7 +6,7 @@
 | 优先级 | P1（稳定性 / 可扩展性；非阻塞当前功能交付） |
 | 依赖 | [S04](./S04-local-face-numeric-id.md) · [S05](./S05-immich-real-name.md) · [S08](./S08-rtsp-face-wdt-mitigation.md) · [01-device MQTT](../../mqtt/modules/01-device.md) · [N01 SNTP](../../net/N01-sntp-clock-sync.md) |
 | 代码落点 | `face_ai/*` · `esp_sparkbot_board.cc` · `mqtt/memory_report.*` · `sdkconfig.defaults.esp32s3` · `vision/vision_frame_hub.cc` · `http-server/*` |
-| 基线状态 | **MEM-01 已落地**（带实测偏差修正）；**MEM-02 复核：已满足**；**MEM-04 已实测证伪**（勿按原文实施）；MEM-05/06 待评估（见 §5 状态列） |
+| 基线状态 | **MEM-01 已落地**（带实测偏差修正）；**MEM-02 复核：已满足**；**MEM-04 已实测证伪**（勿按原文实施）；**MEM-03 / MEM-08 已落地（2026-10-16，板级任务栈 −2KB + internal 回退门控）**；MEM-05/06 待评估（见 §5 状态列） |
 | 观测工具 | MCP `self.board.diagnostics` · MQTT `status/device` · `scripts/capture_deep_dog_baseline.sh` |
 
 ## 1. 背景
@@ -37,6 +37,9 @@ ESP32-S3 deep-dog（8MB PSRAM + ~400KB internal 池）在 **人脸 + 板级 MQTT
 | WS-MCP + 数据点 REST 起动后（~14.3s） | **~5.1 KB** | **~1.8 KB** | — | **httpd 本身吃掉约 5KB internal**（4096 栈 + TCB/会话） |
 | VisionHub 起动后（~30s） | ~4.6 KB | ~1.8 KB | — | MEM-01 门控后启动；起动本身仍成功（相机/JPEG 缓冲走 PSRAM） |
 | 稳态 idel（~42s） | **~8.7 KB** | — | 163 B | `SystemInfo: sram(internal): free=8659`；PSRAM free ~7.3MB |
+| 稳态（2026-10-16 复测，MEM-01 后 / MEM-03·08 前，face off） | **~13.3 KB** | **~5.6 KB** | **123 B** | 实测 `mem.internal: free=13303 largest_free=5632 total=404035`（WS MCP `self.board.diagnostics`，MQTT/WS-MCP/VisionHub 已起，>60s）；`min=123B` 说明**开机峰值**仍会把 internal 打到百字节级（§4 故障链），与 face 开关无关 |
+| 稳态（2026-10-16 复测，MEM-03·08 后，face off） | 10.6–12.6 KB | 4.0 KB | **1687 B** | 同法采样：`free=10615~11503 largest_free=4096`；`cfg_sync` hwm 4960/7168、`httpd` hwm 932/3072（无 overflow）。**注**：`free`/`largest` 随机启动、WS 会话数波动（同一次开机两次采样差 ~0.9KB），跨 boot 差值不可直接当作收益；MEM-03 的收益是**确定性的栈分配 −2KB**。本次 `min` 从 123B 升到 1687B（开机峰值），但样本量不足，勿据此下结论 |
+
 
 > 关键结论：**WS-MCP 的 httpd 常驻约 5KB internal**；其「起不来」时（见 F-13）反而显示 free≈10KB ——
 > 即 WS-MCP 可用性与 internal 余量互为代价。要同时满足 face / VisionHub / WS-MCP，必须靠 §5 的净优化项。
@@ -130,10 +133,20 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 
 #### MEM-03 · 栈高水位审计 + trim
 
+**状态：✅ 已落地（2026-10-16，按实测稳态 hwm 裁剪板级任务）**
+
+实测方法：设备烧录后跑 `scripts/deep_dog/deep_dog_device_audit.py --device-ip <IP> --via none`（走 WS MCP `self.board.diagnostics`），
+取**稳态**（MQTT 已连、WS-MCP/VisionHub 已起，>60s）的 `tasks[].stack_hwm`。
+裁剪规则：本文 §5 —— **仅当 hwm 余量 >25%**；裁剪后仍须留 >512B（本次实际留 >1KB）。
+
 | 项 | 内容 |
 |----|------|
-| 预期收益 | 每任务可省 0.5～4KB（视 hwm） |
-| 改动 | 启用/确认 `CONFIG_FREERTOS_USE_TRACE_FACILITY`；用 MCP diagnostics 读 `tasks[].stack_hwm`，对照 `memory_report.cc` `LookupStackHint` 调整：`face_facedb` 6144→5120、`face_persist` 3072→2560、`dog_post_act` 4096→3072（仅当 hwm 余量 >25%） |
+| 改动① | `config_center/config_manager.cc` `kTaskStack` **8192 → 7168**（`cfg_sync`：hwm=5992，余量 26.9%，裁后余 1176B） |
+| 改动② | `ws-mcp/deep_dog_ws_mcp_server.cc` `config.stack_size` **4096 → 3072**（`httpd`：hwm=1964，余量 52%，裁后余 1108B；**顺带降低启动所需连续 internal**，缓解 F-13 的 `largest_int=3584 < 4096`） |
+| 收益 | 常驻 internal **−2KB**（两项均为常驻任务栈） |
+| 实测不裁（余量不足 25%） | `mqtt_reconn` 6144/hwm=5400（余 12%）、`touch_btn_task` 4096/hwm=3120（余 23.8%） |
+| 无数据不裁 | `face_persist` / `face_facedb` / `face_boot` / `dog_post_act` —— 当前 `DEEP_DOG_FACE_AI_DEFAULT_ENABLED=0`，face 任务不常驻，`dog_post_act` 为瞬时任务，均取不到稳态 hwm；**不得凭推测裁剪** |
+| 非板级候选（需另行决策） | 实测余量 >25% 但不在 `main/boards/deep-dog/` 内、或为项目级 sdkconfig：`opus_codec` 24576/hwm=16736（**−4KB 潜力**，`main/audio/audio_service.cc`）、`audio_input` 8192/hwm=4616（−2KB，同文件）、`mqtt_task`(esp-mqtt) 6144/hwm=4484（`CONFIG_MQTT_TASK_STACK_SIZE`）、`esp_timer` 8192/hwm=4960（`CONFIG_ESP_TIMER_TASK_STACK_SIZE`，⚠ 承载 IMU 等回调，改前须压测）。按板级隔离规则，这些属公共/框架路径，仅在上表收益耗尽后再评估 |
 | 风险 | 栈过小 → 运行时 overflow；**必须**改一项测一项 |
 | 验收 | 压测（face+RTSP+Immich）无 stack overflow；hwm 仍 >512 字节余量 |
 
@@ -196,12 +209,17 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 
 #### MEM-08 · internal 紧张时禁止 heap fallback
 
+**状态：✅ 已落地（2026-10-16）**
+
 | 项 | 内容 |
 |----|------|
-| 预期收益 | 避免碎片化恶化 |
-| 改动 | `immich_client.cc` / `face_ai_runtime.cc`：当 `free_internal < 32KB` 时 multipart/JPEG **不** fallback `MALLOC_CAP_INTERNAL`，直接 skip + 日志 |
-| 风险 | Immich 上传 transient 失败（可出镜重试，见 S05） |
-| 验收 | internal min 不再因 Immich 上传跌破 512B；upload 仍可通过 PSRAM 路径成功 |
+| 预期收益 | 避免 internal 碎片化恶化（大缓冲不再切走 internal 连续块） |
+| 阈值 | 新增 `DEEP_DOG_FACE_INTERNAL_FALLBACK_MIN_FREE`（`face_ai_config.h`，默认 **32KB**，与 `memory_report.cc` 的 `low_internal_heap` 阈值一致） |
+| 改动（实际） | 新增共用判定 `DeepDogInternalFallbackAllowed()`（`face_ai/face_task_util.h`）。以下 5 处 PSRAM 失败后的 `MALLOC_CAP_INTERNAL` 回退改为**先过阈值判定**，不满足则直接跳过并打日志（不分配）：<br>① `face_ai_runtime.cc` `CropFaceToJpeg` crop 缓冲；② 同函数裁剪脸 JPEG 副本；③ `FullFrameToJpeg` 整帧 JPEG 副本；④ `immich_client.cc` `HttpEvent` 响应缓冲 `realloc`；⑤ `immich_client.cc` multipart 请求体。 |
+| 不改 | 人脸检测送帧副本（`face_ai_runtime.cc` `SubmitFrame`，非 multipart/JPEG，且 PSRAM 充足时不会走回退）；`dog_face_ai` / `vision_hub` 等 PSRAM 栈任务创建（`DeepDogFaceTaskCreate` 已优先 PSRAM）。 |
+| 风险 | Immich 上传/取名单在 internal 紧张时会更早失败（可出镜重试，见 S05；`DEEP_DOG_FACE_IMMICH_BACKOFF_S` 已退避） |
+| 验收 | internal 低水位（free<32KB）时日志出现 `internal fallback skipped`（而非把 internal 吃到 <512B）；PSRAM 路径不受影响，`immich jpeg ready` / `upload ok` 在 PSRAM 充足时仍出现 |
+
 
 ---
 

@@ -49,6 +49,7 @@
 | **DT-02** | deep-trace HTTP 配对 | [mqtt/modules/16-http-pairing](./mqtt/modules/16-http-pairing.md) · [N03](./net/N03-wifi-portal-mqtt-broker.md) | M01 · 云端 144 | 本轮落地 |
 | **CFG-01** | 统一配置中心（设备端） | [config/CFG-01](./config/CFG-01-unified-config-center.md) | DT-02 · N03 | **本轮落地** |
 | **CFG-02** | 38/48 引出脚运行时可配置 | [config/CFG-02](./config/CFG-02-ext-pin-runtime-mode.md) | CFG-01 · MOT-01 · M01 | **P1 已落地**（设备端）；后端模板/全模式实机回归待办 |
+| **CFG-03** | 编译期联调剖面开关 | [config/CFG-03](./config/CFG-03-compile-time-profiles.md) | CFG-02 · MOT-02 · MOT-03 | **P1 已落地**（默认剖面 = CAN 通讯联调；CAN 收帧与 MOTOR 解耦） |
 | **DP-00** | 数据点归一化框架 | [docs/interface/04-datapoint-registry](../interface/04-datapoint-registry.md) Phase 0–1 | interop-2 · M01 | 架构就绪，待排期 |
 | **DP-01** | 核心模块迁移（device/system/led/servo） | 同上 Phase 2–3 | DP-00 | 待排期 |
 | **DP-02** | 全模块迁移 + HTTP/MCP 归一化 | 同上 Phase 4–6 | DP-01 | 待排期 |

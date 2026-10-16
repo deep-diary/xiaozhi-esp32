@@ -6,8 +6,27 @@
 
 | 文件 | 职责 |
 |------|------|
-| [`config.h`](./config.h) | 硬件 GPIO + **自由引出脚成对模式** `DEEP_DOG_EXT_PIN_MODE` |
-| [`board_features.h`](./board_features.h) | 分层 ENABLE：**引出脚外设**（CAN/UART/IO/LED…）→ 产品链 → **与脚位无关** |
+| [`config.h`](./config.h) | 硬件 GPIO + **自由引出脚成对模式** `DEEP_DOG_EXT_PIN_MODE`（CAN 产品链剖面下由剖面顺带派生，见下） |
+| [`board_features.h`](./board_features.h) | 顶部 **`DEEP_DOG_PROFILE` 联调剖面**（改这一行）+ 分层 ENABLE：**引出脚外设**（CAN/UART/IO/LED…）→ 产品链 → **与脚位无关** |
+
+**日常最先改的是剖面**（见 [`docs/requirements/config/CFG-03`](./docs/requirements/config/CFG-03-compile-time-profiles.md)）：
+
+| `DEEP_DOG_PROFILE` | CAN | MOTOR | DOG | ARM | 隐含 `EXT_PIN_MODE` | 适用 |
+|--------------------|-----|-------|-----|-----|---------------------|------|
+| `DEEP_DOG_PROFILE_CAN_COMM`（**默认**） | 1 | 0 | 0 | 0 | `CAN` | CAN 透传/总线联调；**不背电机栈**（省 `DeepMotor` + `can_rx` 4KB 栈） |
+| `DEEP_DOG_PROFILE_MOTOR` | 1 | 1 | 0 | 0 | `CAN` | 单电机调试 |
+| `DEEP_DOG_PROFILE_DOG` | 1 | 1 | 1 | 0 | `CAN` | 四足运控 |
+| `DEEP_DOG_PROFILE_FULL` | 默认值 | 1 | 0 | 0 | **不干预**（沿用 `config.h`） | 等价于"不设剖面"，按下面 `*_ENABLE` 默认值 |
+
+剖面块只做**预设赋值**，下方 `#ifndef` 默认值与钳位逻辑不变，仍可用 `-DDEEP_DOG_MOTOR_ENABLE=1` 单独覆盖。
+剖面还会**顺带定掉编译期兜底引出脚模式**（CFG-03 §3.2）：`board_features.h` 里 `#undef` 后重定义
+`DEEP_DOG_EXT_PIN_MODE` / `*_MODE_STR`（因为本文件是 `config.h` 在 mode 与 STR 之后才 include 的），
+免去"裁 CAN 却忘了改 `config.h` 默认模式 → 首启 apply 失败回滚 `none`"。要手工指定 mode 就选 `PROFILE_FULL`。
+
+> **CAN 收帧不随 MOTOR 关闭而消失**（CFG-03 §3.3）：`can_rx` 任务的门控已从
+> `CAN_ENABLE && MOTOR_ENABLE` 放宽为 `CAN_ENABLE`，无电机时任务参数为 `nullptr`，
+> 仅跳过"帧 → 电机状态解算"。`CAN_ENABLE=1` 时 tunnel / `status/can` / Bus-Off 自愈**全部保留**。
+> 若用 `PROFILE_FULL` + 手工裁掉 `CAN_ENABLE`，则须自查兜底模式：把 `DEEP_DOG_EXT_PIN_MODE` 设为 `NONE`（否则首启 apply 失败回滚）。
 
 **云台 vs 裸舵机（同脚二选一，编译期）**：`board_features.h` 里的 `DEEP_DOG_GIMBAL_ENABLE`（默认 1，`PWM` 生效模式下初始化云台）。不要单独改底层 `Servo.c` 开关；驱动随 `GIMBAL|SERVO` 自动编入。模块侧请 `#include "config.h"`，**禁止**直接 include `board_features.h`（否则 `*_AVAILABLE` 未定义会被当成 0，误关云台）。
 
@@ -66,7 +85,7 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 
 `leg/`、`trajectory/` 属于四足步态，随 **DOG** 使用；单电机调试不必开 DOG。
 
-板级初始化（`esp_sparkbot_board.cc`）按层调用：`InitializeCan` → `DeepMotor` + RX 任务 →（可选）`DogControl` / `Arm` 占位。
+板级初始化（`esp_sparkbot_board.cc`）按层调用：`InitializeCan` →（**`CAN_ENABLE=1` 即建**）`can_rx` 收帧任务 +（`MOTOR_ENABLE=1` 时）`DeepMotor` →（可选）`DogControl` / `Arm` 占位。
 
 > 说明：`can/`、`motor/`、`dog/`、`leg/`、`trajectory/` 的实现 TU 用整文件 `#if DEEP_DOG_*_ENABLE` 门控（`WHOLE_ARCHIVE` 下空 TU 几乎不占 flash）。调用侧（板级初始化 / MCP / HTTP 狗 API / 触摸）同步 `#if`。改开关后普通重编即可，无需改 CMake。
 
@@ -77,7 +96,8 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 
 | 剖面 | EXT_PIN | CAN | MOTOR | DOG | ARM | SERVO/GIMBAL | 说明 |
 |------|---------|-----|-------|-----|-----|--------------|------|
-| **单电机（当前默认）** | `CAN` | 1 | 1 | 0 | 0 | 0 | TWAI + DeepMotor + can/motor MQTT + handle motor/轴；GPIO38(TX)/48(RX) |
+| **CAN 通讯联调（当前默认）** | `CAN` | 1 | **0** | 0 | 0 | 0 | `PROFILE_CAN_COMM`：TWAI + `can_rx` 收帧 + can MQTT 透传/心跳/自愈；**无电机栈**；GPIO38(TX)/48(RX) |
+| 单电机 | `CAN` | 1 | 1 | 0 | 0 | 0 | `PROFILE_MOTOR`：TWAI + DeepMotor + can/motor MQTT + handle motor/轴；GPIO38(TX)/48(RX) |
 | 云台 | `PWM` | 0 | 0 | 0 | 0 | 0/1 | 产品 pan/tilt MQTT + 手柄 keymap；GPIO38/48 |
 | 舵机调试 | `PWM` | 0 | 0 | 0 | 0 | **1/0** | 2 路裸舵机 MQTT/MCP（与云台互斥） |
 | 灯带联调 | `LED` | 0 | 0 | 0 | 0 | 0 | `LED_ENABLE=1`；DIN=`gpio_a`(38) |
@@ -97,8 +117,10 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 - `DEEP_DOG_HANDLE_ENABLE`（云台剖面默认 1；瘦剖面可关）
 - **`DEEP_DOG_CAN_HEARTBEAT_MS`**（`can/can_config.h`，**默认 2000**：每 2 s 注入 1 条模拟 RX 心跳帧
   `id=0x1F000000`，仅走 MQTT 透传、**不写总线**，用于区分「透传链路故障」与「总线无报文」；`0` = 关闭）
-- CAN 透传默认值：`tunnel=true`、`allow_tx=true`、`ext_only=false`（`mqtt/modules/can_mqtt.h` 成员初值，
-  **联调剖面**；`allow_tx=true` 表示网页可注入原始帧，`ext_only=false` 表示标准帧也上报，
+- **`DEEP_DOG_CAN_HEALTH_CHECK_MS`**（`can/can_config.h`，**默认 1000**：轮询 TWAI 状态，
+  Bus-Off 自动 `recover()` + `restart()`；次数上报 `status/can.bus_off_count` / `recover_count`）
+- CAN 透传默认值：`tunnel=true`、`allow_tx=true`、`ext_only=false`、`max_hz=100`（`mqtt/modules/can_mqtt.h`
+  成员初值，**联调剖面**；`allow_tx=true` 表示网页可注入原始帧，`ext_only=false` 表示标准帧也上报，
   量产/正式版本须改回 `allow_tx=false`、`ext_only=true`）
 
 引出脚外设 ENABLE 见上表（`CAN`/`UART`/`IO`/`LED` 等）；**灯带只用 `LED_ENABLE`，不用 `IO_ENABLE`**。

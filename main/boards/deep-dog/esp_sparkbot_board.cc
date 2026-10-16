@@ -288,7 +288,7 @@ private:
 #if DEEP_DOG_MOTOR_ENABLE
     DeepMotor* deep_motor_ = nullptr;
 #endif
-#if DEEP_DOG_CAN_ENABLE && DEEP_DOG_MOTOR_ENABLE
+#if DEEP_DOG_CAN_ENABLE
     TaskHandle_t can_rx_task_handle_ = nullptr;
 #endif
 #if DEEP_DOG_IMU_ENABLE
@@ -333,7 +333,7 @@ private:
     }
 #endif
 
-#if DEEP_DOG_CAN_ENABLE && DEEP_DOG_MOTOR_ENABLE
+#if DEEP_DOG_CAN_ENABLE
     /**
      * CAN RX 任务 + **总线健康守护**。
      *
@@ -343,7 +343,11 @@ private:
      * 一旦 Bus-Off（收发器/接线异常、无 ACK、错误计数累积）就**永久收不到帧到重启**。
      */
     static void CanRxTask(void* arg) {
+#if DEEP_DOG_MOTOR_ENABLE
         DeepMotor* motor = static_cast<DeepMotor*>(arg);
+#else
+        (void)arg;  // CFG-03：无电机栈时仅做收帧透传（arg 为 nullptr）
+#endif
         CanFrame frame;
         uint32_t next_health_ms = 0;
         uint32_t recover_attempts = 0;
@@ -361,6 +365,7 @@ private:
                          frame.data[1], frame.data[2], frame.data[3], frame.data[4], frame.data[5], frame.data[6],
                          frame.data[7]);
 #endif
+#if DEEP_DOG_MOTOR_ENABLE
                 if (motor) {
                     if (motor->processCanFrame(frame)) {
 #if DEEP_DOG_CAN_RX_HEX_LOG
@@ -379,6 +384,7 @@ private:
 #endif
                     }
                 }
+#endif  // DEEP_DOG_MOTOR_ENABLE
             }
 
             const uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
@@ -387,15 +393,21 @@ private:
                 const uint32_t can_state = ESP32Can.canState();
                 if (can_state == TWAI_STATE_BUS_OFF) {
                     ++recover_attempts;
+                    DeepDogCanCountBusOff();
                     const bool ok = ESP32Can.recover();
-                    ESP_LOGW(TAG, "CAN bus-off: recovery attempt %lu ok=%d (bus_err=%lu rx_err=%lu tx_err=%lu)",
-                             (unsigned long)recover_attempts, ok ? 1 : 0, (unsigned long)ESP32Can.busErrCounter(),
-                             (unsigned long)ESP32Can.rxErrorCounter(), (unsigned long)ESP32Can.txErrorCounter());
+                    const uint32_t after = ESP32Can.canState();
+                    // 注意：twai_initiate_recovery/twai_start 的返回码在状态机切换过程中可能非 OK，
+                    // 故「恢复成功」以最终回到 RUNNING 为准（见下方 RUNNING 分支计数），不用 API 返回码。
+                    ESP_LOGW(TAG,
+                             "CAN bus-off #%lu: recover ok=%d state %lu→%lu (bus_err=%lu rx_err=%lu tx_err=%lu)",
+                             (unsigned long)recover_attempts, ok ? 1 : 0, (unsigned long)can_state, (unsigned long)after,
+                             (unsigned long)ESP32Can.busErrCounter(), (unsigned long)ESP32Can.rxErrorCounter(),
+                             (unsigned long)ESP32Can.txErrorCounter());
                 } else if (can_state == TWAI_STATE_STOPPED) {
                     // 恢复流程走完后 IDF 停在 STOPPED，需显式重启才回到总线上
-                    ESP_LOGW(TAG, "CAN stopped: restarting controller");
-                    ESP32Can.restart();
+                    ESP_LOGW(TAG, "CAN stopped: restart ok=%d", ESP32Can.restart() ? 1 : 0);
                 } else if (can_state == TWAI_STATE_RUNNING && recover_attempts > 0) {
+                    DeepDogCanCountRecoverOk();  // 一次 Bus-Off 事件最终回到总线 = 一次成功恢复
                     ESP_LOGI(TAG, "CAN back to RUNNING after %lu recovery attempt(s)", (unsigned long)recover_attempts);
                     recover_attempts = 0;
                 }
@@ -964,10 +976,15 @@ public:
                 board_mqtt_->SetDeepMotor(deep_motor_);
             }
 #endif
-#if DEEP_DOG_CAN_ENABLE
-            xTaskCreate(CanRxTask, "can_rx", CAN_RX_TASK_STACK, deep_motor_, CAN_RX_TASK_PRIO, &can_rx_task_handle_);
-#endif
 #endif  // DEEP_DOG_MOTOR_ENABLE
+#if DEEP_DOG_CAN_ENABLE
+            // CFG-03：收帧任务不依赖电机栈；无电机时 arg=nullptr，仅收帧/透传 + 总线自愈
+            void* can_rx_arg = nullptr;
+#if DEEP_DOG_MOTOR_ENABLE
+            can_rx_arg = deep_motor_;
+#endif
+            xTaskCreate(CanRxTask, "can_rx", CAN_RX_TASK_STACK, can_rx_arg, CAN_RX_TASK_PRIO, &can_rx_task_handle_);
+#endif
 #if DEEP_DOG_ARM_ENABLE
             DeepDogArmInit();
 #endif

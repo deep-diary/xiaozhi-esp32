@@ -87,6 +87,10 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port_;
+    // MEM-03（S09）：httpd 主任务栈 4096→3072（实测稳态 stack_hwm=1964，即使处理
+    // diagnostics 大 JSON 也留 ~1.1KB 余量）。顺带降低启动所需的**连续** internal：
+    // F-13 曾因 largest_int=3584 < 4096 导致 httpd_start 失败（本会话无 WS-MCP）。
+    config.stack_size = 3072;
     config.max_open_sockets = 7;
     config.ctrl_port = 32770;
     // 允许通配符 URI（如 /api/datapoints/module/xxx）；默认 NULL 仅精确匹配

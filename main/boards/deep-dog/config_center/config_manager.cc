@@ -25,7 +25,9 @@ namespace config_center {
 namespace {
 
 constexpr const char* kNvsNamespace = "deep_dog_cfg";
-constexpr uint32_t kTaskStack = 8192;
+// MEM-03（S09）：实测稳态 stack_hwm=5992（2026-10-16，MQTT 已连、配置同步运行中），
+// 8192→7168 回收 1KB internal，裁剪后仍留 ~1.1KB 余量（>512B 验收线）。
+constexpr uint32_t kTaskStack = 7168;
 constexpr int kPollTaskPriority = 4;
 /** 失败重试退避（秒） */
 constexpr int kRetryMinS = 30;

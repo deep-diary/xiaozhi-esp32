@@ -1167,7 +1167,7 @@ topics:
       tunnel: { type: bool, optional: true, default: true, note: "debug profile default true" }
       mirror_tx: { type: bool, optional: true }
       allow_tx: { type: bool, optional: true, default: true, note: "DANGER: debug profile default true; production must be false" }
-      max_hz: { type: int, optional: true, default: 50 }
+      max_hz: { type: int, optional: true, default: 100, note: "batch flush rate; default 100 matches a ~100 frames/s bus (20ms period frames)" }
       batch_max: { type: int, optional: true, default: 32 }
       id_filter:
         type: array
@@ -1193,6 +1193,11 @@ topics:
       tx_err: { type: int, optional: true }
       bus_err: { type: int, optional: true }
       dropped: { type: int, optional: true }
+      rx_fps: { type: float, optional: true, note: "recent RX frames/s from the bus (independent of tunnel/throttle); compare with real bus frame rate" }
+      rx_total: { type: int, optional: true, note: "cumulative frames read from the bus" }
+      tx_total: { type: int, optional: true, note: "cumulative frames written to the bus (incl. web injection)" }
+      bus_off_count: { type: int, optional: true, note: "cumulative Bus-Off entries; >0 means link severely abnormal" }
+      recover_count: { type: int, optional: true, note: "cumulative successful auto-recovery (initiate_recovery) count" }
       ts: { type: int }
 
   status/can/frames:

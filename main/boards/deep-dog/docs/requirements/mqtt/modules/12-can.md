@@ -56,6 +56,22 @@
 
 心跳与真实帧共用 `status/can/frames`，受同一 `max_hz` / `batch_max` 节流与 `tunnel` 开关约束。
 
+## 链路质量字段（`status/can`）
+
+判断「总线/物理层好不好」看这几个字段，**与是否开 tunnel、是否节流无关**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `rx_fps` | number | 最近窗口（~2s）从总线读到的帧数/秒。**正常应接近总线实际帧率**（20ms 周期帧 ≈ 50 帧/s）；显著偏低即丢帧/物理层异常 |
+| `rx_total` | int | 累计从总线读到的帧数 |
+| `tx_total` | int | 累计写入总线的帧数（含网页注入） |
+| `bus_off_count` | int | 累计进入 Bus-Off 次数（>0 说明链路严重异常） |
+| `recover_count` | int | 累计 Bus-Off 恢复成功次数（固件自动 `twai_initiate_recovery` + `twai_start`） |
+
+> 注意：**心跳帧不写总线**，Bus-Off / 物理层坏死时仍会照常出现。判总线健康请用
+> `bus_state`（1=RUNNING、2=BUS-OFF）与 `rx_fps`，不要用心跳有无来判断。
+> 固件对 Bus-Off 有**自动恢复**（周期 `DEEP_DOG_CAN_HEALTH_CHECK_MS`，见 `can/can_config.h`）。
+
 ## 样例 JSON
 
 **cmd（开透传 + 节流）**
@@ -65,12 +81,14 @@
   "tunnel": true,
   "mirror_tx": true,
   "allow_tx": false,
-  "max_hz": 50,
+  "max_hz": 100,
   "batch_max": 32,
   "ext_only": true,
   "ts": 1710000000
 }
 ```
+
+> `max_hz` 默认 **100**（匹配 20ms 周期帧 ≈ 50 帧/s ×2 类的总线）；旧默认 50 会在正常总线上丢帧。
 
 **frames**
 
@@ -136,3 +154,4 @@
 - [ ] 文档含 allow_tx 危险提示
 - [ ] 无 capability 隐藏入口卡
 - [ ] 空总线 / 总线无报文时，仍能在 `status/can/frames` 看到 `0x1F000000` 心跳帧
+- [ ] `status/can.rx_fps` 与总线实际帧率量级一致；Bus-Off 后 `bus_off_count`/`recover_count` 递增且能自动回到 RUNNING

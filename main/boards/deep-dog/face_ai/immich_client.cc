@@ -258,10 +258,12 @@ static esp_err_t HttpEvent(esp_http_client_event_t* evt) {
             ncap *= 2;
         }
         char* nd = (char*)heap_caps_realloc(buf->data, ncap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!nd) {
+        if (!nd && DeepDogInternalFallbackAllowed()) {
+            // MEM-08：internal 紧张时不回退 internal，避免切碎连续块
             nd = (char*)heap_caps_realloc(buf->data, ncap, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         }
         if (!nd) {
+            ESP_LOGW(TAG, "http resp buf alloc fail need=%u", (unsigned)ncap);
             return ESP_ERR_NO_MEM;
         }
         buf->data = nd;
@@ -406,11 +408,15 @@ static bool UploadAsset(const uint8_t* jpeg, size_t jpeg_len, char* asset_id_out
     }
 
     const size_t total = (size_t)meta_len + jpeg_len + (size_t)tail_len;
+    // MEM-08：internal 紧张时 multipart 体不再回退 internal
+    const bool allow_internal = DeepDogInternalFallbackAllowed();
     uint8_t* body = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!body) {
+    if (!body && allow_internal) {
         body = (uint8_t*)heap_caps_malloc(total, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     if (!body) {
+        ESP_LOGW(TAG, "multipart body alloc fail bytes=%u internal_fallback=%d", (unsigned)total,
+                 (int)allow_internal);
         return false;
     }
     memcpy(body, meta, (size_t)meta_len);

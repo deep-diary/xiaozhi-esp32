@@ -310,4 +310,16 @@
 #define DEEP_DOG_VISION_HUB_MEMORY_WAIT_MS 3000
 #endif
 
+/**
+ * MEM-08（S09）：Immich multipart / JPEG 等大缓冲在 PSRAM 分配失败后，是否允许回退
+ * `MALLOC_CAP_INTERNAL` 的 internal 余量下限（字节）。
+ *
+ * 低于该值时**不再**回退 internal（直接 skip + 日志），避免把 internal 连续块切碎、
+ * 把 min 打到数百字节（S09 §4 故障链）。阈值与 `memory_report.cc` 的
+ * `low_internal_heap`（32KB）保持一致，便于用同一把尺子判读。
+ */
+#ifndef DEEP_DOG_FACE_INTERNAL_FALLBACK_MIN_FREE
+#define DEEP_DOG_FACE_INTERNAL_FALLBACK_MIN_FREE (32 * 1024)
+#endif
+
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

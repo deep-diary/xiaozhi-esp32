@@ -135,10 +135,32 @@ void DeepDogCanMqtt::HeartbeatTimerCb(void* arg) {
 }
 
 /**
+ * 采样总线链路质量：rx_fps = 本窗口内从总线读到的帧数 / 秒（与是否上报、是否节流无关）。
+ * 用于量化「物理层/X 收链路」好坏：正常应接近总线实际帧率（如 20ms 周期帧 → ~50 帧/s）。
+ */
+void DeepDogCanMqtt::UpdateLinkStats() {
+    const int64_t now = esp_timer_get_time();
+    if (last_stats_us_ != 0 && (now - last_stats_us_) < 1000000) {
+        return;  // ≥1s 才重算，避免状态点/心跳两处重复采样
+    }
+    DeepDogCanHubStats stats {};
+    DeepDogCanGetStats(&stats);
+    if (last_stats_us_ != 0) {
+        const double dt = static_cast<double>(now - last_stats_us_) / 1000000.0;
+        if (dt > 0.2) {
+            rx_fps_ = static_cast<double>(stats.rx_frames - last_rx_frames_) / dt;
+        }
+    }
+    last_rx_frames_ = stats.rx_frames;
+    last_stats_us_ = now;
+}
+
+/**
  * 联调心跳：构造一条「模拟 RX」扩展帧并送入与真实帧相同的管线（不写总线）。
  * 用途：把「CAN→MQTT→网页」链路故障与「总线无报文」区分开。见 12-can.md。
  */
 void DeepDogCanMqtt::EmitHeartbeat() {
+    UpdateLinkStats();  // 心跳每 2s 一次，顺带刷新 rx_fps（不受 tunnel/连接状态影响）
     if (!enabled_ || !connected_ || !tunnel_) {
         return;
     }
@@ -251,6 +273,9 @@ bool DeepDogCanMqtt::PublishStatus(bool force) {
     if (!enabled_ || !connected_ || !client_) {
         return false;
     }
+    UpdateLinkStats();
+    DeepDogCanHubStats stats {};
+    DeepDogCanGetStats(&stats);
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
     cJSON_AddBoolToObject(root, "tunnel", tunnel_);
@@ -263,6 +288,12 @@ bool DeepDogCanMqtt::PublishStatus(bool force) {
     cJSON_AddNumberToObject(root, "tx_err", static_cast<double>(ESP32Can.txErrorCounter()));
     cJSON_AddNumberToObject(root, "bus_err", static_cast<double>(ESP32Can.busErrCounter()));
     cJSON_AddNumberToObject(root, "dropped", static_cast<double>(dropped_));
+    // 链路质量（与 tunnel/节流无关，用于判断物理层好坏；见 12-can.md）
+    cJSON_AddNumberToObject(root, "rx_fps", rx_fps_);
+    cJSON_AddNumberToObject(root, "rx_total", static_cast<double>(stats.rx_frames));
+    cJSON_AddNumberToObject(root, "tx_total", static_cast<double>(stats.tx_frames));
+    cJSON_AddNumberToObject(root, "bus_off_count", static_cast<double>(stats.bus_off_events));
+    cJSON_AddNumberToObject(root, "recover_count", static_cast<double>(stats.recover_count));
     cJSON_AddNumberToObject(root, "ts", static_cast<double>(UnixTs()));
     const std::string payload =
         deep_dog_envelope::Wrap(root, deep_dog_envelope::SchemaStatus(), client_->settings().device_id);

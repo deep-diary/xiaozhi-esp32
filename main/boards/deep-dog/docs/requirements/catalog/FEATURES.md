@@ -124,6 +124,8 @@
 | F0325 | 全模式编入 + 运行时选择（P1） | extpin-runtime-select | CFG-02 | config/CFG-02-ext-pin-runtime-mode.md | 串口 | 已实现 |
 | F0326 | 后端模板接入 `io.ext_pins` | extpin-backend-template | CFG-02 | config/CFG-02-ext-pin-runtime-mode.md | 内部 | 待办 |
 | F0327 | 全模式实机回归 | extpin-regress | CFG-02 | config/CFG-02-ext-pin-runtime-mode.md | 串口 | 待办 |
+| F0328 | 编译期联调剖面（`DEEP_DOG_PROFILE` 单选 CAN/MOTOR/DOG/FULL） | cfg-profile-select | CFG-03 | config/CFG-03-compile-time-profiles.md | 串口 | 已实现 |
+| F0329 | 剖面派生编译期兜底 `EXT_PIN_MODE`（免手工改 config.h） | cfg-profile-extpin-default | CFG-03 | config/CFG-03-compile-time-profiles.md | 内部 | 已实现 |
 
 ---
 
@@ -400,6 +402,7 @@
 | F1006 | 帧监听 Hub（供业务订阅） | can-frame-hub | MOT-01 | can/README.md | 内部 | 已实现 |
 | F1007 | can 数据点注册（tunnel/allow_tx/dropped） | can-datapoints | DP-01 | mqtt/modules/12-can.md | MQTT | 已实现 |
 | F1008 | 引脚 GPIO38/48 上报 | can-pins | MOT-01 | motor/01-can-hw-profile.md | MQTT | 已实现 |
+| F1009 | CAN 收帧/自愈不依赖电机栈（`MOTOR=0` 仍收帧） | can-rx-independent-of-motor | CFG-03 | config/CFG-03-compile-time-profiles.md | 串口 | 已实现 |
 
 ---
 

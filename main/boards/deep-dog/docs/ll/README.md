@@ -49,3 +49,5 @@
 | [LL-006](./LL-006-serial-open-resets-esp32.md) | pyserial 打开 COM6 触发 ESP32 自动复位 | DTR/RTS / EN·GPIO0 / 自动下载电路 / 串口发现 / MQTT retain 发现 |
 | [LL-007](./LL-007-ide-edit-timeout-duplicate-write.md) | IDE 编辑工具超时后改动其实已落盘，重试会造成重复写入 | Edit 超时 / IDE Command timeout / redefinition / 重复应用 / 重试前先读 |
 | [LL-008](./LL-008-subinstance-cmd-flat-field.md) | 多实例写入 `<sub>_<point>` 与注册表 id `module.<sub>.<point>` 不一致 | 子实例 / has_sub_instances / cmd 扁平字段 / 契约与实现漂移 / 单实例用例掩盖 |
+| [LL-009](./LL-009-stack-trim-use-steady-state-hwm.md) | 裁任务栈必须用「稳态」stack_hwm | stack_hwm / 低估 / 栈裁剪 / 串口只打 Top8 / TLS 重连 / diagnostics |
+| [LL-010](./LL-010-can-rx-gated-by-motor-enable.md) | CAN 收帧任务被 MOTOR_ENABLE 门控，关电机后「看着还在、实际收不到帧」 | CanRxTask / MOTOR_ENABLE / tunnel 无帧 / Bus-Off 不自愈 / 半条链路 |

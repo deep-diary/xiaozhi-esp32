@@ -16,6 +16,44 @@
  *   LED_AVAILABLE → LED（WS2812；DIN 默认 gpio_a，可在 config.h 覆盖 LED_STRIP_GPIO）
  */
 
+/* -------- 联调剖面（首选开关：只改下面这一行）--------
+ * 见 docs/requirements/config/CFG-03-compile-time-profiles.md。
+ * 剖面只做「预设赋值」：下方 *_ENABLE 的默认值与依赖钳位逻辑保持原样，
+ * 已被剖面显式定义的宏不会被后面的 #ifndef 覆盖；仍可用 -DDEEP_DOG_XXX_ENABLE=n 单独覆盖。
+ * 只管 CAN 产品链（CAN/MOTOR/DOG/ARM）；UART/RS485/IO/AD/LED/SERVO/GIMBAL 由 CFG-02 运行时模式决定。 */
+#define DEEP_DOG_PROFILE_CAN_COMM 1  /** CAN 透传联调：CAN 1 / MOTOR 0 / DOG 0 / ARM 0（不背电机栈） */
+#define DEEP_DOG_PROFILE_MOTOR    2  /** 单电机调试：CAN 1 / MOTOR 1 / DOG 0 / ARM 0 */
+#define DEEP_DOG_PROFILE_DOG      3  /** 四足运控：  CAN 1 / MOTOR 1 / DOG 1 / ARM 0 */
+#define DEEP_DOG_PROFILE_FULL     4  /** 全功能：    不改 CAN 产品链，沿用下方默认值 */
+
+#ifndef DEEP_DOG_PROFILE
+#define DEEP_DOG_PROFILE DEEP_DOG_PROFILE_CAN_COMM
+#endif
+
+#if DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_CAN_COMM
+#define DEEP_DOG_MOTOR_ENABLE 0
+#elif DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_MOTOR
+#define DEEP_DOG_MOTOR_ENABLE 1
+#elif DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_DOG
+#define DEEP_DOG_MOTOR_ENABLE 1
+#define DEEP_DOG_DOG_ENABLE 1
+#endif
+
+/* -------- 剖面隐含的编译期兜底引出脚模式（随剖面一起选，勿单独改）--------
+ * 目的：免去「裁掉 CAN 产品链却忘了改 config.h 默认模式」的手工联动
+ *       —— 否则首启 ResolveBootTarget() 取到不支持的 can，apply 失败回滚 none。
+ * 注意：本文件由 config.h 在其 `DEEP_DOG_EXT_PIN_MODE` / `*_MODE_STR` 之后 include，
+ *       故这里必须先 #undef 再定义（含 STR，否则宏重定义告警 + 日志 default= 印错）。
+ * PROFILE_FULL = 不干预，沿用 config.h 的值（要手工指定模式时选它）。 */
+#if defined(DEEP_DOG_EXT_PIN_MODE) && (DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_CAN_COMM || \
+                                       DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_MOTOR ||     \
+                                       DEEP_DOG_PROFILE == DEEP_DOG_PROFILE_DOG)
+#undef DEEP_DOG_EXT_PIN_MODE
+#undef DEEP_DOG_EXT_PIN_MODE_STR
+#define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_CAN
+#define DEEP_DOG_EXT_PIN_MODE_STR "can"
+#endif
+
 /* -------- 引出脚外设（运行时模式选择，见 CFG-02；A/B 默认 38/48） --------
  * 全部默认编入 = 1：由 ext_pin/ 在启动时按生效模式只初始化其中一个。 */
 #ifndef DEEP_DOG_CAN_ENABLE

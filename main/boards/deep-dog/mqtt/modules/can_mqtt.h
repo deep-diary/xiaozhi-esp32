@@ -35,6 +35,8 @@ private:
     void OnFrame(const CanFrame* frame, bool is_tx);
     void FlushFrames();
     void EmitHeartbeat();
+    /** 采样总线链路质量（rx_fps 等），≥1s 才重算，见 UpdateLinkStats */
+    void UpdateLinkStats();
     void ApplyCmd(const char* json);
     void HandleTx(const char* json);
 
@@ -47,10 +49,15 @@ private:
     bool mirror_tx_ = true;
     bool allow_tx_ = true;
     bool ext_only_ = false;
-    int max_hz_ = 50;
+    int max_hz_ = 100;
     int batch_max_ = 32;
     uint32_t dropped_ = 0;
     uint32_t hb_seq_ = 0;
+
+    /** 链路质量采样（rx_fps）：上一次的累计 RX 帧数与采样时刻 */
+    uint32_t last_rx_frames_ = 0;
+    int64_t last_stats_us_ = 0;
+    double rx_fps_ = 0.0;
 
     void* flush_timer_ = nullptr;
     void* heartbeat_timer_ = nullptr;

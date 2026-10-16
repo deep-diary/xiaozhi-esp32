@@ -135,12 +135,14 @@ static bool CropFaceToJpeg(const uint8_t* rgb565, uint16_t fw, uint16_t fh, cons
     const int cw = ix1 - ix0;
     const int ch = iy1 - iy0;
     const size_t crop_bytes = (size_t)cw * (size_t)ch * 2u;
+    // MEM-08：internal 紧张时不再回退 internal，避免切碎连续块
+    const bool allow_internal = DeepDogInternalFallbackAllowed();
     uint8_t* crop = (uint8_t*)heap_caps_malloc(crop_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!crop) {
+    if (!crop && allow_internal) {
         crop = (uint8_t*)heap_caps_malloc(crop_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     if (!crop) {
-        ESP_LOGW(TAG, "immich crop alloc fail %dx%d", cw, ch);
+        ESP_LOGW(TAG, "immich crop alloc fail %dx%d internal_fallback=%d", cw, ch, (int)allow_internal);
         return false;
     }
     for (int y = 0; y < ch; y++) {
@@ -162,10 +164,11 @@ static bool CropFaceToJpeg(const uint8_t* rgb565, uint16_t fw, uint16_t fh, cons
     }
     // image_to_jpeg 用 malloc；Immich 队列统一 heap_caps_free
     uint8_t* owned = (uint8_t*)heap_caps_malloc(jpeg_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!owned) {
+    if (!owned && DeepDogInternalFallbackAllowed()) {
         owned = (uint8_t*)heap_caps_malloc(jpeg_len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     if (!owned) {
+        ESP_LOGW(TAG, "immich jpeg copy alloc fail bytes=%u", (unsigned)jpeg_len);
         free(jpeg);
         return false;
     }
@@ -196,10 +199,11 @@ static bool FullFrameToJpeg(const uint8_t* rgb565, uint16_t fw, uint16_t fh, uin
         return false;
     }
     uint8_t* owned = (uint8_t*)heap_caps_malloc(jpeg_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!owned) {
+    if (!owned && DeepDogInternalFallbackAllowed()) {
         owned = (uint8_t*)heap_caps_malloc(jpeg_len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     if (!owned) {
+        ESP_LOGW(TAG, "immich jpeg copy alloc fail bytes=%u", (unsigned)jpeg_len);
         free(jpeg);
         return false;
     }

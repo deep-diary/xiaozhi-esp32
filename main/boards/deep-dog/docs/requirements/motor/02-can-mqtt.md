@@ -33,6 +33,10 @@
 - 模块：`mqtt/modules/can_mqtt.*`
 - 挂钩：`ESP32Can` 嗅探 / `writeFrame`
 - 心跳：`DeepDogCanMqtt::EmitHeartbeat()`，周期宏 `DEEP_DOG_CAN_HEARTBEAT_MS`（`can/can_config.h`）
+- 链路质量：`status/can` 增加 `rx_fps` / `rx_total` / `tx_total` / `bus_off_count` / `recover_count`
+  （计数在 `can/can_frame_hub.cc`，与 tunnel/节流无关）
+- Bus-Off 自动恢复：板级 `CanRxTask` 按 `DEEP_DOG_CAN_HEALTH_CHECK_MS` 轮询 → `recover()` + `restart()`
+- 限速默认：`max_hz=100`（匹配 20ms 周期帧总线）
 - 门控：`#if DEEP_DOG_CAN_ENABLE`
 
 ## 验收

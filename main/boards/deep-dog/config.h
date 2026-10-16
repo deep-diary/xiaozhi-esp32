@@ -27,8 +27,15 @@
 
 typedef int deep_dog_ext_pin_mode_t;
 
-/** 编译期默认模式（无 NVS 时的兜底）：CAN 单电机（A=38 TX / B=48 RX，见
- *  docs/requirements/motor/01-can-hw-profile.md）；运行时可改，无需重编。 */
+/** 编译期兜底模式：无 NVS / 无下发时的最后一道兜底（运行期生效模式由 ext_pin/ 决定，
+ *  见 docs/requirements/config/CFG-02-ext-pin-runtime-mode.md）。
+ *  默认 CAN 单电机：A=38 TX / B=48 RX，见 docs/requirements/motor/01-can-hw-profile.md。
+ *
+ *  注意：下面这个 `#ifndef` 只是「本文件的原值」。board_features.h（本文件末尾 include）
+ *  会按 `DEEP_DOG_PROFILE` 剖面 `#undef` 后重定义它（CFG-03 §3.2），故：
+ *    - CAN 产品链剖面（CAN_COMM / MOTOR / DOG）下，兜底模式由剖面给成 CAN，改这里无效；
+ *    - 只有 `DEEP_DOG_PROFILE_FULL` 才沿用下面的值 ——
+ *      云台 / 灯带 / 串口等自定义模式请选 FULL（或直接 `-DDEEP_DOG_EXT_PIN_MODE=…`）。 */
 #ifndef DEEP_DOG_EXT_PIN_MODE
 #define DEEP_DOG_EXT_PIN_MODE DEEP_DOG_EXT_PIN_CAN
 #endif
