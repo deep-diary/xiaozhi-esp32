@@ -16,7 +16,7 @@
 | **Bluepad32 + BTstack** | **首选**。ESP-IDF 原生、Xbox Series BLE 已验证；统一 `uni_gamepad_t` + `play_dual_rumble` | 板载 `source=bt` |
 | 手写 NimBLE HID Host | 扫描/配对/Xbox HID 解析/重连工作量大，与 Hub 契约重复造轮 | 不推荐 |
 | ESP-IDF Bluedroid/NimBLE 裸 HID | 无现成 Xbox BLE 主机适配层 | 不推荐 |
-| PC MQTT 桥（已有） | [`scripts/deep_dog/deep_dog_handle_bridge.py`](../../../../../../scripts/deep_dog/deep_dog_handle_bridge.py) → `handle/input` | `source=wifi` |
+| PC MQTT 桥（已有） | [`scripts/deep_dog/deep_dog_handle_bridge.py`](../../../../../../scripts/deep_dog/deep_dog_handle_bridge.py) → `cmd/handle/input` | `source=wifi` |
 
 ### Bluepad32 角色
 
@@ -38,8 +38,8 @@ deep-dog 约定：
 ## 配对（需求）
 
 1. 手柄 Xbox 键开机 → 长按配对键约 3s。
-2. 固件 `handle/cmd` `action: pair` → 启动扫描/自动连接；或 `enable` 后自动扫描（默认：enable 后扫描）。
-3. 连上后 Normalize → Hub；`handle/status` 中 `source: "bt"`。
+2. 固件 `cmd/handle` `action: pair` → 启动扫描/自动连接；或 `enable` 后自动扫描（默认：enable 后扫描）。
+3. 连上后 Normalize → Hub；`status/handle` 中 `source: "bt"`。
 
 不支持：索尼 DualShock 4 / DualSense **无线直连本板**（需 Classic BR/EDR；ESP32-S3 无）。
 
@@ -67,12 +67,12 @@ ESP 是 **HID Host**，手柄是 Peripheral。可向下发输出报告；**不�
 
 | 能力 | Xbox Series BLE + Bluepad32 | 落点 |
 |------|------------------------------|------|
-| **双马达震动** | **支持**：`play_dual_rumble(delay_ms, duration_ms, weak, strong)`（FW v5.x） | v0.1：板级 `HandleBtRumble` + `handle/cmd` `rumble` |
+| **双马达震动** | **支持**：`play_dual_rumble(delay_ms, duration_ms, weak, strong)`（FW v5.x） | v0.1：板级 `HandleBtRumble` + `cmd/handle` `rumble` |
 | 扳机独立震动 | 示例有；稳定性次于主马达 | **v0.2**，不进 v0.1 验收 |
 | 玩家 LED / 灯条 | Xbox 能力弱；不依赖 | 不做 |
 | 操控 Xbox 主机 | 角色不对 | **排除** |
 
-### MQTT `handle/cmd` rumble（联调）
+### MQTT `cmd/handle` rumble（联调）
 
 ```json
 { "action": "rumble", "duration_ms": 250, "weak": 128, "strong": 64, "ts": 1710000000 }
@@ -107,7 +107,7 @@ ESP 是 **HID Host**，手柄是 Peripheral。可向下发输出报告；**不�
    idf.py -DDEEP_DOG_HANDLE_BT=ON reconfigure build
    ```
    **`fullclean` 后须再带** `-D`；烧录前停 `monitor`。详见 [`handle/sources/README.md`](../../../handle/sources/README.md)。
-5. wifi 源（`handle/input`）与本源 Hub 后到覆盖；震动：板载用 `action: rumble`，桥用 `action: output`（I09）。
+5. wifi 源（`cmd/handle/input`）与本源 Hub 后到覆盖；震动：板载用 `action: rumble`，桥用 `action: output`（I09）。
 
 ## 与 Wi‑Fi 共存
 
@@ -122,8 +122,8 @@ ESP 是 **HID Host**，手柄是 Peripheral。可向下发输出报告；**不�
 ```text
 Xbox BLE ──► Bluepad32(BTstack) ──► Normalize ──► HandleEventHub
                                                       ├─► HandleApps
-                                                      └─► handle/status (source=bt)
-HandleApps / handle/cmd rumble ──► play_dual_rumble ──► Xbox
+                                                      └─► status/handle (source=bt)
+HandleApps / cmd/handle rumble ──► play_dual_rumble ──► Xbox
 ```
 
 ## 验收（本源）
@@ -132,5 +132,5 @@ HandleApps / handle/cmd rumble ──► play_dual_rumble ──► Xbox
 - [x] 实机：Xbox BLE 配对成功，`source=bt`，摇杆/面键/肩键可见（联调 log）
 - [x] `dpad_*` / `l3`/`r3` 透传进快照（status/log 分组字段）；`ps` 可选扩展
 - [ ] `disable` 后 App 不再驱动狗；status 仍可观察（联调勾选）
-- [ ] `handle/cmd` `rumble` 或板级 API 触发短震冒烟（联调勾选）
+- [ ] `cmd/handle` `rumble` 或板级 API 触发短震冒烟（联调勾选）
 - [ ] 断连后 `connected=false` 且轴/键清零（联调勾选）

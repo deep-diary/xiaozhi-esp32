@@ -39,7 +39,7 @@ graph LR
 | 端口 | `8080`（`DEEP_DOG_WS_MCP_PORT`） | `ws_mcp_config.h:20-22` |
 | 路径 | `/ws`（`DEEP_DOG_WS_MCP_PATH`） | `ws_mcp_config.h:24-26` |
 | 单帧上限 | 4096 字节 | `ws_mcp_config.h:29-31` |
-| 发现方式 | `device/info` 广播 `ip` / `ws_mcp_port` / `ws_mcp_path` / `capabilities.ws_mcp` | `device_mqtt.cc:157-160,186` |
+| 发现方式 | `info/device` 广播 `ip` / `ws_mcp_port` / `ws_mcp_path` / `capabilities.ws_mcp` | `device_mqtt.cc:157-160,186` |
 | 与内置 httpd | 编译期 `#error` 阻止同端口 | `ws_mcp_config.h:33-37` |
 
 ### 2.2 URL 构造（前端）
@@ -48,7 +48,7 @@ graph LR
 ws://{ip}:{port}{path}      # 默认 ws://<device-ip>:8080/ws
 ```
 
-来源优先级（`frontend/src/composables/deviceWsUrl.js:28-46`）：手动填写 > 实时 `device/info` > 本地缓存 `lastAutoUrl`。
+来源优先级（`frontend/src/composables/deviceWsUrl.js:28-46`）：手动填写 > 实时 `info/device` > 本地缓存 `lastAutoUrl`。
 
 ### 2.3 消息封装
 
@@ -135,7 +135,7 @@ topic 骨架与载荷规范见 [01-mqtt-contract.md](./01-mqtt-contract.md)。
 
 | 项 | 建议值 |
 |----|--------|
-| 设备心跳周期 | `status/device` 每 5s（现 `device/status` publish_hz=0.2 即 5s，一致） |
+| 设备心跳周期 | `status/device` 每 5s（现 `status/device` publish_hz=0.2 即 5s，一致） |
 | 端侧在线判定 | 3 × 心跳周期 = 15s（集中为单一常量） |
 | 首包等待 | 10s |
 | clientId 规则 | `<product>-<role>-<rand>`，禁止混用风格 |

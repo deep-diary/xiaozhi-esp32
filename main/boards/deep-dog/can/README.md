@@ -108,6 +108,19 @@ uint8_t  data[8];
 - `recover()`：在 **Bus-Off** 等状态下尝试恢复（见 `ESP32-TWAI-CAN.cpp`）。
 - 引脚、波特率、终端电阻不匹配是最常见硬件问题。
 
+### 透传自检：心跳帧
+
+MQTT 侧（`mqtt/modules/can_mqtt.*`）默认每 **2000 ms** 注入一条**模拟 RX 心跳帧**
+（`id=0x1F000000`，29 位扩展，`data = seq(4B 大端) + uptime_s(4B 大端)`），**不写总线**，
+只走 `DeepDogCanNotifyFrame → OnFrame → status/can/frames`。用于区分两类故障：
+
+- 网页能看到 `0x1F000000` → CAN→MQTT→网页链路正常，真实帧收不到应从总线侧查（终端电阻 / 波特率 /
+  `status/can.bus_state` / `rx_err` / `bus_err`）。
+- 连心跳也看不到 → 问题在透传链路（`tunnel=false`、未订阅 `status/can/frames`、MQTT 未连等）。
+
+周期宏 `DEEP_DOG_CAN_HEARTBEAT_MS`（`can_config.h`，`0` = 关闭）；联调期 `tunnel` / `allow_tx` 默认开启，
+详见 [`../docs/requirements/mqtt/modules/12-can.md`](../docs/requirements/mqtt/modules/12-can.md)。
+
 ---
 
 ## 在 deep-dog 中的角色

@@ -6,7 +6,7 @@
 | capabilities | `gimbal` |
 | 路由建议 | `/device/:deviceId/modules/gimbal` |
 | 契约 | **ready**（含 action / 速度 / jog） |
-| YAML | `gimbal/cmd`、`gimbal/status` |
+| YAML | `cmd/gimbal`、`status/gimbal` |
 | 驱动 | [`gimbal/`](../../../../gimbal/) |
 | 路线图 | **V-C04**（原 M03） |
 | 参考 | [servo](./10-servo.md)、[I08a](../../input/I08a-keymap-mqtt-contract-draft.md)、[I08b 轴](../../input/I08b-axis-mapping.md) |
@@ -20,17 +20,17 @@
 
 1. 回读角度、轴速度、步进、限位、moving、ready  
 2. Web 下发 absolute / relative / nudge / jog / 调速 / set_speed  
-3. 手柄 **press / hold** 绑定云台动作（经 `handle/keymap`，`profile=gimbal`）  
+3. 手柄 **press / hold** 绑定云台动作（经 `status/handle/keymap`，`profile=gimbal`）  
 4. 手柄 **轴**：默认右摇杆 `rx→gimbal.pan_rate`、`ry→gimbal.tilt_rate`（速率 ∝ \|u\|×轴速度）；面键/十字键保留；`l2`/`r2` 可绑、默认 none
 
 ## Topic
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
-| `gimbal/status` | ↑ | 0 | true |
-| `gimbal/cmd` | ↓ | 1 | false |
+| `status/gimbal` | ↑ | 0 | true |
+| `cmd/gimbal` | ↓ | 1 | false |
 
-手柄绑定 Topic 见 [11-handle](./11-handle.md) / I08a（`handle/keymap` · `handle/cmd`）。
+手柄绑定 Topic 见 [11-handle](./11-handle.md) / I08a（`status/handle/keymap` · `cmd/handle`）。
 
 ## 功能函数（固件 API）
 
@@ -101,9 +101,9 @@
 ## Steps（前端）
 
 - **Step 1** 校验 `capabilities.gimbal`（Hub 另需 `ext_pins.mode===pwm`）。
-- **Step 2** 订阅 retain `gimbal/status`。
+- **Step 2** 订阅 retain `status/gimbal`。
 - **Step 3** 控制区：绝对滑块；方向 pointerdown→`jog_start` / pointerup→`jog_stop`；**十字中心 → `home`**；调速点按；`set_speed`。
-- **Step 4** 绑定区：订 `handle/keymap`；**进云台页自动** `set_profile`=`gimbal`；离散 press/hold（含默认 **r3→gimbal.home**）+ **六轴** `axis_bindings`（含 L2/R2）`set_keymap`。
+- **Step 4** 绑定区：订 `status/handle/keymap`；**进云台页自动** `set_profile`=`gimbal`；离散 press/hold（含默认 **r3→gimbal.home**）+ **六轴** `axis_bindings`（含 L2/R2）`set_keymap`。
 - **Step 5** `ready===false` 禁用控制。
 - **Step 6** unmount 退订。
 

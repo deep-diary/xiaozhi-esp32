@@ -33,7 +33,7 @@
 
 出处：`http-server/deep_dog_http_server.cc:1065-1091`（路由注册）。
 
-> **约定**：`/api/status` 与 MQTT `{p}/stream/status`、`/api/face` 与 `{p}/face/status` 为**同源数据**（HTTP 供局域网直连，MQTT 供云端）。
+> **约定**：`/api/status` 与 MQTT `{p}/status/stream`、`/api/face` 与 `{p}/status/face` 为**同源数据**（HTTP 供局域网直连，MQTT 供云端）。
 
 ---
 
@@ -43,7 +43,7 @@
 请求头统一：`Content-Type: application/json`、`Device-Id: <MAC 紧凑串>`（`deep_dog_pair_http.cc:107-110`）。
 
 > **契约决议（D4）**：配对**上行**（握手/确认/解绑）**全部走 HTTP**；云端**移除** MQTT 配对 ingest
-> （不再订阅 `pairing/status`、`pairing/request`）。配对状态**单一来源 = HTTP**，MQTT 仅保留**下行**通知
+> （不再订阅 `status/pairing`、`event/pairing/request`）。配对状态**单一来源 = HTTP**，MQTT 仅保留**下行**通知
 > `{prefix}/{device_id}/cmd/pairing`。详见 [01-mqtt-contract.md §5.6/§6](./01-mqtt-contract.md)。
 
 ### B.1 握手
@@ -76,9 +76,9 @@ Body: { "device_id": "...", "challenge"?: "...", "hmac"?: "..." }
 
 设备状态机见 `pairing/deep_dog_pair_http.cc:394-434`；绑定结果写 NVS 并 defer 重载。
 
-### B.3 解绑（新增，替代 MQTT `pairing/request`）
+### B.3 解绑（新增，替代 MQTT `event/pairing/request`）
 
-> 现状：设备主动解绑走 MQTT `pairing/request` → ingest（[services.py:471-512](file:///D:/working/test-platform/deep-trace-com/backend/devices/services.py#L471-L512)）。
+> 现状：设备主动解绑走 MQTT `event/pairing/request` → ingest（[services.py:471-512](file:///D:/working/test-platform/deep-trace-com/backend/devices/services.py#L471-L512)）。
 > 决议 D4：改为设备面 HTTP 接口，MQTT 该上行通道退役。
 
 ```
@@ -278,7 +278,7 @@ Key   : hex_decode(device_secret)
 
 ## F. 待改善
 
-- [ ] **新增设备面解绑接口 `POST /devices/pair/unbind`**（替代 MQTT `pairing/request`，见 §B.3）。
+- [ ] **新增设备面解绑接口 `POST /devices/pair/unbind`**（替代 MQTT `event/pairing/request`，见 §B.3）。
 - [ ] **移除配对 MQTT ingest**（`ALL_CHANNELS` 去 `pairing`，`PairingMqttIngest` 退役）。
 - [ ] 设备面 `/devices/pair/*`、`/edge/*` 补鉴权/签名校验（现全开放）。
 - [ ] AI 视图显式声明 `permission_classes`（现默认 AllowAny）。

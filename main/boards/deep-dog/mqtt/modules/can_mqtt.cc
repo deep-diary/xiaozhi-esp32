@@ -85,6 +85,19 @@ DeepDogCanMqtt::DeepDogCanMqtt(DeepDogMqttClient* client) : client_(client) {
     if (esp_timer_create(&args, &timer) == ESP_OK) {
         flush_timer_ = timer;
     }
+#if DEEP_DOG_CAN_HEARTBEAT_MS > 0
+    esp_timer_handle_t hb_timer = nullptr;
+    esp_timer_create_args_t hb_args = {
+        .callback = &DeepDogCanMqtt::HeartbeatTimerCb,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "dog_can_hb",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&hb_args, &hb_timer) == ESP_OK) {
+        heartbeat_timer_ = hb_timer;
+    }
+#endif
 }
 
 DeepDogCanMqtt::~DeepDogCanMqtt() {
@@ -92,6 +105,10 @@ DeepDogCanMqtt::~DeepDogCanMqtt() {
     if (flush_timer_) {
         esp_timer_delete(static_cast<esp_timer_handle_t>(flush_timer_));
         flush_timer_ = nullptr;
+    }
+    if (heartbeat_timer_) {
+        esp_timer_delete(static_cast<esp_timer_handle_t>(heartbeat_timer_));
+        heartbeat_timer_ = nullptr;
     }
     if (batch_mutex_) {
         vSemaphoreDelete(static_cast<SemaphoreHandle_t>(batch_mutex_));
@@ -108,6 +125,39 @@ void DeepDogCanMqtt::FlushTimerCb(void* arg) {
     if (self) {
         self->FlushFrames();
     }
+}
+
+void DeepDogCanMqtt::HeartbeatTimerCb(void* arg) {
+    auto* self = static_cast<DeepDogCanMqtt*>(arg);
+    if (self) {
+        self->EmitHeartbeat();
+    }
+}
+
+/**
+ * 联调心跳：构造一条「模拟 RX」扩展帧并送入与真实帧相同的管线（不写总线）。
+ * 用途：把「CAN→MQTT→网页」链路故障与「总线无报文」区分开。见 12-can.md。
+ */
+void DeepDogCanMqtt::EmitHeartbeat() {
+    if (!enabled_ || !connected_ || !tunnel_) {
+        return;
+    }
+    CanFrame frame {};
+    frame.identifier = DEEP_DOG_CAN_HEARTBEAT_ID;
+    frame.extd = 1;
+    frame.rtr = 0;
+    frame.data_length_code = 8;
+    const uint32_t seq = ++hb_seq_;
+    const uint32_t uptime_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000LL);
+    frame.data[0] = static_cast<uint8_t>(seq >> 24);
+    frame.data[1] = static_cast<uint8_t>(seq >> 16);
+    frame.data[2] = static_cast<uint8_t>(seq >> 8);
+    frame.data[3] = static_cast<uint8_t>(seq);
+    frame.data[4] = static_cast<uint8_t>(uptime_s >> 24);
+    frame.data[5] = static_cast<uint8_t>(uptime_s >> 16);
+    frame.data[6] = static_cast<uint8_t>(uptime_s >> 8);
+    frame.data[7] = static_cast<uint8_t>(uptime_s);
+    DeepDogCanNotifyFrame(&frame, 0);
 }
 
 void DeepDogCanMqtt::FrameListener(const CanFrame* frame, int is_tx, void* ctx) {
@@ -325,11 +375,25 @@ void DeepDogCanMqtt::OnConnected() {
     client_->Subscribe(deep_dog_topics::Cmd("can"), 1);
     client_->Subscribe(deep_dog_topics::Cmd("can/tx"), 1);
     PublishStatus(true);
+#if DEEP_DOG_CAN_HEARTBEAT_MS > 0
+    if (heartbeat_timer_) {
+        auto* hb = static_cast<esp_timer_handle_t>(heartbeat_timer_);
+        esp_timer_stop(hb);
+        esp_timer_start_periodic(hb, static_cast<uint64_t>(DEEP_DOG_CAN_HEARTBEAT_MS) * 1000ULL);
+        ESP_LOGI(TAG, "can heartbeat on: id=0x%08lX period=%d ms", (unsigned long)DEEP_DOG_CAN_HEARTBEAT_ID,
+                 (int)DEEP_DOG_CAN_HEARTBEAT_MS);
+    }
+#endif
 }
 
 void DeepDogCanMqtt::OnDisconnected() {
     connected_ = false;
     DeepDogCanSetFrameListener(nullptr, nullptr);
+#if DEEP_DOG_CAN_HEARTBEAT_MS > 0
+    if (heartbeat_timer_) {
+        esp_timer_stop(static_cast<esp_timer_handle_t>(heartbeat_timer_));
+    }
+#endif
 }
 
 void DeepDogCanMqtt::Stop() {
@@ -363,9 +427,11 @@ void DeepDogCanMqtt::OnMessage(const std::string&, const std::string&) {}
 bool DeepDogCanMqtt::PublishStatus(bool) { return false; }
 void DeepDogCanMqtt::RegisterDataPoints() {}
 void DeepDogCanMqtt::FlushTimerCb(void*) {}
+void DeepDogCanMqtt::HeartbeatTimerCb(void*) {}
 void DeepDogCanMqtt::FrameListener(const CanFrame*, int, void*) {}
 void DeepDogCanMqtt::OnFrame(const CanFrame*, bool) {}
 void DeepDogCanMqtt::FlushFrames() {}
+void DeepDogCanMqtt::EmitHeartbeat() {}
 void DeepDogCanMqtt::ApplyCmd(const char*) {}
 void DeepDogCanMqtt::HandleTx(const char*) {}
 

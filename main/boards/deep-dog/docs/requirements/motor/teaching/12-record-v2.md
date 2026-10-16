@@ -45,7 +45,7 @@ Phase B：插值 `(pos, vel)` 来自录制；`vel` 乘以 `1/time_scale`。
 
 ## 4. MQTT 快照（Phase B）
 
-### `motor/teaching/snapshot` ↑ QoS0
+### `event/motor/teaching` ↑ QoS0
 
 stop 录制后发布（单电机或 multi）：
 
@@ -62,7 +62,7 @@ stop 录制后发布（单电机或 multi）：
 
 Multi：`motors: [{ motor_id, samples, ... }]` 替代顶层 `motor_id`。
 
-### `motor/teaching/status` ↑ retain QoS0
+### `status/motor/teaching` ↑ retain QoS0
 
 摘要：`recording`, `ready`, `motor_id`, `point_count`, `duration_ms`。
 
@@ -76,7 +76,7 @@ bool executeTeaching(uint8_t motor_id, const TeachingPlayConfig* cfg = nullptr);
 bool executeTeachingMulti(const uint8_t* motor_ids, uint8_t count, const TeachingPlayConfig* cfg = nullptr);
 ```
 
-MQTT `motor/cmd` 增：`play_time_scale`、`sample_period_ms`（start 时可选）、`teaching_motor_ids`（multi）。
+MQTT `cmd/motor` 增：`play_time_scale`、`sample_period_ms`（start 时可选）、`teaching_motor_ids`（multi）。
 
 ## 6. 验收
 

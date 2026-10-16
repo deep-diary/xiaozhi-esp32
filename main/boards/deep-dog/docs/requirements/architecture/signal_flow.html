@@ -29,7 +29,7 @@
 
 <section>
   <h2>MQTT Topic 拓扑</h2>
-  <div class="sub">前缀 <code>deepdiary/deep-dog/{device_id}/</code>；模块 <code>cmd</code> / <code>status</code>（及特例 frames/input）</div>
+  <div class="sub">前缀 <code>{prefix}/{device_id}/</code>（默认 <code>deep-trace</code>）；骨架 <code>{kind}/{subject}</code>，kind ∈ info/status/cmd/event/result</div>
   <div class="legend-inline">
     <span class="lg-sig"><i></i>事件/遥测</span>
     <span class="lg-ui"><i></i>控制</span>
@@ -38,13 +38,13 @@
   <div class="mmd">
 <pre class="mermaid">
 flowchart TB
-  Prefix["deepdiary/deep-dog/id/"]
+  Prefix["{prefix}/{device_id}/"]
   Prefix --> Dev["device/ · pairing/"]
   Prefix --> Sense["stream/ face/ track/ imu/"]
   Prefix --> Act["dog/ led/ gimbal/ servo/ touch/"]
   Prefix --> Bus["handle/ can/ motor/ person/"]
 
-  Dev --> Info["device/info retain"]
+  Dev --> Info["info/device retain"]
   Sense --> St1["*/status"]
   Act --> Cmd1["*/cmd"]
   Act --> St2["*/status"]
@@ -68,7 +68,7 @@ flowchart TB
 <pre class="mermaid">
 flowchart LR
   T["触摸 GPIO 1/2/3"] --> TH["TouchEventHub"]
-  H["BT HID / MQTT handle/input"] --> HH["HandleEventHub"]
+  H["BT HID / MQTT cmd/handle/input"] --> HH["HandleEventHub"]
   TH --> TD["Dispatcher"]
   HH --> HD["Dispatcher"]
   TD --> A1["TouchAppDog"]
@@ -131,7 +131,7 @@ sequenceDiagram
   Dom-->>Mod: 结果
   Mod->>EMQX: publish …/status
   EMQX->>FE: 订阅推送
-  Note over Out: device/info 等 retain 供晚到客户端
+  Note over Out: info/device 等 retain 供晚到客户端
 </pre>
   </div>
 </section>

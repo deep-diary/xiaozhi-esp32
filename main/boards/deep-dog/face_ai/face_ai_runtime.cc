@@ -647,11 +647,16 @@ void DeepDogFaceAiSetEnabled(bool on) {
     if (on) {
         if (!s_runtime_started.load(std::memory_order_acquire)) {
             if (!s_runtime_start_inflight.exchange(true, std::memory_order_acq_rel)) {
-                // 模型加载栈深；禁止在 mqtt_task（~6KB）上同步 RuntimeStart
+                // 模型加载栈深；禁止在 mqtt_task（~6KB）上同步 RuntimeStart。
+                // 注意：**不能**把本任务栈放 PSRAM —— RuntimeStart 内部会做 NVS/FAT（facedb/persist）
+                // 等 flash 操作，PSRAM 栈在关闭 flash cache 时会触发
+                // `esp_task_stack_is_sane_cache_disabled()` 断言并重启（实测，见 FINDINGS F-10）。
                 if (xTaskCreate(FaceRuntimeStartWorker, "face_boot", DEEP_DOG_FACE_BOOT_TASK_STACK, nullptr, 2,
                                 nullptr) != pdPASS) {
                     s_runtime_start_inflight.store(false, std::memory_order_release);
-                    ESP_LOGW(TAG, "SetEnabled(true) failed: face_boot task");
+                    ESP_LOGW(TAG, "SetEnabled(true) failed: face_boot task (free_int=%u largest_int=%u)",
+                             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
                     return;
                 }
             }

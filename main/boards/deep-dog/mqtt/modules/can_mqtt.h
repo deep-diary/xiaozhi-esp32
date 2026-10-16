@@ -29,10 +29,12 @@ public:
 
 private:
     static void FlushTimerCb(void* arg);
+    static void HeartbeatTimerCb(void* arg);
     static void FrameListener(const CanFrame* frame, int is_tx, void* ctx);
 
     void OnFrame(const CanFrame* frame, bool is_tx);
     void FlushFrames();
+    void EmitHeartbeat();
     void ApplyCmd(const char* json);
     void HandleTx(const char* json);
 
@@ -40,15 +42,18 @@ private:
     bool enabled_ = false;
     bool connected_ = false;
 
-    bool tunnel_ = false;
+    // 联调剖面默认全开（tunnel + 网页注入 + 不过滤标准帧）；量产须改回，见 12-can.md
+    bool tunnel_ = true;
     bool mirror_tx_ = true;
-    bool allow_tx_ = false;
-    bool ext_only_ = true;
+    bool allow_tx_ = true;
+    bool ext_only_ = false;
     int max_hz_ = 50;
     int batch_max_ = 32;
     uint32_t dropped_ = 0;
+    uint32_t hb_seq_ = 0;
 
     void* flush_timer_ = nullptr;
+    void* heartbeat_timer_ = nullptr;
     void* batch_mutex_ = nullptr;
     cJSON* pending_frames_ = nullptr;
     int64_t last_flush_us_ = 0;

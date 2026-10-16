@@ -6,7 +6,7 @@
 | capabilities | `dog`（可裁剪） |
 | 路由建议 | `/device/:deviceId/modules/dog` |
 | 契约 | ready（字段） |
-| YAML | `dog/cmd`、`dog/status` |
+| YAML | `cmd/dog`、`status/dog` |
 
 ## 入口卡文案
 
@@ -21,8 +21,8 @@
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
-| `dog/status` | ↑ | 0 | true |
-| `dog/cmd` | ↓ | 1 | false |
+| `status/dog` | ↑ | 0 | true |
+| `cmd/dog` | ↓ | 1 | false |
 
 ## 样例 JSON
 
@@ -39,9 +39,9 @@
 ## Steps（前端）
 
 - **Step 1** 校验 `capabilities.dog`（非狗产品应无此卡）。
-- **Step 2** 订阅 `dog/status`。
+- **Step 2** 订阅 `status/dog`。
 - **Step 3** 未 init 时仅开放 init；已 init 开放动作按钮。
-- **Step 4** 发布 `dog/cmd`。
+- **Step 4** 发布 `cmd/dog`。
 - **Step 5** unmount 退订。
 
 ## 固件实现

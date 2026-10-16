@@ -152,8 +152,8 @@
 {
   "state": "idle",
   "mode": "off",
-  "url": "https://live.deep-diary.com/deep-dog/dev/index.m3u8",
-  "lan_url": "http://192.168.31.25:8888/deep-dog/dev/index.m3u8",
+  "url": "https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8",
+  "lan_url": "http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8",
   "push_url": "",
   "error": "",
   "ts": 1710000000,
@@ -167,9 +167,9 @@
 {
   "state": "starting",
   "mode": "rtsp_push",
-  "url": "https://live.deep-diary.com/deep-dog/dev/index.m3u8",
-  "lan_url": "http://192.168.31.25:8888/deep-dog/dev/index.m3u8",
-  "push_url": "rtsp://192.168.31.25:8554/deep-dog/dev",
+  "url": "https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8",
+  "lan_url": "http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8",
+  "push_url": "rtsp://192.168.31.25:8554/deep-dog/{device_id}",
   "error": "no_rtp",
   "ts": 1710000005,
   "ts_iso": "2024-03-09T16:00:05Z"
@@ -182,9 +182,9 @@
 {
   "state": "streaming",
   "mode": "rtsp_push",
-  "url": "https://live.deep-diary.com/deep-dog/dev/index.m3u8",
-  "lan_url": "http://192.168.31.25:8888/deep-dog/dev/index.m3u8",
-  "push_url": "rtsp://192.168.31.25:8554/deep-dog/dev",
+  "url": "https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8",
+  "lan_url": "http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8",
+  "push_url": "rtsp://192.168.31.25:8554/deep-dog/{device_id}",
   "error": "",
   "ts": 1710000010,
   "ts_iso": "2024-03-09T16:00:10Z"
@@ -197,9 +197,9 @@
 {
   "state": "error",
   "mode": "rtsp_push",
-  "url": "https://live.deep-diary.com/deep-dog/dev/index.m3u8",
-  "lan_url": "http://192.168.31.25:8888/deep-dog/dev/index.m3u8",
-  "push_url": "rtsp://192.168.31.25:8554/deep-dog/dev",
+  "url": "https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8",
+  "lan_url": "http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8",
+  "push_url": "rtsp://192.168.31.25:8554/deep-dog/{device_id}",
   "error": "push_error",
   "ts": 1710000020,
   "ts_iso": "2024-03-09T16:00:20Z"
@@ -212,8 +212,8 @@
 {
   "state": "idle",
   "mode": "off",
-  "url": "https://live.deep-diary.com/deep-dog/dev/index.m3u8",
-  "lan_url": "http://192.168.31.25:8888/deep-dog/dev/index.m3u8",
+  "url": "https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8",
+  "lan_url": "http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8",
   "push_url": "",
   "error": "unknown_action",
   "ts": 1710000030,

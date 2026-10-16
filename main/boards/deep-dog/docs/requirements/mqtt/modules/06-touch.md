@@ -6,7 +6,7 @@
 | capabilities | `touch` |
 | 路由建议 | `/device/:deviceId/modules/touch` |
 | 契约 | ready；驱动 + `touch_mqtt` + 阈值/标定 |
-| YAML | `touch/status`、`touch/cmd` |
+| YAML | `status/touch`、`cmd/touch` |
 | 参考 | [touch_btn](../../../../touch_btn/) |
 
 ## 入口卡文案
@@ -30,8 +30,8 @@
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
-| `touch/status` | ↑ | 0 | true |
-| `touch/cmd` | ↓ | 1 | false |
+| `status/touch` | ↑ | 0 | true |
+| `cmd/touch` | ↓ | 1 | false |
 
 触发：按键事件 / 改阈 / 标定进度（约 250ms）/ 重连。retain 便于晚进页。
 
@@ -68,7 +68,7 @@
 | `count` / `samples` | 已采峰 / 目标次数 |
 | `error` | 失败时：`timeout` / `cancelled` 等 |
 
-## touch/cmd
+## cmd/touch
 
 | action | 说明 |
 |--------|------|
@@ -121,7 +121,7 @@
 
 ## 按键语义对照（非 MQTT 字段）
 
-`touch/status` **物理态 + 阈值**；不含 dog/servo 业务动作名。Web 静态说明见 [touch_btn/README.md](../../../../touch_btn/README.md#应用与按键映射)。
+`status/touch` **物理态 + 阈值**；不含 dog/servo 业务动作名。Web 静态说明见 [touch_btn/README.md](../../../../touch_btn/README.md#应用与按键映射)。
 
 | 手势 | log | dog（`DEEP_DOG_DOG_ENABLE`） | servo（占位） |
 |------|-----|------------------------------|---------------|
@@ -141,20 +141,20 @@
 |----|------|----------------------|
 | `chord_short_1_2` / `_1_3` / `_2_3` | Chord | （业务层，见狗控表） |
 | `hold1_tap2` | Hold+Tap | 进入配对 / 播报码 |
-| `hold1_tap3` | Hold+Tap | 请求解绑（`pairing/request`） |
+| `hold1_tap3` | Hold+Tap | 请求解绑（`event/pairing/request`） |
 
 ## Steps（前端）
 
 1. 校验 `capabilities.touch`。
-2. 订 `touch/status`；渲染三键 + `thresholds` 滑条。
-3. 调阈 → `touch/cmd` `set_thresholds`；标定 → `calibrate`，看 `calib.count`。
+2. 订 `status/touch`；渲染三键 + `thresholds` 滑条。
+3. 调阈 → `cmd/touch` `set_thresholds`；标定 → `calibrate`，看 `calib.count`。
 4. unmount 退订 status（不必长期订 cmd）。
 
 ## 固件实现
 
 - `TouchThresholds` 运行时结构；NVS `touch_thr`；开机 `LoadThresholdsFromNvs`
 - 标定：idle 采噪声 → soft_thr 采 N 峰 → `press_abs_min = min(peaks)*0.45`（夹紧）并 persist
-- `touch_mqtt` 订 `touch/cmd`；标定中约 250ms 刷新 status
+- `touch_mqtt` 订 `cmd/touch`；标定中约 250ms 刷新 status
 
 ## 验收
 

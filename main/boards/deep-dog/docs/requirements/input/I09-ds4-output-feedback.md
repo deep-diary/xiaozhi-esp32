@@ -1,17 +1,17 @@
-# I09 · PC 桥 handle/cmd `output` 反馈（DS4 灯震 / Xbox 震）
+# I09 · PC 桥 cmd/handle `output` 反馈（DS4 灯震 / Xbox 震）
 
 | 项 | 内容 |
 |----|------|
 | 状态 | **契约 + 桥 DS4 HID + Xbox pygame rumble + 固件 PublishOutput** |
-| 范围 | PC 桥执行 `handle/cmd` `action: output`：DS4 灯条 RGB + 双马达；Xbox 双马达（忽略 led） |
+| 范围 | PC 桥执行 `cmd/handle` `action: output`：DS4 灯条 RGB + 双马达；Xbox 双马达（忽略 led） |
 | 前置 | [I03](./I03-source-pc-mqtt-bridge.md) |
-| 非目标 | 与板载 `led/cmd`（WS2812）混用；板载 BT `action: rumble`（见 [I02](./I02-source-bluepad32-xbox.md)） |
+| 非目标 | 与板载 `cmd/led`（WS2812）混用；板载 BT `action: rumble`（见 [I02](./I02-source-bluepad32-xbox.md)） |
 
 ## 目标链路
 
 ```text
 告警源 / 前端调试
-  --PUB QoS1-->  …/handle/cmd  { action: output, … }
+  --PUB QoS1-->  …/cmd/handle  { action: output, … }
                     │
          ┌──────────┴──────────┐
          ▼                     ▼
@@ -22,7 +22,7 @@
 
 手柄插在电脑上时，**只有桥能写输出**。固件可 PUBLISH 同 Topic（告警）；下行 `output` 设备侧安静忽略（防自回环）。
 
-## 契约 · `handle/cmd` `action: output`
+## 契约 · `cmd/handle` `action: output`
 
 ```json
 {
@@ -51,12 +51,12 @@
 | Xbox / pygame | `--layout xbox` | 仅震 |
 | 本地冒烟 | `--probe-output` / `--probe-xbox-rumble` | 不经 MQTT |
 
-- 订 `handle/cmd`；仅处理 `action=output`
+- 订 `cmd/handle`；仅处理 `action=output`
 - **macOS**：Xbox 震动优先 **蓝牙**连 Mac；USB 有线常不震（Game Controller / SDL 限制）
 
 ## 固件
 
-- `DeepDogHandleMqtt::PublishOutput(...)` → `Publish("handle/cmd", …)`
+- `DeepDogHandleMqtt::PublishOutput(...)` → `Publish("cmd/handle", …)`
 - 下行收到 `output`：安静忽略
 - 联调钩：`action=disable` 末尾可发一次弱震 + 微红灯（桥在线时 DS4 可见）
 

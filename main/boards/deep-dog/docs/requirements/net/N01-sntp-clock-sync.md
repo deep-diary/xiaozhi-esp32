@@ -11,9 +11,9 @@
 
 WiFi 联网后自动 SNTP 同步 UTC，使 `time()` 为可信 Unix 秒（≥ `1e9`），支撑：
 
-- `face/registry` 的 `last_seen_at` / `updated_at`
+- `status/face/registry` 的 `last_seen_at` / `updated_at`
 - Immich `fileCreatedAt` / `fileModifiedAt`
-- `device/status` / `device/info` 的 `ts` / `ts_iso`
+- `status/device` / `info/device` 的 `ts` / `ts_iso`
 - 主动招呼 `greet_gap_sec` 间隔判断
 
 ## 边界
@@ -41,7 +41,7 @@ WiFi 联网后自动 SNTP 同步 UTC，使 `time()` 为可信 Unix 秒（≥ `1e
 | `DeepDogNowUnixSec()` | 已同步 → Unix 秒；否则 boot 秒 |
 | `DeepDogSntpSetOnSynced(fn)` | 首次同步回调（MQTT 侧重发 registry/status） |
 
-## MQTT · `device/status` 增字段
+## MQTT · `status/device` 增字段
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -52,7 +52,7 @@ WiFi 联网后自动 SNTP 同步 UTC，使 `time()` 为可信 Unix 秒（≥ `1e
 ## 验收
 
 - [ ] WiFi 获 IP 后 30s 内串口出现 `SNTP synced` 日志
-- [ ] `device/status.clock_synced=true`；`ts` 与浏览器 UTC 偏差 &lt; 5s
-- [ ] 识别熟人后 `face/registry` 出现有效 `last_seen_at`（≥1e9）
-- [ ] SNTP 同步后 retain `face/registry` 重发一次（便于 Web/Django 镜像）
+- [ ] `status/device.clock_synced=true`；`ts` 与浏览器 UTC 偏差 &lt; 5s
+- [ ] 识别熟人后 `status/face/registry` 出现有效 `last_seen_at`（≥1e9）
+- [ ] SNTP 同步后 retain `status/face/registry` 重发一次（便于 Web/Django 镜像）
 - [ ] `DEEP_DOG_SNTP_ENABLE=0` 时行为与改前一致（依赖 OTA 设钟）

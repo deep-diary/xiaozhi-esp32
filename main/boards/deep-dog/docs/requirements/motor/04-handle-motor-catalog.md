@@ -50,5 +50,5 @@
 
 ## 验收
 
-- [ ] `set_profile=motor` 后 `handle/keymap` catalog 含上表
+- [ ] `set_profile=motor` 后 `status/handle/keymap` catalog 含上表
 - [ ] A 使能、B 失能；`rx` 满偏≈±12.57、回中→0（见 [05](./05-analog-axis-sample.md)）

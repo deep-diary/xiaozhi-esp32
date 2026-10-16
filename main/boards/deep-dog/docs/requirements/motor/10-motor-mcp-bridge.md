@@ -15,11 +15,11 @@
 
 | Topic | 方向 | retain | 说明 |
 |-------|------|--------|------|
-| `motor/tools` | ↑ | true | 工具 catalog（name、description、inputSchema） |
-| `motor/mcp_result` | ↑ | false | 单次 `mcp_call` 执行结果 |
-| `motor/cmd.mcp_call` | ↓ | — | `{ "name": "self.motor.get_status", "arguments": { "motor_id": 1 } }` |
+| `status/motor/tools` | ↑ | true | 工具 catalog（name、description、inputSchema） |
+| `event/motor/mcp_result` | ↑ | false | 单次 `mcp_call` 执行结果 |
+| `cmd/motor.mcp_call` | ↓ | — | `{ "name": "self.motor.get_status", "arguments": { "motor_id": 1 } }` |
 
-同网段亦可走 WebSocket MCP（`device/info.ws_mcp_port`），与本 Topic **并存**。
+同网段亦可走 WebSocket MCP（`info/device.ws_mcp_port`），与本 Topic **并存**。
 
 ## 固件
 
@@ -28,6 +28,6 @@
 
 ## 验收
 
-- [ ] 连 broker 后 retain 收到 `motor/tools`，含 `self.motor.initialize` 等
-- [ ] `motor/cmd` 发 `mcp_call` 后收到 `motor/mcp_result`
-- [ ] 与 `motor/status` 位置点动不冲突
+- [ ] 连 broker 后 retain 收到 `status/motor/tools`，含 `self.motor.initialize` 等
+- [ ] `cmd/motor` 发 `mcp_call` 后收到 `event/motor/mcp_result`
+- [ ] 与 `status/motor` 位置点动不冲突

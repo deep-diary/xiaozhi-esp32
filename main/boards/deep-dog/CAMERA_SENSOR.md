@@ -202,7 +202,7 @@ A：前者在 **CPU 采帧后**软件 swap（xiaozhi `EspVideo`）；后者在 *
 
 | 角色 | 地址（示例） | 定义位置 |
 |------|------|----------|
-| **设备 RTSP 推流（内网）** | `rtsp://192.168.31.25:8554/deep-dog/dev` 或 `…/deep-dog/{mac}` | `DeepDogMqttConfig::RtspPushUrlForDeviceId` |
+| **设备 RTSP 推流（内网）** | `rtsp://192.168.31.25:8554/deep-dog/{device_id}` 或 `…/deep-dog/{mac}` | `DeepDogMqttConfig::RtspPushUrlForDeviceId` |
 | **局域网 HLS 播放** | `http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8` | `LanHlsUrlForDeviceId` |
 | **外网 HLS 播放** | `https://live.deep-diary.com/deep-dog/{device_id}/index.m3u8` | `PublicHlsUrlForDeviceId`；MQTT `stream/status.url` |
 | **MQTT 上报** | `push_url`=内网 RTSP，`url`=外网 HLS | [`mqtt/modules/stream_mqtt.cc`](mqtt/modules/stream_mqtt.cc) |

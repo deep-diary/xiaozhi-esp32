@@ -44,7 +44,7 @@ Dispatcher **fan-out**：每个更新送给全部已注册 App；App 内按 **`p
 | `b` | 打印 | 停止运控 | 见 keymap |
 | `start` | 打印 | `dog.init()` | 见 keymap |
 
-`handle/cmd` `disable` 时：dog / keymap **不执行**执行器；log 仍可打印。
+`cmd/handle` `disable` 时：dog / keymap **不执行**执行器；log 仍可打印。
 
 ## 与 touch App 关系
 

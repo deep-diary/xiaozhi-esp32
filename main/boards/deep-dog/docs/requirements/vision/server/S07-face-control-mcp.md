@@ -9,7 +9,7 @@
 ## 1. 目标
 
 - **FaceControl** 统一 API：MQTT / WS MCP / HTTP 共用。
-- 检测与识别**分拆开关**；人脸库 CRUD；alias 合并；`face/registry` retain。
+- 检测与识别**分拆开关**；人脸库 CRUD；alias 合并；`status/face/registry` retain。
 - MCP **聚合工具**（≤3），避免小智云端 32 tool 上限膨胀。
 
 ## 2. FaceControl API
@@ -46,11 +46,11 @@
 
 `DEEP_DOG_FACE_RECOG_MAX` = **32**（`FaceMeta` 静态 BSS ~4.5KiB；满库按 embedding 槽 `last_seen_at` LRU 淘汰）。
 
-`face/registry` 增 `feat_count`、`max_count`；entries 增 `last_seen_at`（上次识别见面，Unix 秒）。
+`status/face/registry` 增 `feat_count`、`max_count`；entries 增 `last_seen_at`（上次识别见面，Unix 秒）。
 
 ## 5. 验收
 
 - [ ] MCP/ MQTT / WS 均可 set_mode、list、manage
 - [ ] alias merge 后侧脸命中 source feat 显示 canonical 名
 - [ ] asset_id 持久化；Immich 稍后命名后绑定成功
-- [ ] `face/registry` retain 与 list 一致
+- [ ] `status/face/registry` retain 与 list 一致

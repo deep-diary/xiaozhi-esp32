@@ -6,8 +6,8 @@
 | 优先级 | P1（稳定性 / 可扩展性；非阻塞当前功能交付） |
 | 依赖 | [S04](./S04-local-face-numeric-id.md) · [S05](./S05-immich-real-name.md) · [S08](./S08-rtsp-face-wdt-mitigation.md) · [01-device MQTT](../../mqtt/modules/01-device.md) · [N01 SNTP](../../net/N01-sntp-clock-sync.md) |
 | 代码落点 | `face_ai/*` · `esp_sparkbot_board.cc` · `mqtt/memory_report.*` · `sdkconfig.defaults.esp32s3` · `vision/vision_frame_hub.cc` · `http-server/*` |
-| 基线状态 | **评估文档**（待 Agent 按 §6 顺序逐项落地） |
-| 观测工具 | MCP `self.board.diagnostics` · MQTT `device/status` · `scripts/capture_deep_dog_baseline.sh` |
+| 基线状态 | **MEM-01 已落地**（带实测偏差修正）；**MEM-02 复核：已满足**；**MEM-04 已实测证伪**（勿按原文实施）；MEM-05/06 待评估（见 §5 状态列） |
+| 观测工具 | MCP `self.board.diagnostics` · MQTT `status/device` · `scripts/capture_deep_dog_baseline.sh` |
 
 ## 1. 背景
 
@@ -29,6 +29,18 @@ ESP32-S3 deep-dog（8MB PSRAM + ~400KB internal 池）在 **人脸 + 板级 MQTT
 | **`face_ready`** | **~13 KB** | **~3.5 KB** | **~231 B** | 检测+识别模型加载后 |
 | 稳态 idle（~40s） | ~17 KB | — | 仍 ~231 B | `health.warn` → `low_internal_heap` |
 
+### 2.1 复测基线（2026-10-16，F-12 落地 + MEM-01 落地后）
+
+| 阶段 | internal free | largest block | internal min | 备注 |
+|------|---------------|---------------|--------------|------|
+| 启动（httpd 之前，~13.4s） | **~10.1 KB** | **~3.6 KB** | 163 B | 实测 `dog_ws_mcp` retry log：`free_int=10135 largest_int=3584` |
+| WS-MCP + 数据点 REST 起动后（~14.3s） | **~5.1 KB** | **~1.8 KB** | — | **httpd 本身吃掉约 5KB internal**（4096 栈 + TCB/会话） |
+| VisionHub 起动后（~30s） | ~4.6 KB | ~1.8 KB | — | MEM-01 门控后启动；起动本身仍成功（相机/JPEG 缓冲走 PSRAM） |
+| 稳态 idel（~42s） | **~8.7 KB** | — | 163 B | `SystemInfo: sram(internal): free=8659`；PSRAM free ~7.3MB |
+
+> 关键结论：**WS-MCP 的 httpd 常驻约 5KB internal**；其「起不来」时（见 F-13）反而显示 free≈10KB ——
+> 即 WS-MCP 可用性与 internal 余量互为代价。要同时满足 face / VisionHub / WS-MCP，必须靠 §5 的净优化项。
+
 对比 **esp-sparkbot v2.2.2**（同 OV2640）：激活后 free ~110KB，idle ~82KB（无人脸栈与模型）。
 
 sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
@@ -41,7 +53,7 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 
 健康阈值（固件已实现，勿随意改语义）：
 
-- `dog_mem_rpt` / `device/status.health.warn`：`internal.free < 32768` → `low_internal_heap`
+- `dog_mem_rpt` / `status/device.health.warn`：`internal.free < 32768` → `low_internal_heap`
 - 启动门控：`DEEP_DOG_BOOT_MIN_INTERNAL_FREE=24KB`，`DEEP_DOG_BOOT_MIN_INTERNAL_LARGEST=12KB`（`face_ai_config.h`）
 
 ## 3. 架构约束（不可违反）
@@ -85,7 +97,7 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 
 1. face 模型加载 → `largest_internal` ≈ 3.5KB  
 2. `immich_late`（4096 字栈）创建失败 → Immich worker 延迟或失败  
-3. `device/status` 持续 `low_internal_heap`  
+3. `status/device` 持续 `low_internal_heap`  
 4. 极端情况下 TLS/OTA/新 task 因 **无连续 internal 块** 失败  
 
 ## 5. 优化项清单（按优先级）
@@ -96,20 +108,24 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 
 #### MEM-01 · 启动错峰（Face → Immich → VisionHub → HTTP 微调）
 
+**状态：✅ 已落地（2026-10-16，带实测偏差修正）**
+
 | 项 | 内容 |
 |----|------|
 | 预期收益 | 降低 face 模型加载与 camera/httpd 同时抢 internal 的概率；`largest` +5～15KB |
-| 改动 | `esp_sparkbot_board.cc` `StartPostActivationServices()`：Face runtime OK 且 `DeepDogMemoryWaitInternalReady(..., 8KB largest, ...)` 后再 `vision_hub->Start()`；HTTP/WS MCP 可保持现状或再 delay 1～2s |
-| 风险 | 首帧 RTSP/MJPEG 晚 1～3s |
-| 验收 | face_ready 后 `largest_internal ≥ 8192`；VisionHub 启动 log 晚于 `dog_face_rec: recognizer ready` |
+| 改动（实际） | `esp_sparkbot_board.cc` 两处 VisionHub 启动前加门控：`DeepDogMemoryWaitInternalReady("vision_hub", DEEP_DOG_VISION_HUB_MIN_INTERNAL_FREE(4KB), DEEP_DOG_VISION_HUB_MIN_INTERNAL_LARGEST(2KB), DEEP_DOG_VISION_HUB_MEMORY_WAIT_MS(3s))`；常量在 `face_ai_config.h`。另：**WS-MCP httpd 起动改为「等内存达标 + 多次重试」**（见 F-13），修掉「开机 largest<4KB → 本会话无 WS-MCP/数据点 REST」。 |
+| 实测偏差（重要） | 原文验收「face_ready 后 `largest_internal ≥ 8192`」**当前剖面不可达**：实测 VisionHub 起动时 `largest_int=1792B`，且**启动仍成功**（相机/JPEG 缓冲在 PSRAM）。按 8KB/15s 原文实施会变成「纯 15s 启动延迟」。故改为**短超时 + 可达阈值**的让路式门控。 |
+| 风险 | 首帧 RTSP/MJPEG 晚 ~3s（原为 15s） |
+| 验收（修正） | `largest_internal` 不低于门控阈值（4KB free / 2KB largest）即启动；VisionHub 启动不再因内存阻塞 15s |
 
 #### MEM-02 · 取消 `immich_late` 独立 internal 任务
 
+**状态：✅ 复核结论——已满足（无需改动）**
+
 | 项 | 内容 |
 |----|------|
-| 预期收益 | 省 4KB 栈；消除 `immich_late task create failed` |
-| 改动 | `face_ai_runtime.cc`：在 `dog_face_ai` 内 `vTaskDelay` 后调用现有 `DeepDogImmichInit()` 重试环；或 `ScheduleImmichWorkerAfterBoot()` 仅用 `DeepDogFaceTaskCreate` 且确认 PSRAM 栈可用 |
-| 风险 | 低；需确认 `PrepareConfig` 仍在 internal 上下文执行一次 |
+| 复核证据 | ① `ScheduleImmichWorkerAfterBoot()` 已用 `DeepDogFaceTaskCreate`（`face_task_util.h`：`xTaskCreateWithCaps(MALLOC_CAP_SPIRAM)` 优先，失败才回退 internal）→ **不占用 4KB internal**；② 原文要求的「`PrepareConfig` 仍在 internal 上下文执行一次」已满足：`DeepDogImmichPrepareConfig()` 在 `face_ai_runtime.cc:531`（`face_boot` 任务，**internal 栈**）先执行，`immich_late` 内的再次调用因 `s_config_ready` 短路为 no-op —— 这一点很关键：`DeepDogImmichApplyDefaultsIfEmpty()` 会读写 NVS（`LoadConfigFromNvs`/`SaveConfigToNvs`），若首次发生在 PSRAM 栈上会触发 `esp_task_stack_is_sane_cache_disabled` 断言（同 F-10）。 |
+| 残留风险 | 若将来有人把 `DeepDogImmichPrepareConfig()` 挪到 PSRAM 栈上下文，会立刻复现 F-10 类崩溃；已在 `immich_client.cc` 保留 `init skipped: PrepareConfig not done (internal stack required)` 告警。 |
 | 验收 | 无 `immich_late task create failed`；`dog_immich: immich worker ready` 在 face_ready 后 30s 内出现 |
 
 #### MEM-03 · 栈高水位审计 + trim
@@ -122,6 +138,13 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 | 验收 | 压测（face+RTSP+Immich）无 stack overflow；hwm 仍 >512 字节余量 |
 
 #### MEM-04 · `SPIRAM_MALLOC_RESERVE_INTERNAL` 128K → 96K 试验
+
+**状态：❌ 已实测证伪 —— 勿按原文实施**
+
+| 项 | 内容 |
+|----|------|
+| 实测（2026-10） | 128K→96K 后 internal **total 反而从 403955 降到 371187（少 32KB）**，且板级 MQTT 无法启动 → **已回滚**（详见 FINDINGS 第 7 轮）。 |
+| 结论 | 该项在当前 SDK 配置下不成立；如需回收 internal，应改走 MEM-03（栈 trim）+ MEM-05/06 + 常驻对象迁 PSRAM。 |
 
 | 项 | 内容 |
 |----|------|
@@ -136,6 +159,13 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 
 #### MEM-05 · 合并 `face_persist` + `face_facedb` 为单一 internal worker
 
+**状态：⏸ 暂不落地（前置条件未满足）**
+
+| 项 | 内容 |
+|----|------|
+| 阻塞原因 | ① 需 face 运行时**可跑**才能回归 `enroll/delete/clear_db/registry/Immich 绑定`（当前 `face_boot` 起不来，见 F-10）；② `clear_db` 会**删除已入库人脸**（`TC0500`/face 库 CRUD 需用户授权）；③ 属 `quiesce` 逻辑重构，回归面大、收益 3～6KB。 |
+| 建议顺序 | 先按 F-10「拆 internal-flash 小任务 + PSRAM 模型任务」让 face 起得来 → 再评估本项。 |
+
 | 项 | 内容 |
 |----|------|
 | 预期收益 | 省 ~3～6KB（一个任务栈 + 队列） |
@@ -145,12 +175,15 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 
 #### MEM-06 · 识别模型延迟加载（lazy `HumanFaceRecognizer`）
 
+**状态：⚠️ 部分已具备；本轮未落地（原因见下）**
+
 | 项 | 内容 |
 |----|------|
-| 预期收益 | face_ready 峰值 internal free +10～20KB |
-| 改动 | boot 仅 `DeepDogFaceDetectInit`；首次 `RecognizeProcess` / enroll 再 `DeepDogFaceRecognizeInit` |
-| 风险 | 首次识别延迟 1～2s；detect-only 路径需明确 |
-| 验收 | boot `face_ready` 时 free ≥ 25KB；首次 enroll 成功；detect 不受影响 |
+| 已具备 | 识别入口**已经是懒加载**：`face_recognize.cc::DeepDogFaceRecognizeProcess()` 首行即 `if (!DeepDogFaceRecognizeReady() && !DeepDogFaceRecognizeInit()) return;`。 |
+| 未改动的唯一 eager 点 | `face_ai_runtime.cc:561` 的 `DeepDogFaceRecognizeInit()`（RuntimeStart 内，internal 的 `face_boot` 栈）。 |
+| 为何不落地 | ① 若删掉该 eager init，首次初始化会发生在 `dog_face_ai` 任务（**PSRAM 栈**）上——模型加载在 PSRAM 栈的安全性**未验证**（F-10 同类风险，不可凭推测改动）；② 当前 face 根本起不来（见下），**无法端到端验证**该改动。 |
+| 关键结论 | **MEM-06 不是「face 起不来」的主因**。实测 `face_boot` 任务需要 **16KB 连续 internal**，而当前 `largest_int` 仅 1.8～4.3KB → 任务创建即失败（F-10）。正确方向是 F-10 §「正确方向 2」：把 `RuntimeStart` 拆成「internal 小任务做 NVS/FAT（persist/facedb）」+「PSRAM 任务做模型加载」，而不是继续推迟识别模型。 |
+| 验收（原文） | boot `face_ready` 时 free ≥ 25KB；首次 enroll 成功；detect 不受影响 |
 
 #### MEM-07 · `face_boot`（16KB）改 PSRAM 栈
 
@@ -159,7 +192,7 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 | 预期收益 | 动态启 face 时省 ~16KB internal |
 | 改动 | `DeepDogFaceAiSetEnabled(true)` 路径用 `DeepDogFaceTaskCreate` 替代 `xTaskCreate` |
 | 风险 | 模型加载在 PSRAM 栈上是否 100% 安全需实机验证（与 facedb 不同，主要是 heap） |
-| 验收 | MQTT `face/cmd enabled=true` 冷启动成功；无 cache_disabled assert |
+| 验收 | MQTT `cmd/face enabled=true` 冷启动成功；无 cache_disabled assert |
 
 #### MEM-08 · internal 紧张时禁止 heap fallback
 
@@ -181,7 +214,7 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 | 预期收益 | 待机 internal 显著升高 |
 | 改动 | `DEEP_DOG_FACE_AI_DEFAULT_ENABLED` 或拆分 detect/recog 默认 |
 | 风险 | 产品行为变化；需更新 [04-face MQTT](../../mqtt/modules/04-face.md) |
-| 验收 | 默认 boot 无 `recognizer ready`；`face/cmd` 可启全功能 |
+| 验收 | 默认 boot 无 `recognizer ready`；`cmd/face` 可启全功能 |
 
 #### MEM-10 · IMU / 非关键模块延后到 `face_ready` 之后
 
@@ -233,7 +266,7 @@ sdkconfig 相关（`sdkconfig.defaults.esp32s3`）：
 |------|-----------|----------|
 | 冷启动 | baseline 脚本 120s | 无 panic；`dog_face_ai runtime started`；Immich worker ready |
 | 人脸周期 | `scripts/test_deep_dog_face_cycle.sh` | FAILURES: none |
-| internal 健康 | MQTT `device/status` | 稳态 `mem.internal.free ≥ 16KB`（目标；当前 ~17KB） |
+| internal 健康 | MQTT `status/device` | 稳态 `mem.internal.free ≥ 16KB`（目标；当前 ~17KB） |
 | largest 块 | diagnostics | 稳态 `largest_free ≥ 8192`（目标；当前 ~3.5KB at face_ready） |
 | RTSP+脸 | stream start + 人脸 | 无 WDT；S08 验收 |
 | Immich | 出镜 + upload | `immich_asset_id` 可写入；S05 验收 |

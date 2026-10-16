@@ -50,6 +50,13 @@ DP_SERVO_INT_READER(dp_servo_read_type, type)
 DP_SERVO_INT_READER(dp_servo_read_min_angle, min_angle)
 DP_SERVO_INT_READER(dp_servo_read_max_angle, max_angle)
 
+// 写回调（Phase E）：写入目标角度 = 让舵机移动。ctx = sub_id（实例号）
+static bool dp_servo_write_target(void* ctx, int32_t v) {
+    const int idx = CtxToIndex(ctx);
+    if (idx < 0) return false;
+    return DeepDogServoSetAngle(idx, static_cast<int>(v), 0) == ESP_OK;
+}
+
 // ============================================================
 // 模板点定义（id 用 module.point_name，注册时按 sub_id 展开）
 // ============================================================
@@ -65,13 +72,13 @@ static const DataPointDef kServoTemplatePoints[kServoPointPerInstance] = {
         { .read_int = dp_servo_read_angle }, { nullptr },
     },
     {
-        "servo.target", "目标角度", "servo", nullptr, "舵机目标角度",
+        "servo.target", "目标角度", "servo", nullptr, "舵机目标角度（可写，写入即移动）",
         DP_TYPE_INT, "°", 0, -360.0f, 360.0f, 1,
         nullptr,
-        DP_ACCESS_RO, DP_CH_MQTT | DP_CH_HTTP | DP_CH_MCP,
+        DP_ACCESS_RW, DP_CH_MQTT | DP_CH_HTTP | DP_CH_MCP,
         DP_POLICY_ON_CHANGE, 0, 0,
         nullptr, nullptr,
-        { .read_int = dp_servo_read_target }, { nullptr },
+        { .read_int = dp_servo_read_target }, { .write_int = dp_servo_write_target },
     },
     {
         "servo.attached", "已挂载", "servo", nullptr, "舵机是否已挂载",

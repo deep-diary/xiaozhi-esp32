@@ -8,7 +8,7 @@
 
 ## 链路总览
 
-前缀：`deepdiary/deep-dog/{device_id}/`（例：`device_id=dev`）
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`；示例 `device_id=aabbccddeeff`）
 
 ```text
 ① 手柄 USB/BT HID report（厂商二进制）
@@ -17,10 +17,10 @@
 ② PC 桥内存快照（Normalize 后的 dict，尚未 MQTT）
        │  PUB QoS0
        ▼
-③ …/handle/input          ← 桥 → 设备
+③ …/cmd/handle/input          ← 桥 → 设备
        │  Hub 合并
        ▼
-④ …/handle/status         ← 设备 → 前端
+④ …/status/handle         ← 设备 → 前端
        │  前端 SUB status only
        ▼
 ⑤ 网页可视化
@@ -30,8 +30,8 @@
 |----|----------------|------|
 | ① 手柄→OS/HID | **本文件 §0**（说明级；非 JSON） | 二进制 HID report |
 | ② 桥内 Normalize | 见脚本 `read_snapshot()` | Python dict |
-| ③ `handle/input` | **§1** | JSON |
-| ④ `handle/status` | **§2** | JSON（与 input 同构） |
+| ③ `cmd/handle/input` | **§1** | JSON |
+| ④ `status/handle` | **§2** | JSON（与 input 同构） |
 | ⑤ 前端 | 只消费 ④ | — |
 
 桥日志里的 `STATUS …` = **④ 的回传**，不是 ① 的 HID 原始包。
@@ -69,7 +69,7 @@ button 15 == Touch Pad Click   → 映射为 buttons.touch (bool)
 | DS4 HID report（硬件→OS） | **有** | 有 |
 | pygame.Joystick（桥默认路径） | **无** | 有（btn 15） |
 | 桥 `--touchpad-xy`（hidapi 全量读） | **有** | 有（HID 派生） |
-| MQTT `handle/input\|status` | 可选 `touchpad` | 可选 `buttons.touch` |
+| MQTT `cmd/handle/input`、`status/handle` | 可选 `touchpad` | 可选 `buttons.touch` |
 | 前端 | 有 `touchpad` 画触点 | TOUCH 高亮 |
 
 结论：桥 **默认 HID 全量读**（触控/motion/灯震）；`--no-touchpad-xy` 回退 pygame（仅点击）。规格见 **[I06](./I06-touchpad-xy.md)** · **[I09](./I09-ds4-output-feedback.md)**。
@@ -80,9 +80,9 @@ button 15 == Touch Pad Click   → 映射为 buttons.touch (bool)
 
 ---
 
-## 1. PC 桥 → 设备：`handle/input`
+## 1. PC 桥 → 设备：`cmd/handle/input`
 
-Topic：`deepdiary/deep-dog/dev/handle/input`  
+Topic：`{prefix}/{device_id}/cmd/handle/input`（示例：`deep-trace/aabbccddeeff/cmd/handle/input`）  
 QoS 0 · retain false · `source` 固定 `"wifi"`
 
 ### 静置心跳（约每 150ms）
@@ -168,12 +168,12 @@ QoS 0 · retain false · `source` 固定 `"wifi"`
 | `l2`/`r2` | [0,1] |
 | `ps`/`l3`/`r3`/`touch`/`dpad_*` | **可选**；桥有则带，固件透传到 status |
 | `touchpad` | **可选**（I06）；`x/y` 主触点兼容；`contacts` 最多 2 指 |
-| `motion` | **可选**（I07）；机体系 **+X 右 / +Y 前 / +Z 上**；平放面朝上 → `accel_z ≈ -1 g`；gyro dps、accel g；≠ 板载 `imu/status` |
+| `motion` | **可选**（I07）；机体系 **+X 右 / +Y 前 / +Z 上**；平放面朝上 → `accel_z ≈ -1 g`；gyro dps、accel g；≠ 板载 `status/imu` |
 
-## 2. 设备 → 前端：`handle/status`
+## 2. 设备 → 前端：`status/handle`
 
-Topic：`deepdiary/deep-dog/dev/handle/status`  
-与 `handle/input` **同构**（Hub 合并后的当前请求）。前端 **只订本 Topic**。
+Topic：`{prefix}/{device_id}/status/handle`（示例：`deep-trace/aabbccddeeff/status/handle`）  
+与 `cmd/handle/input` **同构**（Hub 合并后的当前请求）。前端 **只订本 Topic**。
 
 终端里常见截断形态（与上表同一 JSON，字段可能省略到核心集若旧固件）：
 
@@ -218,9 +218,9 @@ STATUS {"connected":true,"source":"wifi","axes":{"lx":0,"ly":0,"rx":0,"ry":0},"b
 }
 ```
 
-## 2.1 告警 / 调试 → 桥：`handle/cmd` `output`（I09）
+## 2.1 告警 / 调试 → 桥：`cmd/handle` `output`（I09）
 
-Topic：`deepdiary/deep-dog/dev/handle/cmd`（QoS1）  
+Topic：`{prefix}/{device_id}/cmd/handle`（QoS1；示例：`deep-trace/aabbccddeeff/cmd/handle`）  
 设备或云 PUBLISH；**PC 桥 SUB** 后写 DS4 HID；设备下行收到 `output` 忽略。
 
 ```json
@@ -237,9 +237,9 @@ Topic：`deepdiary/deep-dog/dev/handle/cmd`（QoS1）
 
 ## 3. 前端侧
 
-- 订阅：仅 `…/handle/status`（及可选 `…/device/info` 读 `capabilities.handle`）
-- 不订阅：`handle/input`（避免与设备回环重复）
-- 调试区发的虚拟摇杆：走同一 `handle/input`，与 PC 桥等价
+- 订阅：仅 `…/status/handle`（及可选 `…/info/device` 读 `capabilities.handle`）
+- 不订阅：`cmd/handle/input`（避免与设备回环重复）
+- 调试区发的虚拟摇杆：走同一 `cmd/handle/input`，与 PC 桥等价
 
 ## 触控板：有没有坐标？
 
@@ -283,7 +283,7 @@ Topic：`deepdiary/deep-dog/dev/handle/cmd`（QoS1）
 
 ```bash
 # 桥（会 PUB input，并打印设备 STATUS）
-/usr/bin/python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id dev --layout ds4_sdl --hz 40
+/usr/bin/python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id aabbccddeeff --layout ds4_sdl --hz 40
 
 # 仅看原始 HID 下标
 /usr/bin/python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe

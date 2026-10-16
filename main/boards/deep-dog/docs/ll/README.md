@@ -46,3 +46,6 @@
 | [LL-003](./LL-003-ccache-cmake-cxx-features.md) | ccache 导致 CMake CXX 特性探测失败 + 新增源需 reconfigure | ccache / target_compile_features / GLOB / undefined reference |
 | [LL-004](./LL-004-httpd-and-datapoint-http.md) | HTTP/WS 服务与 ESP-IDF httpd 踩坑 | uri_match_fn / 通配符 URI 404 / ESP_ERR_HTTPD_TASK / internal 内存 / 复用 httpd |
 | [LL-005](./LL-005-restore-headers-and-union-size-measure.md) | 还原头文件后增量编译不生效 + 全模式固件体积实测方法 | Copy-Item mtime / ninja 假增量 / 全集体积 / nm 符号校验 |
+| [LL-006](./LL-006-serial-open-resets-esp32.md) | pyserial 打开 COM6 触发 ESP32 自动复位 | DTR/RTS / EN·GPIO0 / 自动下载电路 / 串口发现 / MQTT retain 发现 |
+| [LL-007](./LL-007-ide-edit-timeout-duplicate-write.md) | IDE 编辑工具超时后改动其实已落盘，重试会造成重复写入 | Edit 超时 / IDE Command timeout / redefinition / 重复应用 / 重试前先读 |
+| [LL-008](./LL-008-subinstance-cmd-flat-field.md) | 多实例写入 `<sub>_<point>` 与注册表 id `module.<sub>.<point>` 不一致 | 子实例 / has_sub_instances / cmd 扁平字段 / 契约与实现漂移 / 单实例用例掩盖 |

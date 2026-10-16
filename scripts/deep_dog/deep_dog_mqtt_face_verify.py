@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify deep-dog MQTT face/cmd + face/status (LAN and/or WSS).
+"""Verify deep-dog MQTT cmd/face + status/face (LAN and/or WSS).
 
 Suggested order: stop RTSP push first so VisionHub feeds face_ai
   /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
@@ -84,10 +84,10 @@ def validate_status(obj: dict) -> list[str]:
 
 
 def run_once(via: str, args: argparse.Namespace) -> int:
-    prefix = f"deepdiary/deep-dog/{args.device_id}"
-    status_topic = f"{prefix}/face/status"
-    cmd_topic = f"{prefix}/face/cmd"
-    info_topic = f"{prefix}/device/info"
+    prefix = f"deep-trace/{args.device_id}"
+    status_topic = f"{prefix}/status/face"
+    cmd_topic = f"{prefix}/cmd/face"
+    info_topic = f"{prefix}/info/device"
     topics = [(status_topic, 0), (info_topic, 0)]
 
     seen: dict[str, int] = {t: 0 for t, _ in topics}
@@ -125,13 +125,13 @@ def run_once(via: str, args: argparse.Namespace) -> int:
         except json.JSONDecodeError as e:
             field_errors.append(f"json:{e}")
             return
-        if msg.topic.endswith("device/info"):
+        if msg.topic.endswith("/info/device"):
             caps = obj.get("capabilities") or {}
             if "face" in caps:
                 caps_face["seen"] = True
                 caps_face["value"] = bool(caps["face"])
             return
-        if msg.topic.endswith("face/status"):
+        if msg.topic.endswith("/status/face"):
             field_errors.extend(validate_status(obj))
             if isinstance(obj.get("enabled"), bool):
                 enabled_seen.append(obj["enabled"])
@@ -201,17 +201,17 @@ def run_once(via: str, args: argparse.Namespace) -> int:
     client.disconnect()
 
     print(f"\n=== summary via={via} ===")
-    print(f"  face/status count={seen.get(status_topic, 0)} (min={args.min_msgs})")
-    print(f"  device/info count={seen.get(info_topic, 0)}")
+    print(f"  status/face count={seen.get(status_topic, 0)} (min={args.min_msgs})")
+    print(f"  info/device count={seen.get(info_topic, 0)}")
     if caps_face["seen"]:
         print(f"  capabilities.face={caps_face['value']}")
     if statuses:
-        print("  sample face/status:")
+        print("  sample status/face:")
         print("  " + json.dumps(statuses[0], ensure_ascii=False))
 
     ok = True
     if seen.get(status_topic, 0) < args.min_msgs:
-        print(f"FAIL: need >= {args.min_msgs} face/status", file=sys.stderr)
+        print(f"FAIL: need >= {args.min_msgs} status/face", file=sys.stderr)
         ok = False
     uniq_errs = sorted(set(field_errors))
     if uniq_errs:
@@ -244,7 +244,7 @@ def main() -> int:
     ap.add_argument("--password", default=os.environ.get("DEEP_DOG_MQTT_PASS", ""))
     ap.add_argument("--wait", type=float, default=12.0)
     ap.add_argument("--min-msgs", type=int, default=2)
-    ap.add_argument("--toggle", action="store_true", default=True, help="send face/cmd off then on (default)")
+    ap.add_argument("--toggle", action="store_true", default=True, help="send cmd/face off then on (default)")
     ap.add_argument("--no-toggle", action="store_false", dest="toggle")
     args = ap.parse_args()
 

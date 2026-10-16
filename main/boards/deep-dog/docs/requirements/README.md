@@ -9,6 +9,7 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | **权威顺序** | [ROADMAP.md](./ROADMAP.md) |
 | **架构图集** | [architecture/](./architecture/index.html)（HTML + Mermaid；宏观→机制） |
 | **MQTT** | [mqtt/](./mqtt/)（M01 总览 + modules 前端详情页 + YAML） |
+| **功能/用例注册表** | [catalog/](./catalog/)（F/TC 编号 + 测试发现） |
 | **跨端接口契约** | [docs/interface/](../interface/)（设备 ⇄ deep-trace：MQTT/WS/HTTP 标准接口 + 架构审查建议） |
 | **控制输入** | [input/](./input/)（手柄双源；I-HANDLE；I08b 轴映射） |
 | **电机 / CAN** | [motor/](./motor/)（单电机联调；MOT） |
@@ -28,6 +29,8 @@ Deep-Dog 板级**需求与路线图**唯一入口。
 | 路径 | 内容 |
 |------|------|
 | [ROADMAP.md](./ROADMAP.md) | 可追溯总表 |
+| [catalog/](./catalog/) | **功能点（F）/ 测试用例（TC）注册表 + 全盘测试发现**（`F0001-…` / `TC0001-…`） |
+| [TEST_REPORT.md](./TEST_REPORT.md) | 最近一次全盘自动化测试报告 |
 | [architecture/](./architecture/index.html) | 板卡系统架构图集（Mermaid） |
 | [mqtt/](./mqtt/) | MQTT：M01、frontend、modules、YAML |
 | [docs/interface/](../interface/) | **跨端接口契约**（deep-dog ⇄ deep-trace-com）：架构审查 + MQTT/WS/HTTP 标准接口 |

@@ -16,6 +16,6 @@
 
 ## MQTT
 
-`motor/cmd` 可选 `teaching_motor_ids: [1,2,3,4,5,6]`，与 `teaching: start|play` 联用。
+`cmd/motor` 可选 `teaching_motor_ids: [1,2,3,4,5,6]`，与 `teaching: start|play` 联用。
 
 Snapshot：`{ "motors": [ { "motor_id", "samples", ... } ], "ts" }`。

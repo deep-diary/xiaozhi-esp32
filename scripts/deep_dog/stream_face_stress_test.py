@@ -75,7 +75,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    prefix = f"deepdiary/deep-dog/{args.device_id.strip().lower()}"
+    prefix = f"deep-trace/{args.device_id.strip().lower()}"
     received: dict[str, object] = {}
     checks: list[tuple[str, bool, str]] = []
 
@@ -89,16 +89,16 @@ def main() -> int:
         if rc != 0:
             print(f"MQTT connect failed rc={reason_code}")
             return
-        for suffix in ("device/info", "stream/status", "face/status", "imu/status"):
+        for suffix in ("info/device", "status/stream", "status/face", "status/imu"):
             client.subscribe(topic(prefix, suffix), qos=0)
 
     def on_message(_client, _userdata, msg):
         key_base = msg.topic.rsplit("/", 1)[-1]
-        if msg.topic.endswith("/stream/status"):
+        if msg.topic.endswith("/status/stream"):
             key_base = "stream_status"
-        elif msg.topic.endswith("/face/status"):
+        elif msg.topic.endswith("/status/face"):
             key_base = "face_status"
-        elif msg.topic.endswith("/device/info"):
+        elif msg.topic.endswith("/info/device"):
             key_base = "device_info"
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
@@ -123,10 +123,10 @@ def main() -> int:
     info0 = received.get("device_info_retain") or received.get("device_info_live")
     uptime0 = info0.get("uptime_s") if isinstance(info0, dict) else None
     reset0 = info0.get("reset_reason") if isinstance(info0, dict) else None
-    check("device/info baseline", isinstance(info0, dict), f"uptime_s={uptime0} reset={reset0}")
+    check("info/device baseline", isinstance(info0, dict), f"uptime_s={uptime0} reset={reset0}")
 
-    stream_cmd = topic(prefix, "stream/cmd")
-    face_cmd = topic(prefix, "face/cmd")
+    stream_cmd = topic(prefix, "cmd/stream")
+    face_cmd = topic(prefix, "cmd/face")
     now_ts = lambda: int(time.time())
 
     if args.auto_stop_wait > 0:

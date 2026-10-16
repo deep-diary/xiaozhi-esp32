@@ -19,7 +19,7 @@
 
 [`face_mqtt.cc`](../../../mqtt/modules/face_mqtt.cc) → [`FaceControl`](../../../face_ai/face_control.cc) → `face_ai_*`。
 
-MQTT `face/cmd` 字段映射到 FaceControl；[`face_mcp.cc`](../../../face_ai/face_mcp.cc) 注册聚合 MCP 工具。
+MQTT `cmd/face` 字段映射到 FaceControl；[`face_mcp.cc`](../../../face_ai/face_mcp.cc) 注册聚合 MCP 工具。
 
 ### 2.2 `mcp_call` 透传（motor / can）
 
@@ -34,17 +34,17 @@ MQTT `face/cmd` 字段映射到 FaceControl；[`face_mcp.cc`](../../../face_ai/f
 }
 ```
 
-白名单：`self.motor.*`、`self.can.*`。结果经 `motor/status`（或模块 status）回传。
+白名单：`self.motor.*`、`self.can.*`。结果经 `status/motor`（或模块 status）回传。
 
 ## 3. 扩展 face / stream（规划，未改 Topic 语义）
 
 | 模块 | 建议 cmd 扩展 | MCP 工具 | 说明 |
 |------|---------------|----------|------|
-| face | 保留现有 `face/cmd` 字段 | `self.face.*`（已注册） | 新能力先加 MCP + FaceControl，MQTT 增字段 |
+| face | 保留现有 `cmd/face` 字段 | `self.face.*`（已注册） | 新能力先加 MCP + FaceControl，MQTT 增字段 |
 | stream | 可选 `mcp_call` | `self.camera.*` 等 | `take_photo` 等重栈操作继续独立 task |
 | led/servo/dog | 可选 `mcp_call` 或域 API | 已有 `self.led_strip.*` / `self.dog.*` | 与 motor 同模式 |
 
-**禁止**：用 MCP 替代 `face/status`、`face/registry` retain、`stream/status`、`device/status`。
+**禁止**：用 MCP 替代 `status/face`、`status/face/registry` retain、`status/stream`、`status/device`。
 
 ## 4. 与 WS MCP 关系
 
@@ -67,4 +67,4 @@ MQTT `face/cmd` 字段映射到 FaceControl；[`face_mcp.cc`](../../../face_ai/f
 
 - 删除现有 MQTT Topic
 - 设备 WS 公网暴露替代 EMQX
-- 把 `device/status` 心跳改为 MCP 轮询
+- 把 `status/device` 心跳改为 MCP 轮询

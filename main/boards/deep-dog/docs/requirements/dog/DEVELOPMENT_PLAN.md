@@ -52,7 +52,7 @@
 | 六     | **安全：堵转与最大力矩保护**                                                | 高（硬件保护）       | 新增                                                     |
 | 七     | **运动品质：大步插值 + 运控模式**                                           | 高（体验与性能）     | 在现有步态与 `motor` 上增强                              |
 | 八     | **动作库：晃身、横移、丰富跳舞**                                            | —                    | **已完成**                                               |
-| 九     | **IMU：BMI270 + MQTT `imu/status`**                                       | 中（感知/闭环前置）  | 对齐 thumble；对外含 [M01](../mqtt/M01-board-mqtt-protocol.md) |
+| 九     | **IMU：BMI270 + MQTT `status/imu`**                                       | 中（感知/闭环前置）  | 对齐 thumble；对外含 [M01](../mqtt/M01-board-mqtt-protocol.md) |
 | 十     | **视觉（已迁出）** | — | 见 [../ROADMAP.md](../ROADMAP.md)（V-S01～V-C04） |
 | 十一   | **RK3588 CAN 与小智协同** | 中高 | 协议与网关设计 |
 | 十二   | **ROS：状态/控制上报 rviz**                                                 | 中（调试与仿真对齐） | 桥接层                                                   |
@@ -193,7 +193,7 @@
 | ---- | -------------- | --------------------------------------------- |
 | 9.1  | 硬件确认       | **型号拍板 BMI270**（与 [`deep-thumble/sensor`](../../../../deep-thumble/sensor/) 一致）；接线写入 `config.h` I2C |
 | 9.2  | 驱动与采样任务 | 可移植 thumble `ImuSensor`；固定频率读取；可选简单低通 |
-| 9.3  | 对外           | 日志 / MCP 只读 / ROS 预留；**MQTT `imu/status`**（见 [M01](../mqtt/M01-board-mqtt-protocol.md) / [YAML](../mqtt/protocol/deep-dog-mqtt.yml)） |
+| 9.3  | 对外           | 日志 / MCP 只读 / ROS 预留；**MQTT `status/imu`**（见 [M01](../mqtt/M01-board-mqtt-protocol.md) / [YAML](../mqtt/protocol/deep-dog-mqtt.yml)） |
 
 **MQTT 字段（摘要）**：`ok`、`accel_x/y/z`（m/s²）、`gyro_x/y/z`（dps）、`accel_g`、`pitch`/`roll`（deg）、`ts`；建议发布约 5–10 Hz。
 
@@ -201,7 +201,7 @@
 
 - 静态：Z 轴约 1g，水平放置三轴合理。
 - 动态：晃动时波形连续；与阶段七冲击测试可交叉验证。
-- MQTT：订阅 `.../imu/status` 可见与日志一致的加速度。
+- MQTT：订阅 `.../status/imu` 可见与日志一致的加速度。
 
 ---
 

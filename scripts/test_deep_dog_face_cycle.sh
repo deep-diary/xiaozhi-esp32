@@ -9,7 +9,7 @@ DURATION="${1:-150}"
 PORT="${ESP_PORT:-/dev/cu.usbmodem1101}"
 BROKER="${MQTT_BROKER:-192.168.31.25}"
 DEVICE_ID="${MQTT_DEVICE_ID:-1051db847e88}"
-PREFIX="deepdiary/deep-dog/${DEVICE_ID}"
+PREFIX="deep-trace/${DEVICE_ID}"
 
 export IDF_PATH="${IDF_PATH:-/Volumes/MacExtStorage/projects/esp-idf-v5.5.2}"
 export IDF_PYTHON_ENV_PATH="${IDF_PYTHON_ENV_PATH:-$HOME/.espressif/python_env/idf5.5_py3.11_env}"
@@ -68,7 +68,7 @@ registry_payload = {"raw": None, "parsed": None, "after_clear": None}
 mqtt_done = {"clear_db": False, "registry_ok": False, "device_ready": False}
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
-    client.subscribe(f"{prefix}/face/registry", qos=0)
+    client.subscribe(f"{prefix}/status/face/registry", qos=0)
 
 def maybe_send_cmds(client):
     if not mqtt_done["device_ready"]:
@@ -76,14 +76,14 @@ def maybe_send_cmds(client):
     if mqtt_done.get("cmds_sent"):
         return
     mqtt_done["cmds_sent"] = True
-    client.publish(f"{prefix}/face/cmd", json.dumps({"action": "clear_db", "ts": int(time.time())}), qos=1)
+    client.publish(f"{prefix}/cmd/face", json.dumps({"action": "clear_db", "ts": int(time.time())}), qos=1)
     time.sleep(8)
-    client.publish(f"{prefix}/face/cmd", json.dumps({"action": "ping_immich", "ts": int(time.time())}), qos=1)
+    client.publish(f"{prefix}/cmd/face", json.dumps({"action": "ping_immich", "ts": int(time.time())}), qos=1)
     time.sleep(2)
-    client.publish(f"{prefix}/face/cmd", json.dumps({"action": "refresh_status", "ts": int(time.time())}), qos=1)
+    client.publish(f"{prefix}/cmd/face", json.dumps({"action": "refresh_status", "ts": int(time.time())}), qos=1)
 
 def on_message(client, userdata, msg):
-    if msg.topic.endswith("/face/registry"):
+    if msg.topic.endswith("/status/face/registry"):
         try:
             text = msg.payload.decode("utf-8", errors="replace")
             registry_payload["raw"] = text

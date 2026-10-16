@@ -31,16 +31,16 @@ def topic(prefix: str, suffix: str) -> str:
 
 
 def wait_live(client: mqtt.Client, prefix: str, seconds: float = 25.0) -> bool:
-    """设备在线时 imu/status 约 20s 一条（non-retain）。"""
+    """设备在线时 status/imu 约 20s 一条（non-retain）。"""
     seen = {"ok": False}
 
     def on_message(_c, _u, msg):
-        if msg.topic.endswith("/imu/status") and not msg.retain:
+        if msg.topic.endswith("/status/imu") and not msg.retain:
             seen["ok"] = True
 
     old = client.on_message
     client.on_message = on_message
-    client.subscribe(topic(prefix, "imu/status"), qos=0)
+    client.subscribe(topic(prefix, "status/imu"), qos=0)
     deadline = time.time() + seconds
     while time.time() < deadline and not seen["ok"]:
         time.sleep(0.2)
@@ -56,7 +56,7 @@ def main() -> int:
     parser.add_argument("--device-ip", default="", help="override IP from device/info")
     args = parser.parse_args()
 
-    prefix = f"deepdiary/deep-dog/{args.device_id.strip().lower()}"
+    prefix = f"deep-trace/{args.device_id.strip().lower()}"
     received: dict[str, object] = {}
     checks: list[tuple[str, bool, str]] = []
 
@@ -70,23 +70,22 @@ def main() -> int:
         if rc != 0:
             print(f"MQTT connect failed rc={reason_code}")
             return
-        for suffix in ("device/info", "face/status", "face/registry", "person/active", "imu/status"):
+        for suffix in ("info/device", "status/face", "status/face/registry", "status/person/active", "status/imu"):
             client.subscribe(topic(prefix, suffix), qos=0)
         print(f"subscribed {prefix}/…")
 
     def on_message(_client, _userdata, msg):
-        suffix = msg.topic.rsplit("/", 1)[-1]
-        # topic 末段可能重复（如 face/status 与 track/status 均为 status）
-        if msg.topic.endswith("/face/status"):
+        # kind-first（REQ-IOT-310）：末段不再唯一，按完整后缀归类
+        if msg.topic.endswith("/status/face"):
             key_base = "face_status"
-        elif msg.topic.endswith("/device/info"):
+        elif msg.topic.endswith("/info/device"):
             key_base = "device_info"
-        elif msg.topic.endswith("/face/registry"):
+        elif msg.topic.endswith("/status/face/registry"):
             key_base = "face_registry"
-        elif msg.topic.endswith("/person/active"):
+        elif msg.topic.endswith("/status/person/active"):
             key_base = "person_active"
         else:
-            key_base = suffix.replace("/", "_")
+            key_base = msg.topic.rsplit("/", 1)[-1].replace("/", "_")
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
         except Exception:
@@ -143,7 +142,7 @@ def main() -> int:
         "detect_interval_ms": 500,
         "ts": int(time.time()),
     }
-    client.publish(topic(prefix, "face/cmd"), json.dumps(cmd), qos=1)
+    client.publish(topic(prefix, "cmd/face"), json.dumps(cmd), qos=1)
     deadline = time.time() + 12.0
     status = None
     while time.time() < deadline:
@@ -165,7 +164,7 @@ def main() -> int:
 
     print("\n=== Step 3: recognize off, detect on ===")
     client.publish(
-        topic(prefix, "face/cmd"),
+        topic(prefix, "cmd/face"),
         json.dumps({"enabled": True, "recognize_enabled": False, "ts": int(time.time())}),
         qos=1,
     )
@@ -186,7 +185,7 @@ def main() -> int:
 
     print("\n=== Step 4: restore recognize ===")
     client.publish(
-        topic(prefix, "face/cmd"),
+        topic(prefix, "cmd/face"),
         json.dumps({"enabled": True, "recognize_enabled": True, "ts": int(time.time())}),
         qos=1,
     )

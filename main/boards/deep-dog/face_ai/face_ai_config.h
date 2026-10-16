@@ -292,4 +292,22 @@
 #define DEEP_DOG_BOOT_MEMORY_WAIT_MS 15000
 #endif
 
+/**
+ * MEM-01（启动错峰）：VisionHub（摄像头/RTSP/JPEG）启动前的 internal 门控。
+ * 目的：避免 face 模型加载与 camera/JPEG 抢 internal；只在明显低内存时短暂让路。
+ *
+ * 实测（2026-10-16）：VisionHub 在 `largest_int=1792B` 时也能正常启动（相机/JPEG 缓冲走 PSRAM），
+ * 故这里取「短超时 + 可达阈值」——只做 ~3s 让路，不做硬等待（原 8KB/15s 阈值实测永不可达，
+ * 变成纯 15s 启动延迟，见 FINDINGS F-13 附注）。
+ */
+#ifndef DEEP_DOG_VISION_HUB_MIN_INTERNAL_FREE
+#define DEEP_DOG_VISION_HUB_MIN_INTERNAL_FREE (4 * 1024)
+#endif
+#ifndef DEEP_DOG_VISION_HUB_MIN_INTERNAL_LARGEST
+#define DEEP_DOG_VISION_HUB_MIN_INTERNAL_LARGEST (2 * 1024)
+#endif
+#ifndef DEEP_DOG_VISION_HUB_MEMORY_WAIT_MS
+#define DEEP_DOG_VISION_HUB_MEMORY_WAIT_MS 3000
+#endif
+
 #endif  // _DEEP_DOG_FACE_AI_CONFIG_H_

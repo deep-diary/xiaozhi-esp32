@@ -10,15 +10,20 @@
  *
  * 注：复杂过程性操作（如 motor.scan、face.recognize）仍由各模块独立注册，
  *     不进入数据点自动生成体系。
+ *
+ * **实现方式（F-12 修复）**：不再为每个数据点创建常驻堆对象，而是实现
+ * `McpServer::AutoToolSource`——工具名/描述/schema 在 `tools/list`、`tools/call`
+ * 时按需生成。因此工具数量与 internal 堆占用**解耦**（此前 75 个工具约 20~30KB
+ * 常驻 internal，内存紧张时只能整批跳过注册）。
+ *
+ * 参考：docs/requirements/catalog/FINDINGS.md F-12
  */
 
 class McpServer;
 
 /**
- * 为所有带 DP_CH_MCP 标志的数据点自动注册 MCP get/set 工具。
- * 调用方在 MCP server 启动后、各模块注册完自定义工具后调用。
+ * 挂接数据点自动工具源（幂等、**常数内存**，可在开机时无条件调用）。
  *
- * @param mcp_server  MCP server 实例
- * @return            自动注册的工具数量
+ * @return 当前注册表中会暴露的工具数量（仅用于日志；后续随点位注册动态变化）
  */
 int RegisterDataPointMcpTools(McpServer& mcp_server);

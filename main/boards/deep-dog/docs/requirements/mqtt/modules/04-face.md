@@ -5,8 +5,8 @@
 | module_id | `face` |
 | capabilities | `face`（入口卡；含原 person 能力） |
 | 路由建议 | `/device/:deviceId/modules/face` |
-| 契约 | ready；`face/registry` retain；`person/active` ready |
-| YAML | `face/cmd`、`face/status`、`face/registry`；`person/active` |
+| 契约 | ready；`status/face/registry` retain；`status/person/active` ready |
+| YAML | `cmd/face`、`status/face`、`status/face/registry`；`status/person/active` |
 | 说明 | **实时框/跟踪 UI 在 [02-stream](./02-stream.md)**；本页做人脸开关、清库、间隔、Immich 轮播与打招呼 |
 
 ## 入口卡文案
@@ -20,16 +20,16 @@
 | 分区 | 内容 |
 |------|------|
 | **检测控制** | `enabled` / `recognize_enabled` / `pipeline` / `detect_interval_ms`；`action=clear_db` |
-| **人脸库** | 订 `face/registry`；rename / delete_one / merge |
-| **当前身份** | `faces[]`、`display_name`；可选订 `person/active` |
+| **人脸库** | 订 `status/face/registry`；rename / delete_one / merge |
+| **当前身份** | `faces[]`、`display_name`；可选订 `status/person/active` |
 | **Immich / 打招呼** | 按身份拉相册轮播；节流打招呼（见下） |
-| **实时画面** | 不嵌主直播；链到 Stream 页。预留日后 `face/thumb` |
+| **实时画面** | 不嵌主直播；链到 Stream 页。预留日后 `event/face/thumb` |
 
 兼容：`/modules/person` → redirect → `/modules/face`；`/modules/track` → `/modules/stream#track`。
 
 ## 与推流
 
-固件 `DEEP_DOG_FACE_AI_DURING_RTSP=1`：**可与 RTSP 推流同时检测**。Stream 页订 `face/status` 画框即可。
+固件 `DEEP_DOG_FACE_AI_DURING_RTSP=1`：**可与 RTSP 推流同时检测**。Stream 页订 `status/face` 画框即可。
 
 识别依赖检测出框；**不存在**「关检测、只识别」。省电/静默身份用 `pipeline=identity`（检测间隔=识别间隔）。
 
@@ -37,17 +37,17 @@
 
 | Topic | 方向 | QoS | retain | 说明 |
 |-------|------|-----|--------|------|
-| `…/face/status` | ↑ | 0 | false | on_change 实时框 + **≈30s 控制态心跳**（非 retain，晚订阅靠心跳/`refresh_status`） |
-| `…/face/registry` | ↑ | 0 | **true** | 已注册 canonical 人脸库 |
-| `…/face/immich/status` | ↑ | 0 | **true** | Immich 配置 + 探活（见 [04-face-immich-mqtt](./04-face-immich-mqtt.md)） |
-| `…/face/cmd` | ↓ | 1 | false | 见字段表 |
-| `…/person/active` | ↑ | 0 | true | primary 身份变化 |
-| `…/face/thumb` | ↑ | 0 | false | **planned**，默认不发 |
-| `…/track/*` | — | — | — | UI 在 Stream 页 |
+| `…/status/face` | ↑ | 0 | false | on_change 实时框 + **≈30s 控制态心跳**（非 retain，晚订阅靠心跳/`refresh_status`） |
+| `…/status/face/registry` | ↑ | 0 | **true** | 已注册 canonical 人脸库 |
+| `…/status/face/immich` | ↑ | 0 | **true** | Immich 配置 + 探活（见 [04-face-immich-mqtt](./04-face-immich-mqtt.md)） |
+| `…/cmd/face` | ↓ | 1 | false | 见字段表 |
+| `…/status/person/active` | ↑ | 0 | true | primary 身份变化 |
+| `…/event/face/thumb` | ↑ | 0 | false | **planned**，默认不发 |
+| `…/cmd/track`、`…/status/track` | — | — | — | UI 在 Stream 页 |
 
-前缀：`deepdiary/deep-dog/{device_id}/`。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）。字段以 [YAML](../protocol/deep-dog-mqtt.yml) 为准。
 
-## 字段表 · `face/cmd`
+## 字段表 · `cmd/face`
 
 兼容旧报文：仅 `{ "enabled": bool, "ts" }`。
 
@@ -74,9 +74,9 @@
 | `live` | 按 `detect_interval_ms` 检测（可偏快）；识别按固件 recog 间隔（默认约 2s） |
 | `identity` | 检测与识别**同一** `detect_interval_ms` |
 
-跟踪开关用独立 [`track/cmd`](./05-track.md)，不进 `face/cmd`。
+跟踪开关用独立 [`cmd/track`](./05-track.md)，不进 `cmd/face`。
 
-## 字段表 · `face/status`
+## 字段表 · `status/face`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -88,9 +88,9 @@
 | `primary` / `faces[]` | — | 框 + `local_id` / `display_name` |
 | `ts` | int | Unix 秒 |
 
-**晚订阅**：`retain=false`，MQTT 重连时会 force 发一帧；之后检测关且画面不变时 fingerprint 去重会跳过。**固件每 ≈30s 强制发一帧**（含 `enabled`/`recognize_enabled` 等控制态，框可为空）。前端 mount 时可发 `face/cmd {"action":"refresh_status"}` 立即拉一帧。
+**晚订阅**：`retain=false`，MQTT 重连时会 force 发一帧；之后检测关且画面不变时 fingerprint 去重会跳过。**固件每 ≈30s 强制发一帧**（含 `enabled`/`recognize_enabled` 等控制态，框可为空）。前端 mount 时可发 `cmd/face {"action":"refresh_status"}` 立即拉一帧。
 
-## 样例 · `face/cmd`
+## 样例 · `cmd/face`
 
 **开/关（兼容）**
 
@@ -152,9 +152,9 @@
 { "action": "clear_db", "ts": 1710000000 }
 ```
 
-拍照视觉解释已迁到 [02-stream](./02-stream.md)（`stream/cmd` `take_photo` → `stream/photo`），不在本模块。
+拍照视觉解释已迁到 [02-stream](./02-stream.md)（`cmd/stream` `take_photo` → `event/stream/photo`），不在本模块。
 
-## 样例 · `face/status`
+## 样例 · `status/face`
 
 ```json
 {
@@ -179,7 +179,7 @@
 
 - **`w` / `h`**：当前**采集帧**像素尺寸（联调默认 240×240；S06 §9 规划 **640×480**）。与 RTSP/HLS 推流分辨率（§9 规划 **320×240**）可不同，见 [S06 §9](../../vision/server/S06-higher-resolution.md)。
 
-## 样例 · `face/registry`
+## 样例 · `status/face/registry`
 
 ```json
 {
@@ -206,12 +206,12 @@
 ```
 
 - **`feat_count` / `max_count`**：embedding 槽用量（UI 显示 `20/32`）；`count` 为 canonical 人数。
-- **`clock_synced` / `ts_iso`**：与 [N01 SNTP](../../net/N01-sntp-clock-sync.md)、`device/status` 一致；前端应用 **`last_seen_iso`**（UTC `Z` 后缀）展示「上次见面」，勿把 `last_seen_at` 当本地墙钟秒解析（否则会误判设备时钟超前 8h）。
+- **`clock_synced` / `ts_iso`**：与 [N01 SNTP](../../net/N01-sntp-clock-sync.md)、`status/device` 一致；前端应用 **`last_seen_iso`**（UTC `Z` 后缀）展示「上次见面」，勿把 `last_seen_at` 当本地墙钟秒解析（否则会误判设备时钟超前 8h）。
 - **`last_seen_at`**：上次成功识别或 **enroll 成功**（Unix 秒，UTC）；与 `updated_at`（meta 写入，同为 Unix 秒）分离。init 补 orphan 槽不写此字段。
 - **`updated_at`**：元数据变更时刻（Unix 秒，`time()` / SNTP）；**禁止**使用 `esp_timer`  boot 毫秒。时钟前提见 [N01 SNTP](../../net/N01-sntp-clock-sync.md)。
 - **满库 LRU**：`feat_count >= max_count` 时新人 enroll 淘汰 `last_seen_at` 最久槽位（tie：优先 placeholder / 无 Immich）。
 
-## `person/active`
+## `status/person/active`
 
 ```json
 { "local_id": 2, "display_name": "张三", "immich_person_id": "uuid-optional", "ts": 1710000000 }
@@ -219,14 +219,14 @@
 
 无人时可不发或发空身份。打招呼：前端/对话服务对「已知人」做 cooldown（如 300–1800s），设备只保证身份事件。
 
-## `face/thumb`（planned，本期不实现）
+## `event/face/thumb`（planned，本期不实现）
 
 事件触发 JPEG base64 小图；默认关。见计划评估：优先新人脸 1 张，禁止按检测频率刷整帧。
 
 ## Steps（前端）
 
 - **Step 1** `capabilities.face`；无独立 Person/Track 卡。
-- **Step 2** 订 `face/status`；可选 `person/active`。
+- **Step 2** 订 `status/face`；可选 `status/person/active`。
 - **Step 3** 控件：enable、pipeline、interval、clear_db（确认框）。
 - **Step 4** Immich 轮播 + 节流打招呼；实时看流 → Stream 页。
 - **Step 5** unmount 退订。
@@ -235,13 +235,13 @@
 
 - `DURING_RTSP=1`；`clear_db` 清 facedb+NVS+session（recognizer 未就绪时亦 wipe `/facedb/db` 文件，避免 Init 恢复旧库）。
 - `live` / `identity` 分频；`detect_interval_ms` 运行时夹紧 200–5000。
-- **`face/registry` retain 与 `face/status` 语义分离**：status 为实时框；registry 为 canonical 已注册库。
-- **boot 默认关 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=0`，云台/手柄联调）：不加载检测/识别模型，减轻 internal 堆压力，避免 MQTT 断连；MQTT `face/cmd` `enabled:true` 可再开。
+- **`status/face/registry` retain 与 `status/face` 语义分离**：status 为实时框；registry 为 canonical 已注册库。
+- **boot 默认关 Face AI**（`DEEP_DOG_FACE_AI_DEFAULT_ENABLED=0`，云台/手柄联调）：不加载检测/识别模型，减轻 internal 堆压力，避免 MQTT 断连；MQTT `cmd/face` `enabled:true` 可再开。
 - **boot 默认开 Face AI**（显式 `DEEP_DOG_FACE_AI_DEFAULT_ENABLED=1`）且 **`DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION=1`（默认）** 时：WiFi IP 后**不**立即启 Face；等小智 **OTA/激活完成**（`Application::OnActivationComplete` → `post_activation` 内存报告）且 internal 达标后再 `DeepDogFaceAiRuntimeStart()`。串口：`post_activation` → `face_ready`。
 - **关闭延后**（`DEEP_DOG_BOOT_DEFER_HEAVY_UNTIL_ACTIVATION=0`）：恢复 WiFi IP 后立即启 Face/hub/MQTT（联调旧行为）。
-- **推流**默认关（`DEEP_DOG_VISION_PUSH_AT_BOOT=0`）；`stream/cmd` 再开。
-- **`face/cmd` lazy-start**：先创建 `face_persist`（internal，NVS meta）、**`face_facedb`（internal，facedb enroll/delete/clear）** 与 `dog_face_ai`（**优先 PSRAM 栈**，仅检测/feat/内存 query），`dog_immich` 仍为 **internal 栈**；再加载检测/识别模型。见 [S08 §3.1](../../vision/server/S08-rtsp-face-wdt-mitigation.md)。
-- **`face/cmd` 变更检测/识别开关成功后**，须 republish registry（`esp_timer` 异步 publish）。
+- **推流**默认关（`DEEP_DOG_VISION_PUSH_AT_BOOT=0`）；`cmd/stream` 再开。
+- **`cmd/face` lazy-start**：先创建 `face_persist`（internal，NVS meta）、**`face_facedb`（internal，facedb enroll/delete/clear）** 与 `dog_face_ai`（**优先 PSRAM 栈**，仅检测/feat/内存 query），`dog_immich` 仍为 **internal 栈**；再加载检测/识别模型。见 [S08 §3.1](../../vision/server/S08-rtsp-face-wdt-mitigation.md)。
+- **`cmd/face` 变更检测/识别开关成功后**，须 republish registry（`esp_timer` 异步 publish）。
 
 ## 验收
 
@@ -249,7 +249,7 @@
 - [ ] `clear_db` 后身份清空可重测
 - [ ] `pipeline` / 间隔在 status 回显
 - [ ] 入口无独立 Person 卡；Track UI 在 Stream
-- [ ] 有 enrolled 库的设备：`face/registry` retain `count≥1`，entries 与 `face/status` 识别 id/名称一致
+- [ ] 有 enrolled 库的设备：`status/face/registry` retain `count≥1`，entries 与 `status/face` 识别 id/名称一致
 - [ ] enroll 新人脸不触发 `esp_task_stack_is_sane_cache_disabled`（facedb 经 `face_facedb` internal 栈）
 - [ ] 冷启动 Face AI off→MQTT cmd `enabled:true` 后 registry 从 0 变为完整库
-- [ ] 晚订阅 Stream/Face 页：≤30s 内收到 `face/status` 控制态，或 `refresh_status` 立即回一帧
+- [ ] 晚订阅 Stream/Face 页：≤30s 内收到 `status/face` 控制态，或 `refresh_status` 立即回一帧

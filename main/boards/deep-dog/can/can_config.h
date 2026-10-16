@@ -24,6 +24,27 @@
 #define DEEP_DOG_CAN_TX_HEX_LOG 0
 #endif
 
+/**
+ * CAN 心跳帧（联调自检）：每 DEEP_DOG_CAN_HEARTBEAT_MS 毫秒向 MQTT 透传管线注入一条
+ * **模拟 RX 帧**（不写总线），用于区分「透传链路故障」与「总线无报文」。0 = 关闭。
+ */
+#ifndef DEEP_DOG_CAN_HEARTBEAT_MS
+#define DEEP_DOG_CAN_HEARTBEAT_MS 2000
+#endif
+
+/** 心跳帧 ID：29 位扩展，cmd_type=0x1F 保留段且 master_id=0，不与电机协议（master_id=0xFD）冲突 */
+#ifndef DEEP_DOG_CAN_HEARTBEAT_ID
+#define DEEP_DOG_CAN_HEARTBEAT_ID 0x1F000000UL
+#endif
+
+/**
+ * CAN 总线健康检查周期（ms）：轮询 TWAI 状态，Bus-Off / Stopped 时自恢复。
+ * TWAI 进入 Bus-Off 后不会自愈，必须 twai_initiate_recovery + twai_start，否则永久收不到帧。
+ */
+#ifndef DEEP_DOG_CAN_HEALTH_CHECK_MS
+#define DEEP_DOG_CAN_HEALTH_CHECK_MS 1000
+#endif
+
 /** TWAI 队列深度（增大可降低高频下发 send timeout） */
 #ifndef DEEP_DOG_CAN_TX_QUEUE_SIZE
 #define DEEP_DOG_CAN_TX_QUEUE_SIZE 96

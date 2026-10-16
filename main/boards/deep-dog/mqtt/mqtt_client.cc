@@ -3,9 +3,17 @@
 #include <mqtt_client.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/semphr.h>
+
+#if __has_include(<freertos/idf_additions.h>)
+#include <freertos/idf_additions.h>
+#define DEEP_DOG_HAS_TASK_CAPS 1
+#else
+#define DEEP_DOG_HAS_TASK_CAPS 0
+#endif
 
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 #include <esp_crt_bundle.h>
@@ -40,13 +48,28 @@ struct DeepDogMqttClient::Impl {
     std::atomic<bool> connected{false};
     std::atomic<bool> stopping{false};
     std::atomic<bool> connect_in_progress{false};
-    std::atomic<bool> reconnect_task_running{false};
+    /**
+     * 常驻重连 worker（**必须 internal 栈**）。
+     *
+     * 教训（F-15）：曾把本任务栈放 PSRAM 以规避 internal 碎片（F-01），但重连成功后会回调
+     * `connection_cb_(true)` → `DeepDogPairingMqtt::OnConnected()` → `Settings::GetBool()`
+     * → **NVS 读**（flash 操作，会关 cache）→ `esp_task_stack_is_sane_cache_disabled()` 断言重启。
+     * 串口实测：`assert failed: spi_flash_disable_interrupts_caches_and_other_cpu` + Backtrace 指向
+     * `ReconnectTask → OnConnection → pairing_mqtt.cc:68 LoadBoundState`。
+     *
+     * 因此改为：**开机一次性创建 internal 栈常驻 worker**，此后重连只发信号——
+     * 既不在重连时刻创建任务（原 F-01 目标：`reconnect task create failed` → 永久离线），
+     * 也不在 PSRAM 栈上执行 NVS。
+     */
+    TaskHandle_t reconnect_worker = nullptr;
+    SemaphoreHandle_t reconnect_signal = nullptr;
     int retry_count = 0;
     DeepDogMqttClient* owner = nullptr;
 
     static void OnMqttEvent(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
     static void OnReconnectTimer(void* arg);
-    static void ReconnectTask(void* arg);
+    static void ReconnectWorker(void* arg);
+    void EnsureReconnectWorker();
     void ScheduleReconnect();
     bool DoConnect();
     void DestroyHandleUnlocked();
@@ -56,6 +79,7 @@ DeepDogMqttClient::DeepDogMqttClient() : impl_(std::make_unique<Impl>()) {
     impl_->owner = this;
     impl_->events = xEventGroupCreate();
     impl_->mutex = xSemaphoreCreateMutex();
+    impl_->reconnect_signal = xSemaphoreCreateBinary();
     esp_timer_create_args_t targs = {
         .callback = &Impl::OnReconnectTimer,
         .arg = impl_.get(),
@@ -68,10 +92,23 @@ DeepDogMqttClient::DeepDogMqttClient() : impl_(std::make_unique<Impl>()) {
 
 DeepDogMqttClient::~DeepDogMqttClient() {
     Stop();
+    if (impl_->reconnect_worker) {
+        // 让常驻 worker 退出（loop 收到 stopping 后自删）
+        if (impl_->reconnect_signal) {
+            xSemaphoreGive(impl_->reconnect_signal);
+        }
+        for (int i = 0; i < 20 && impl_->reconnect_worker; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
     if (impl_->reconnect_timer) {
         esp_timer_stop(impl_->reconnect_timer);
         esp_timer_delete(impl_->reconnect_timer);
         impl_->reconnect_timer = nullptr;
+    }
+    if (impl_->reconnect_signal) {
+        vSemaphoreDelete(impl_->reconnect_signal);
+        impl_->reconnect_signal = nullptr;
     }
     if (impl_->events) {
         vEventGroupDelete(impl_->events);
@@ -201,27 +238,49 @@ void DeepDogMqttClient::Impl::ScheduleReconnect() {
     esp_timer_start_once(reconnect_timer, kReconnectIntervalUs);
 }
 
-void DeepDogMqttClient::Impl::ReconnectTask(void* arg) {
+void DeepDogMqttClient::Impl::EnsureReconnectWorker() {
+    if (reconnect_worker || stopping.load(std::memory_order_acquire)) {
+        return;
+    }
+    constexpr uint32_t kReconnectStack = kReconnectTaskStack;
+    // 必须 internal 栈（见 Impl::reconnect_worker 注释：重连成功回调链里有 NVS 读）
+    if (xTaskCreate(ReconnectWorker, "mqtt_reconn", kReconnectStack, this, kReconnectTaskPrio,
+                    &reconnect_worker) != pdPASS) {
+        reconnect_worker = nullptr;
+        ESP_LOGE(TAG, "reconnect worker create failed (free_int=%u largest_int=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    }
+}
+
+void DeepDogMqttClient::Impl::ReconnectWorker(void* arg) {
     auto* self = static_cast<Impl*>(arg);
-    if (!self || !self->owner) {
+    if (!self || !self->owner || !self->reconnect_signal) {
         if (self) {
-            self->reconnect_task_running.store(false, std::memory_order_release);
+            self->reconnect_worker = nullptr;
         }
         vTaskDelete(nullptr);
         return;
     }
-
-    ESP_LOGI(TAG, "reconnecting...");
-    if (self->DoConnect()) {
-        self->retry_count = 0;
-        if (self->owner->connection_cb_) {
-            self->owner->connection_cb_(true);
+    for (;;) {
+        if (xSemaphoreTake(self->reconnect_signal, portMAX_DELAY) != pdTRUE) {
+            continue;
         }
-    } else if (!self->stopping.load(std::memory_order_acquire)) {
-        self->ScheduleReconnect();
+        if (self->stopping.load(std::memory_order_acquire)) {
+            break;
+        }
+        ESP_LOGI(TAG, "reconnecting...");
+        if (self->DoConnect()) {
+            self->retry_count = 0;
+            if (self->owner->connection_cb_) {
+                // 此处为 internal 栈：回调链会读 NVS（Settings/配对），不得放 PSRAM（F-15）
+                self->owner->connection_cb_(true);
+            }
+        } else if (!self->stopping.load(std::memory_order_acquire)) {
+            self->ScheduleReconnect();
+        }
     }
-
-    self->reconnect_task_running.store(false, std::memory_order_release);
+    self->reconnect_worker = nullptr;
     vTaskDelete(nullptr);
 }
 
@@ -235,15 +294,11 @@ void DeepDogMqttClient::Impl::OnReconnectTimer(void* arg) {
         self->ScheduleReconnect();
         return;
     }
-    bool expected = false;
-    if (!self->reconnect_task_running.compare_exchange_strong(expected, true)) {
-        return;
-    }
-    BaseType_t ok = xTaskCreate(&Impl::ReconnectTask, "dog_mqtt_re", kReconnectTaskStack, self,
-                                kReconnectTaskPrio, nullptr);
-    if (ok != pdPASS) {
-        self->reconnect_task_running.store(false, std::memory_order_release);
-        ESP_LOGE(TAG, "reconnect task create failed");
+    // 常驻 worker 缺省在 Start 时已建好；若当时内存不足则在此补建（内部栈）
+    self->EnsureReconnectWorker();
+    if (self->reconnect_worker && self->reconnect_signal) {
+        xSemaphoreGive(self->reconnect_signal);
+    } else {
         self->ScheduleReconnect();
     }
 }
@@ -310,6 +365,8 @@ bool DeepDogMqttClient::Start(const DeepDogMqttSettings& settings) {
     impl_->retry_count = 0;
 
     ESP_LOGI(TAG, "start prefix=%s", prefix_.c_str());
+    // 常驻重连 worker：开机一次性创建（internal 栈），此后重连只发信号（F-15 / F-01）
+    impl_->EnsureReconnectWorker();
     if (!impl_->DoConnect()) {
         ESP_LOGW(TAG, "initial connect failed; will retry");
         impl_->ScheduleReconnect();
@@ -328,6 +385,10 @@ void DeepDogMqttClient::Stop() {
     impl_->stopping.store(true, std::memory_order_release);
     if (impl_->reconnect_timer) {
         esp_timer_stop(impl_->reconnect_timer);
+    }
+    // 唤醒常驻重连 worker 使其退出（其 loop 检测 stopping 后自删）
+    if (impl_->reconnect_signal) {
+        xSemaphoreGive(impl_->reconnect_signal);
     }
     if (impl_->mutex && xSemaphoreTake(impl_->mutex, portMAX_DELAY) == pdTRUE) {
         impl_->DestroyHandleUnlocked();

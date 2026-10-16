@@ -54,14 +54,14 @@ MotorProtocol::sendGetDeviceIdProbes   DeepMotor::processCanFrame
 
 | Topic | 方向 | 语义 |
 |-------|------|------|
-| `motor/scan` | ↓ | 触发异步扫描（payload 可为空 `{}`） |
-| `motor/scan_result` | ↑ | 扫描启动：`{ "started": true, "range": [1,127], "ts": ... }`；发现事件：`{ "event": "discovered", "id": N, "mcu_uid": "...", "ts": ... }` |
-| `motor/status` | ↑ retain | 发现新电机后自动更新；`motors[].mcu_uid` 在 `has_device_id` 时输出 |
+| `cmd/motor/scan` | ↓ | 触发异步扫描（payload 可为空 `{}`） |
+| `event/motor/scan` | ↑ | 扫描启动：`{ "started": true, "range": [1,127], "ts": ... }`；发现事件：`{ "event": "discovered", "id": N, "mcu_uid": "...", "ts": ... }` |
+| `status/motor` | ↑ retain | 发现新电机后自动更新；`motors[].mcu_uid` 在 `has_device_id` 时输出 |
 
 ## 验收
 
-- [ ] `motor/scan` 立即返回，无 6s+ 阻塞
+- [ ] `cmd/motor/scan` 立即返回，无 6s+ 阻塞
 - [ ] 探测 TX：dlc=8，data 全 0
 - [ ] RX 应答 id 低字节 `0xFE`，仅 `CanRxTask` 读帧
-- [ ] 应答到达后 `motor/status` retain 含新 `id` 与 `mcu_uid`
+- [ ] 应答到达后 `status/motor` retain 含新 `id` 与 `mcu_uid`
 - [ ] 无双读竞争（协议层不再 `readFrame` 等待）

@@ -5,7 +5,7 @@
 | 状态 | **契约 + 桥 + 固件透传**；前端展示 P1；云台 App planned |
 | 范围 | PS4 DualShock 全量 HID 中的 **gyro / accel**；经 `handle` 可选字段上报 |
 | 前置 | [I03](./I03-source-pc-mqtt-bridge.md) · [I06](./I06-touchpad-xy.md)（同 `--touchpad-xy` HID 路径） |
-| 非目标 | 与板载 BMI270 `imu/status` 合并；触控手势枚举（→ I08） |
+| 非目标 | 与板载 BMI270 `status/imu` 合并；触控手势枚举（→ I08） |
 
 ## 「可选 motion」含义
 
@@ -16,11 +16,11 @@
 | 有 | DS4 + `--touchpad-xy`（hidapi 全量 report）时带上 |
 | 无 | pygame / Xbox / 未开 HID → **整段省略**；旧端忽略 |
 | 单位 | `gyro_*`：**dps**；`accel_*`：**g**（约 ±4g 满量程） |
-| ≠ | `imu/status`（ESP32 板载 BMI270） |
+| ≠ | `status/imu`（ESP32 板载 BMI270） |
 
 ## 契约
 
-`handle/input` 与 `handle/status` 同构，可选：
+`cmd/handle/input` 与 `status/handle` 同构，可选：
 
 ```json
 "motion": {
@@ -95,7 +95,7 @@ gyro:  (x, y, z)_body = ( x, -z,  y)_hid          # det(R)·R·ω，保持右手
 
 - [x] YAML 含可选 `motion`
 - [x] 桥在 `--touchpad-xy` 下上报 motion
-- [x] 固件 `HandleMotion` + `handle/status` 透传
+- [x] 固件 `HandleMotion` + `status/handle` 透传
 - [x] 前端需求 REQ-IOT-230 含 MOTION 区
 - [x] 设备 status 透传
 - [ ] 前端 MOTION 区可见（P1）

@@ -6,7 +6,7 @@
 | capabilities | `imu` |
 | 路由建议 | `/device/:deviceId/modules/imu` |
 | 契约 | ready（六轴 + 12 路 switches） |
-| YAML | `imu/status` |
+| YAML | `status/imu` |
 | 芯片 | BMI270（对齐 thumble） |
 
 ## 入口卡文案
@@ -26,7 +26,7 @@
 |------|------|------|
 | 芯片 ODR | **200 Hz** | 硬件上限（BMI270 已配置） |
 | 本地采集 / 开关识别 | **100 Hz**（目标） | 独立 timer/task 读 `ReadRawData`；旋转/平移边沿检测 + 去抖 |
-| MQTT `imu/status` | **~10 Hz** | 六轴遥测 + 本周期开关边沿计数 |
+| MQTT `status/imu` | **~10 Hz** | 六轴遥测 + 本周期开关边沿计数 |
 
 100 Hz 相对 10 Hz 识别更稳；不必强拉满 200 Hz（I2C / CPU 更省，对人体尺度动作已够用）。
 
@@ -71,11 +71,11 @@
 
 示例 `device_id=aabbccddeeff` → 全路径：
 
-`deepdiary/deep-dog/dev/imu/status`
+`deep-trace/aabbccddeeff/status/imu`
 
-另需读 `device/info` 的 `capabilities.imu`（应为 `true` 才显示入口卡）。
+另需读 `info/device` 的 `capabilities.imu`（应为 `true` 才显示入口卡）。
 
-**无下行** `imu/cmd`（v0.1）。不新增开关专用 topic；边沿计数并入 `imu/status`。
+**无下行** `imu/cmd`（v0.1）。不新增开关专用 topic；边沿计数并入 `status/imu`。
 
 ## 样例 JSON
 
@@ -125,7 +125,7 @@
 ## Steps（前端）
 
 - **Step 1** 校验 `capabilities.imu`。
-- **Step 2** 订阅 `imu/status`（非 retain，需等下一帧）。
+- **Step 2** 订阅 `status/imu`（非 retain，需等下一帧）。
 - **Step 3** 渲染六轴与姿态（可图表）；`ok===false` 显示未就绪。
 - **Step 4** 渲染 12 路开关：本帧 `switches.* > 0` 时脉冲高亮/闪一下（可叠加次数角标；建议分组：旋转 6 + 平移 6）。
 - **Step 5** 无下行 cmd（v0.1）。
@@ -163,11 +163,11 @@
 
 ## 验收
 
-- [x] 固件发布 `imu/status`（有/无芯片均可）
-- [x] `device/info` 含 `capabilities.imu=true`
+- [x] 固件发布 `status/imu`（有/无芯片均可）
+- [x] `info/device` 含 `capabilities.imu=true`
 - [ ] 详情页可见三轴与姿态（前端）
 - [ ] 详情页可见 12 路开关脉冲（前端；固件 `switches` 已落地）
 - [ ] 无 capability 隐藏入口卡（前端）
 - [x] 本地 100 Hz 采集 + 边沿识别（固件）
 - [x] 12 路调度入口默认仅打 log（固件）
-- [x] `imu/status` 含 12 路 `switches.*` 边沿计数（固件）
+- [x] `status/imu` 含 12 路 `switches.*` 边沿计数（固件）

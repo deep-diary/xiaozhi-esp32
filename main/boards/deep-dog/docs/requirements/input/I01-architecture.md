@@ -11,13 +11,13 @@
 ```text
 Bluepad32 (Xbox BLE) ──┐
                        ├─► Normalize → HandleSnapshot
-PC MQTT handle/input ──┘         │
+PC MQTT cmd/handle/input ──┘         │
                                  ▼
                           HandleEventHub
                     ┌────────────┴────────────┐
                     │                         │
              handle_mqtt                 队列 / Poll
-             handle/status ↑          HandleAppDispatcher
+             status/handle ↑          HandleAppDispatcher
                                           ├─ HandleAppLog
                                           ├─ HandleAppDog
                                           └─ HandleAppServo
@@ -29,7 +29,7 @@ PC MQTT handle/input ──┘         │
 
 ## 快照模型（逻辑）
 
-与 MQTT `handle/status` / `handle/input` 对齐：
+与 MQTT `status/handle` / `cmd/handle/input` 对齐：
 
 | 字段 | 说明 |
 |------|------|
@@ -76,7 +76,7 @@ PS4 HID 原始下标与极性见 [I03](./I03-source-pc-mqtt-bridge.md)（实测�
 |------|------|
 | 后到覆盖 | 任一源更新快照即成为当前控制请求 |
 | `source` 标明 | status 上报当前生效源 |
-| `handle/cmd` `disable` | 停止 App 执行（本地运控）；仍可更新 / 上报 status 供网页观察 |
+| `cmd/handle` `disable` | 停止 App 执行（本地运控）；仍可更新 / 上报 status 供网页观察 |
 | `enable` | 恢复 App 执行 |
 | `pair` | 仅板载 BT 有意义（见 I02） |
 
@@ -88,8 +88,8 @@ PS4 HID 原始下标与极性见 [I03](./I03-source-pc-mqtt-bridge.md)（实测�
 | `TouchEventHub` | `HandleEventHub` |
 | `TouchAppDispatcher` | `HandleAppDispatcher` |
 | `ITouchApp` | `IHandleApp` |
-| `touch/status` 物理态 | `handle/status` 控制请求快照 |
-| 无下行注入（除阈值 cmd） | **`handle/input` 下行注入**（PC 桥） |
+| `status/touch` 物理态 | `status/handle` 控制请求快照 |
+| 无下行注入（除阈值 cmd） | **`cmd/handle/input` 下行注入**（PC 桥） |
 
 `touch` 与 `handle` **并行存在**：三键手势与手柄互不替代。
 

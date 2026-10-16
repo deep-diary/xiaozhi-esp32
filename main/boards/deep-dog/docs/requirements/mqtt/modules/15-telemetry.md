@@ -78,7 +78,7 @@
 
 ## 上报节奏
 
-5–60s；本板默认复用 `device/status` 心跳节奏（约 5s）另加节流（默认 15s，可 `DEEP_DOG_TELEMETRY_INTERVAL_US` 覆盖）。
+5–60s；本板默认复用 `status/device` 心跳节奏（约 5s）另加节流（默认 15s，可 `DEEP_DOG_TELEMETRY_INTERVAL_US` 覆盖）。
 
 ## 固件实现
 

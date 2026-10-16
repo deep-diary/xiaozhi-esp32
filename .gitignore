@@ -22,6 +22,9 @@ main/assets/lang_config.h
 main/mmap_generate_emoji.h
 .DS_Store
 .cache
+# 本机专属跨仓路径配置（不同电脑各自填写；模板 .trae/paths.local.example.json）
+.trae/*.local.json
+.cursor/*.local.json
 main/boards/deep-dog/face_ai/face_ai_secrets.h
 *.pyc
 *.bin

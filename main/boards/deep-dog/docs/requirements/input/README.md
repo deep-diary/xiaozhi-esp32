@@ -14,7 +14,7 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 
 - **双源并列（v0.1）**
   - 板载：**Bluepad32 + BTstack + Xbox BLE**（`source: bt`）— 固件宏 `DEEP_DOG_HANDLE_BT_ENABLE` 默认关
-  - 远端：PC Python 读 **PS4 / Xbox** → MQTT `handle/input`（`source: wifi`）— **已实现**
+  - 远端：PC Python 读 **PS4 / Xbox** → MQTT `cmd/handle/input`（`source: wifi`）— **已实现**
 - 驱动 / 桥只产出统一快照（axes / buttons / connected / source），**不含**狗 / 舵机语义。
 - 业务经 `HandleApp*` 拆分。
 
@@ -30,7 +30,7 @@ Deep-Dog **控制输入域**需求入口：统一手柄快照 → Hub → App；
 | [I06-touchpad-xy](./I06-touchpad-xy.md) | 触控板 XY + **双点 contacts** |
 | [I07-motion-gyro](./I07-motion-gyro.md) | DS4 手柄 gyro/accel（可选 `motion`） |
 | [I08-dynamic-key-action-mapping-eval](./I08-dynamic-key-action-mapping-eval.md) | **评估**：运行时按键→动作表 / MQTT+NVS（灯带试点） |
-| [I08a-keymap-mqtt-contract-draft](./I08a-keymap-mqtt-contract-draft.md) | **契约拍板**：`profile`=App 类；离散 keymap + retain `handle/keymap` |
+| [I08a-keymap-mqtt-contract-draft](./I08a-keymap-mqtt-contract-draft.md) | **契约拍板**：`profile`=App 类；离散 keymap + retain `status/handle/keymap` |
 | [I08b-axis-mapping](./I08b-axis-mapping.md) | **通用轴映射**：`axis_bindings`；跨 profile；`FireContinuous` |
 | [I09-ds4-output-feedback](./I09-ds4-output-feedback.md) | PC 桥 `output`：DS4 灯震 + Xbox pygame 震 |
 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png) | DualShock 4 实测标注（Linux） |

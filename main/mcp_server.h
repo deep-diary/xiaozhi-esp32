@@ -311,6 +311,45 @@ public:
     }
 };
 
+/**
+ * 「按需生成」的工具源：用于**批量**自动工具（如数据点归一化生成的 75~数百个
+ * `self.<module>.get_/set_<point>`）。
+ *
+ * 与 `AddTool`/`AddUserOnlyTool` 的区别：**不常驻任何 per-tool 堆对象**。
+ * 工具名/描述/schema 在 `tools/list`、`tools/call` 时**逐条现算**到调用方缓冲区，
+ * 源对象本身通常是一个静态单例（可由实现自行放 PSRAM）。
+ * 因此工具数量与 internal 堆占用**解耦**——这是 F-12 的修复方向：
+ * 原先 75 个工具每个都在 internal 常驻 name/description/properties/callback（约 20~30KB），
+ * 内存紧张时只能「全有或全无」地跳过注册。
+ */
+class AutoToolSource {
+public:
+    virtual ~AutoToolSource() = default;
+
+    virtual size_t ToolCount() const = 0;
+
+    /**
+     * 描述第 i 个工具（i ∈ [0, ToolCount)）。
+     * @param name      输出工具名（NUL 结尾，容量 name_cap）
+     * @param desc      输出描述（NUL 结尾，容量 desc_cap）
+     * @param props     输出入参 schema
+     * @param user_only 输出是否仅本地全量通道可见
+     * @return          false 表示 i 越界
+     */
+    virtual bool DescribeTool(size_t i, char* name, size_t name_cap,
+                              char* desc, size_t desc_cap,
+                              PropertyList* props, bool* user_only) const = 0;
+
+    /**
+     * 按名字调用。
+     * @param name  工具名（与 DescribeTool 产出一致）
+     * @param props 已按 schema 解析好的参数
+     * @param result 输出结果字符串（成功时）
+     * @return true 表示**名字匹配本源**（不论执行成败）；false 表示不属于本源
+     */
+    virtual bool InvokeTool(const char* name, const PropertyList& props, std::string* result) const = 0;
+};
+
 class McpServer {
 public:
     static McpServer& GetInstance() {
@@ -323,6 +362,9 @@ public:
     void AddTool(McpTool* tool);
     void AddTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
     void AddUserOnlyTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
+    /** 挂接批量自动工具源（单例，生命周期由调用方保证；可传 nullptr 卸载）。 */
+    void SetAutoToolSource(AutoToolSource* source) { auto_source_ = source; }
+    AutoToolSource* GetAutoToolSource() const { return auto_source_; }
     void ParseMessage(const cJSON* json);
     void ParseMessage(const std::string& message);
 
@@ -348,7 +390,20 @@ private:
     void GetToolsList(int id, const std::string& cursor, bool list_user_only_tools);
     void DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments);
 
+    /** 构造自动工具的 JSON（复用与 McpTool::to_json 相同的字段形态） */
+    static std::string AutoToolToJson(const char* name, const char* desc,
+                                      const PropertyList& props, bool user_only);
+    /** 按 schema 把 cJSON 参数解析进 props（写入默认值/实参）；缺失必填项返回 false */
+    static bool ParseArgs(PropertyList& props, const cJSON* args, std::string* error);
+    /**
+     * 在自动工具源里按名字查找并执行。
+     * @return true 表示名字命中本源（不论成败，结果写入 out）；false 表示本源无此工具
+     */
+    bool InvokeAutoToolSync(const std::string& tool_name, const cJSON* tool_arguments,
+                            InvokeResult* out);
+
     std::vector<McpTool*> tools_;
+    AutoToolSource* auto_source_ = nullptr;
 };
 
 #endif // MCP_SERVER_H

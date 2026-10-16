@@ -77,7 +77,7 @@
 ```text
 后端改配置 → MQTT cmd/config{action:refresh}
   → 设备 HTTP config/pull → 解析 io.ext_pins.mode
-  → 与当前 active_mode 不同 → 写入 NVS（pending_mode）+ 上报 device/info
+  → 与当前 active_mode 不同 → 写入 NVS（pending_mode）+ 上报 info/device
   → 设备重启 → 启动时按 pending_mode 初始化 → 成功则 active_mode = 该值
   → HTTP config/ack {status, applied_mode}
 ```
@@ -120,7 +120,7 @@
 | `uart` | `uart` | `can`, `motor`, `servo`, `gimbal`, `led` |
 | `io` / `ad` / `none` | — | 以上全部 |
 
-切换生效后必须**重发 `device/info`（retain）**，否则前端入口卡显隐会滞后。
+切换生效后必须**重发 `info/device`（retain）**，否则前端入口卡显隐会滞后。
 
 ## 5. 契约（跨端）
 
@@ -146,7 +146,7 @@
 - 设备端不合并模板，只解析最终值（CFG-01 §3.1）。
 - `gpio_a` / `gpio_b` **不出现在配置项中**（只读）。
 
-### 5.2 上行 `device/info.ext_pins`（新增字段，向后兼容）
+### 5.2 上行 `info/device.ext_pins`（新增字段，向后兼容）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -178,7 +178,7 @@
 |------|------|
 | 无网络 / 无 NVS 缓存（首启） | 用编译期默认 `DEEP_DOG_EXT_PIN_MODE` 启动 |
 | 下发值非法 | 拒绝 + 回滚，`capabilities`/`mode` 保持上一值 |
-| 重启后初始化失败 | 自动回滚到上一成功 `active_mode`，重发 `device/info`，`ack.status=failed` |
+| 重启后初始化失败 | 自动回滚到上一成功 `active_mode`，重发 `info/device`，`ack.status=failed` |
 | 连续回滚后仍失败 | 落到 `none`（两个脚都不占用），保证设备可连网可控 |
 | 配置解析失败 | 沿用上一版本配置（CFG-01 §7） |
 
@@ -195,7 +195,7 @@
 - [ ] 下发非法值（如 `mode="spi"`）→ `ack.status=partial` + `E_UNSUPPORTED_MODE`，设备 `mode` 不变
 - [ ] 下发 `gpio_a=99` → 忽略，`ack.status=partial` + `E_RO_PIN`，`gpio_a` 仍为 38
 - [ ] 单版固件可依次切到 `pwm` / `led` / `uart` / `io` / `none` 并各自可用
-- [ ] 目标模式初始化失败时自动回滚且设备仍可连网（`device/info` 正常）
+- [ ] 目标模式初始化失败时自动回滚且设备仍可连网（`info/device` 正常）
 - [ ] **回归**：切换过程不影响与 38/48 无关的功能（vision / face_ai / audio / MQTT / touch 正常）
 - [ ] **回归**：`none` 模式与旧「前端壳」剖面行为一致
 

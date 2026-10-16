@@ -3,7 +3,7 @@
 | 项 | 说明 |
 |----|------|
 | 固件 | [`motor/deep_motor_teaching.{h,cpp}`](../../../../motor/deep_motor_teaching.cpp) · [`deep_motor`](../../../../motor/deep_motor.cpp) 委托 |
-| MQTT | [14-motor](../../mqtt/modules/14-motor.md) `motor/cmd` · `motor/teaching/*` |
+| MQTT | [14-motor](../../mqtt/modules/14-motor.md) `cmd/motor` · `status/motor/teaching` · `event/motor/teaching` |
 | 前端 | [REQ-IOT-238](../../../../../../../deep-trace/docs/requirements/features/iot/modules/motor/238-module-motor-teaching.md) |
 
 ## 文档索引

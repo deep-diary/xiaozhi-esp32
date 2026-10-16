@@ -68,7 +68,7 @@ def mqtt_collect(prefix: str, via: str, wss: str, broker: str, port: int, user: 
     if mqtt is None:
         return {"error": "missing paho-mqtt"}
     out: dict[str, Any] = {}
-    topics = [f"{prefix}/face/registry", f"{prefix}/device/status", f"{prefix}/device/info"]
+    topics = [f"{prefix}/status/face/registry", f"{prefix}/status/device", f"{prefix}/info/device"]
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         rc = reason_code if isinstance(reason_code, int) else getattr(reason_code, "value", reason_code)
@@ -79,7 +79,16 @@ def mqtt_collect(prefix: str, via: str, wss: str, broker: str, port: int, user: 
             client.subscribe(t)
 
     def on_message(client, userdata, msg):
-        key = msg.topic.split("/")[-1]
+        # kind-first（REQ-IOT-310）：末段不再唯一，按完整后缀归类
+        t = msg.topic
+        if t.endswith("/status/face/registry"):
+            key = "registry"
+        elif t.endswith("/info/device"):
+            key = "info"
+        elif t.endswith("/status/device"):
+            key = "status"
+        else:
+            key = t.split("/")[-1]
         try:
             out[key] = json.loads(msg.payload.decode())
         except Exception as e:
@@ -178,7 +187,7 @@ def main() -> int:
     ap.add_argument("--json-out", default="")
     args = ap.parse_args()
 
-    prefix = f"deepdiary/deep-dog/{args.device_id}"
+    prefix = f"deep-trace/{args.device_id}"
     report: dict[str, Any] = {"ts": ts(), "device_id": args.device_id, "device_ip": args.device_ip}
 
     if args.via != "none":

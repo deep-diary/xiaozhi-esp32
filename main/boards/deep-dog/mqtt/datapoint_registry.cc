@@ -703,12 +703,27 @@ void DataPointRegistry::HandleCmdMessage(const std::string& module_name, const s
     const auto& entry = impl_->modules[it->second];
     int applied = 0;
 
+    // 字段名 → 数据点解析：
+    //  1. 单实例：`<point>`        → `module.<point>`
+    //  2. 子实例：`<sub>_<point>`   → `module.<sub>.<point>`（见 interface/04 §3.7）
+    const bool has_sub = entry.def.has_sub_instances;
+    auto ResolveField = [&](const char* field) -> const DataPointDef* {
+        if (has_sub) {
+            const char* us = strchr(field, '_');
+            if (us) {
+                std::string pid = std::string(module_name) + "." + std::string(field, us - field) +
+                                  "." + (us + 1);
+                if (const DataPointDef* dp = FindPoint(pid.c_str())) return dp;
+            }
+        }
+        std::string pid = std::string(module_name) + "." + field;
+        return FindPoint(pid.c_str());
+    };
+
     // 遍历 JSON 对象的每个字段，找到对应的数据点并写入
     cJSON* item = nullptr;
     cJSON_ArrayForEach(item, data) {
-        // 构造完整 point_id（简化：module.point_name）
-        std::string point_id = module_name + "." + item->string;
-        const DataPointDef* dp = FindPoint(point_id.c_str());
+        const DataPointDef* dp = ResolveField(item->string);
         if (!dp) continue;
 
         if (dp->access == DP_ACCESS_RO) continue;
@@ -749,7 +764,8 @@ void DataPointRegistry::HandleCmdMessage(const std::string& module_name, const s
             if (err == DP_ERR_OK) {
                 ++applied;
             } else {
-                ESP_LOGW(TAG, "HandleCmdMessage: write '%s' failed: err=%d", point_id.c_str(), err);
+                ESP_LOGW(TAG, "HandleCmdMessage: write '%s' failed: err=%d", dp->id ? dp->id : "?",
+                         err);
             }
         }
     }

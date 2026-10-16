@@ -6,7 +6,7 @@
 | capabilities | `motor` |
 | 路由建议 | `/device/:deviceId/modules/motor` |
 | 契约 | ready（本轮） |
-| YAML | `motor/cmd`、`motor/status` |
+| YAML | `cmd/motor`、`status/motor` |
 | 需求 | [docs/requirements/motor/03](../../motor/03-motor-mqtt.md) |
 | 驱动 | [`motor/`](../../../../motor/) |
 | 显示条件 | `capabilities.motor === true`（常与 `ext_pins.mode=can` 同时） |
@@ -26,18 +26,18 @@
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
-| `motor/status` | ↑ | 0 | true |
-| `motor/tools` | ↑ | 0 | true |
-| `motor/mcp_result` | ↑ | 0 | false |
-| `motor/cmd` | ↓ | 1 | false |
-| `motor/teaching/snapshot` | ↑ | 0 | false |
-| `motor/teaching/status` | ↑ | 0 | true |
+| `status/motor` | ↑ | 0 | true |
+| `status/motor/tools` | ↑ | 0 | true |
+| `event/motor/mcp_result` | ↑ | 0 | false |
+| `cmd/motor` | ↓ | 1 | false |
+| `event/motor/teaching` | ↑ | 0 | false |
+| `status/motor/teaching` | ↑ | 0 | true |
 
-前缀：`deepdiary/deep-dog/{device_id}/`。
+前缀：`{prefix}/{device_id}/`。
 
 ## 字段表
 
-### `motor/cmd`（稀疏）
+### `cmd/motor`（稀疏）
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -60,7 +60,7 @@
 | `mcp_call` | object | 否 | `{ name, arguments }` 执行 `self.motor.*` / `self.can.*` 工具（MOT-10） |
 | `ts` | int | 否 | Unix 秒 |
 
-### `motor/status`
+### `status/motor`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -72,7 +72,7 @@
 | `motors[].motor_enabled` | bool | 固件侧 enable/reset 意图（`self.can.enable_motor` 仅 CAN 使能，**不切换** `run_mode`；init 成功后也为 true） |
 | `motors[].run_mode` | string | `mit` / `position` / `speed` / `current`（下发后更新） |
 | `motors[].drive_state` | string | 反馈帧驱动状态：`reset` / `calibrate` / `run` |
-| `motors[].teaching_recording` | bool | 该电机是否正在示教录制（详情见 `motor/teaching/status`） |
+| `motors[].teaching_recording` | bool | 该电机是否正在示教录制（详情见 `status/motor/teaching`） |
 | `motors[].position_rad` | float | 实际角 |
 | `motors[].speed_rad_s` | float | 实际速 |
 | `motors[].torque_nm` | float | 实际矩 |
@@ -92,11 +92,11 @@
 
 **发布策略**：CAN 状态缓存更新 → 事件触发 + **20ms 节流**；无反馈时 **1s 心跳**（宏见 `motor_config.h`）。
 
-### `motor/teaching/snapshot`（MOT-12）
+### `event/motor/teaching`（MOT-12）
 
 stop 录制后发布：`motor_id`, `point_count`, `duration_ms`, `sample_period_ms`, `samples[]`（`t_ms`, `pos`, `vel`）。
 
-### `motor/teaching/status` retain
+### `status/motor/teaching` retain
 
 `recording`, `ready`, `motor_id`, `point_count`, `duration_ms`。
 
@@ -128,8 +128,8 @@ stop 录制后发布：`motor_id`, `point_count`, `duration_ms`, `sample_period_
 ## Steps（前端）
 
 - **Step 1** 校验 `capabilities.motor`。
-- **Step 2** 订 `motor/status`（retain）。
-- **Step 3** 发 `motor/cmd` 使能与点动；强提示力矩风险。
+- **Step 2** 订 `status/motor`（retain）。
+- **Step 3** 发 `cmd/motor` 使能与点动；强提示力矩风险。
 - **Step 4** 手柄映射链到 handle 模块或嵌入 `HandleKeymapEditor`（`profile=motor`）。
 - **Step 5** unmount 退订。
 

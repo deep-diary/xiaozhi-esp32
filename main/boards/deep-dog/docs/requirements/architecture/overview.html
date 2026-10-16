@@ -167,7 +167,7 @@ flowchart LR
       <ul>
         <li><code>EXT_PIN_MODE</code> + <code>DEEP_DOG_*_ENABLE</code></li>
         <li>实现 TU 整文件 <code>#if</code> 门控</li>
-        <li><code>device/info.capabilities</code> 反映前端入口</li>
+        <li><code>info/device.capabilities</code> 反映前端入口</li>
       </ul>
     </div>
     <div class="item">
@@ -231,7 +231,7 @@ flowchart LR
   Hub["McpServer + Domain API"]
   subgraph Telemetry["遥测面 Telemetry"]
     T1["MQTT status / retain"]
-    T2["device/info capabilities"]
+    T2["info/device capabilities"]
     T3["CAN 反馈 / IMU"]
     T4["RTSP / face events"]
   end

@@ -5,7 +5,7 @@
 | module_id | `person`（Topic 仍可用） |
 | capabilities | **不单独出入口卡**；随 `face` |
 | 路由 | `/modules/person` → **redirect** → `/modules/face` |
-| 契约 | `person/active` 草案；产品见 [P01](../../vision/product/P01-kiosk-personalization.md) |
+| 契约 | `status/person/active` 草案；产品见 [P01](../../vision/product/P01-kiosk-personalization.md) |
 | 主文档 | **[04-face](./04-face.md)**（Immich 轮播、打招呼、身份） |
 
 ## 说明

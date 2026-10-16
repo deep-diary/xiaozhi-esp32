@@ -6,7 +6,7 @@
 | capabilities | `servo` |
 | 路由建议 | `/device/:deviceId/modules/servo` |
 | 契约 | ready；驱动 + `servo_mqtt` + MCP |
-| YAML | `servo/cmd`、`servo/status` |
+| YAML | `cmd/servo`、`status/servo` |
 | 说明 | 调试用 2 路裸舵机；产品云台走 [09-gimbal](./09-gimbal.md) |
 | 驱动 | [servo/](../../../../servo/)（MCPWM，移植 deep-diary，补 `duration_ms`） |
 
@@ -35,14 +35,14 @@
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
-| `servo/status` | ↑ | 0 | true |
-| `servo/cmd` | ↓ | 1 | false |
+| `status/servo` | ↑ | 0 | true |
+| `cmd/servo` | ↓ | 1 | false |
 
-前缀：`deepdiary/deep-dog/{device_id}/`。连接成功订阅 cmd，并发一次 retain status；运动中节流约 200ms 补发，到位必发。
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）。连接成功订阅 cmd，并发一次 retain status；运动中节流约 200ms 补发，到位必发。
 
 ## 字段表
 
-### `servo/cmd`（稀疏）
+### `cmd/servo`（稀疏）
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -53,7 +53,21 @@
 | `type` | enum | 否 | `90` \| `180` \| `270` \| `360`；可与 attach 同发 |
 | `ts` | int | 否 | Unix 秒 |
 
-### `servo/status`
+#### 数据点归一化写入（`cmd/servo`，扁平字段）
+
+除上表「按 `index`」的稀疏写法外，`servo` 已纳入[数据点归一化](../../../interface/04-datapoint-registry.md)：
+`servo.target` 为 **`rw`** 点，按**扁平字段**下发，键名为 `<sub_id>_<point>`（`sub_id` 为 `0`/`1`）：
+
+```json
+{ "0_target": 45 }
+```
+
+- 语义等价于 `{ "index": 0, "angle": 45, "duration_ms": 0 }`（**立即到位**，无插值）；
+- 未识别键（如上表旧写法）由归一化通道忽略，**不会**误判为错误，旧写法继续可用；
+- 回读仍取 `status/servo`（归一化侧子实例按 `<sub_id>` **分组嵌套**：`{ "0": { "target": 45, ... }, "1": { ... } }`）；
+- 通用契约见 `interop 04 §3.7`。
+
+### `status/servo`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -90,8 +104,8 @@
 ## Steps（前端）
 
 - **Step 1** 校验 `capabilities.servo`；建议同时看 `ext_pins.mode === "pwm"`。
-- **Step 2** 订阅 `servo/status`。
-- **Step 3** 列表 + 单路角度 / 类型 / `duration_ms` 滑条；发 `servo/cmd`。
+- **Step 2** 订阅 `status/servo`。
+- **Step 3** 列表 + 单路角度 / 类型 / `duration_ms` 滑条；发 `cmd/servo`。
 - **Step 4** unmount 退订。
 
 ## 固件实现
@@ -109,7 +123,7 @@
 ## 验收
 
 - [ ] 默认剖面 `ext_pins.mode=pwm` 且 `capabilities.servo=true`
-- [ ] `servo/cmd` 设 `duration_ms=1000` 从 0→90，约 1s 内到位且 status `moving` 过渡
+- [ ] `cmd/servo` 设 `duration_ms=1000` 从 0→90，约 1s 内到位且 status `moving` 过渡
 - [ ] `duration_ms=0` 立即到位
 - [ ] `type` 切换后 `min`/`max` 与钳位正确
 - [ ] MCP `self.servo.set_angle` 与 MQTT 一致

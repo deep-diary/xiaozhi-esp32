@@ -40,7 +40,7 @@
 
 - **开启/关闭**：`MotorProtocol::setActiveReportSwitch(id, enable)`，data=`01 02 03 04 05 06 F_CMD 00`；开启后电机约 10ms 周期推送 cmd=0x18 状态帧。
 - **管理层**：`DeepMotor::requestActiveReport` / `releaseActiveReport`（引用计数，避免 init 与 MQTT 互相关闭）。
-- **MQTT**：`motor/report_start` → 对已注册电机 `requestActiveReport`；`motor/report_stop` → `releaseActiveReport`。
+- **MQTT**（**未实现，固件待办**）：设计意图为 `cmd/motor/report_start` → 对已注册电机 `requestActiveReport`；`cmd/motor/report_stop` → `releaseActiveReport`。固件当前只订阅 `cmd/motor` 与 `cmd/motor/scan`，故这两个主题**无响应**（见 `docs/requirements/motor/07-active-report-frame.md`、`catalog/FEATURES.md` F1078）。
 - **旧式 API**：`sendRunModeForStatusQuery` 仍保留，新代码请用 T24。
 - 需求文档：[docs/requirements/motor/07-active-report-frame.md](../docs/requirements/motor/07-active-report-frame.md)
 

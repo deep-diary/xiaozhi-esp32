@@ -19,7 +19,7 @@
 | 详情页 | [02-stream](./02-stream.md) 叠加区：跟踪开关 + 目标十字 |
 | Face 页 | 不做跟踪主 UI（见 [04-face](./04-face.md)） |
 
-Topic 仍拆分：`face/*` ≠ `track/*`。
+Topic 仍拆分：`status/face`、`cmd/face` 与 `status/track`、`cmd/track` 分属两个家族。
 
 ## 管线
 
@@ -31,7 +31,7 @@ Topic 仍拆分：`face/*` ≠ `track/*`。
 
 ## Topic
 
-前缀：`deepdiary/deep-dog/{deviceId}/`
+前缀：`{prefix}/{device_id}/`
 
 | Topic | 方向 | QoS | retain |
 |-------|------|-----|--------|
@@ -68,7 +68,7 @@ Topic 仍拆分：`face/*` ≠ `track/*`。
 ## Steps（前端 · Stream 同页）
 
 - **Step 1** 进入 Stream；从 `/modules/track` 则 redirect + `#track`。
-- **Step 2** `capabilities.track` 时订 `status/track`，与 `face/status` 共用。
+- **Step 2** `capabilities.track` 时订 `status/track`，与 `status/face` 共用。
 - **Step 3** 跟踪开关、`following`、目标十字。
 - **Step 4** 发 `cmd/track`；检测未开可提示先开人脸。
 - **Step 5** unmount 退订。

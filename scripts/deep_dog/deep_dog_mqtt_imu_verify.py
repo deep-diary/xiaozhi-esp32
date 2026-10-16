@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify deep-dog MQTT imu/status on LAN and/or WSS (for frontend contract).
+"""Verify deep-dog MQTT status/imu on LAN and/or WSS (for frontend contract).
 
 Examples:
   /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_imu_verify.py --via web --wait 8
@@ -113,9 +113,9 @@ def validate_payload(obj: dict) -> list[str]:
 
 
 def run_once(via: str, args: argparse.Namespace) -> int:
-    prefix = f"deepdiary/deep-dog/{args.device_id}"
-    imu_topic = f"{prefix}/imu/status"
-    info_topic = f"{prefix}/device/info"
+    prefix = f"deep-trace/{args.device_id}"
+    imu_topic = f"{prefix}/status/imu"
+    info_topic = f"{prefix}/info/device"
     topics = [(imu_topic, 0), (info_topic, 0)]
 
     seen: dict[str, int] = {t: 0 for t, _ in topics}
@@ -152,13 +152,13 @@ def run_once(via: str, args: argparse.Namespace) -> int:
         except json.JSONDecodeError as e:
             field_errors.append(f"json:{e}")
             return
-        if msg.topic.endswith("device/info"):
+        if msg.topic.endswith("/info/device"):
             caps = (obj.get("capabilities") or {})
             if "imu" in caps:
                 caps_imu["seen"] = True
                 caps_imu["value"] = bool(caps["imu"])
             return
-        if msg.topic.endswith("imu/status"):
+        if msg.topic.endswith("/status/imu"):
             errs = validate_payload(obj)
             field_errors.extend(errs)
             if len(samples) < 3:
@@ -214,17 +214,17 @@ def run_once(via: str, args: argparse.Namespace) -> int:
     client.disconnect()
 
     print(f"\n=== summary via={via} ===")
-    print(f"  imu/status count={seen.get(imu_topic, 0)} (min={args.min_msgs})")
-    print(f"  device/info count={seen.get(info_topic, 0)}")
+    print(f"  status/imu count={seen.get(imu_topic, 0)} (min={args.min_msgs})")
+    print(f"  info/device count={seen.get(info_topic, 0)}")
     if caps_imu["seen"]:
         print(f"  capabilities.imu={caps_imu['value']}")
     if samples:
-        print("  sample imu/status:")
+        print("  sample status/imu:")
         print("  " + json.dumps(samples[0], ensure_ascii=False))
 
     ok = True
     if seen.get(imu_topic, 0) < args.min_msgs:
-        print(f"FAIL: need >= {args.min_msgs} imu/status messages", file=sys.stderr)
+        print(f"FAIL: need >= {args.min_msgs} status/imu messages", file=sys.stderr)
         ok = False
     if field_errors:
         uniq = sorted(set(field_errors))
@@ -233,12 +233,12 @@ def run_once(via: str, args: argparse.Namespace) -> int:
     if caps_imu["seen"] and caps_imu["value"] is not True:
         print("WARN: capabilities.imu is not true (frontend may hide IMU card)", file=sys.stderr)
     if ok:
-        print("PASS: imu/status received and fields OK")
+        print("PASS: status/imu received and fields OK")
     return 0 if ok else 1
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Verify deep-dog MQTT imu/status")
+    ap = argparse.ArgumentParser(description="Verify deep-dog MQTT status/imu")
     ap.add_argument("--via", choices=["web", "lan", "both"], default="web")
     ap.add_argument("--wss", default=WEB_WSS_DEFAULT)
     ap.add_argument("--broker", default=LAN_HOST_DEFAULT)
@@ -247,7 +247,7 @@ def main() -> int:
     ap.add_argument("--username", default=os.environ.get("DEEP_DOG_MQTT_USER", ""))
     ap.add_argument("--password", default=os.environ.get("DEEP_DOG_MQTT_PASS", ""))
     ap.add_argument("--wait", type=float, default=8.0)
-    ap.add_argument("--min-msgs", type=int, default=3, help="minimum imu/status messages")
+    ap.add_argument("--min-msgs", type=int, default=3, help="minimum status/imu messages")
     args = ap.parse_args()
 
     vias = ["lan", "web"] if args.via == "both" else [args.via]

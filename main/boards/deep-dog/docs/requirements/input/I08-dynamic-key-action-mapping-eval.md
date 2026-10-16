@@ -50,9 +50,9 @@
 
 | 步骤 | 原说法 | 评估 |
 |------|--------|------|
-| 列出灯带控制函数 | `ApplyStatic` / Blink / Breathe… | ✅ 已有 [`LedStripControl`](../../../led/led_strip_control.h)；MQTT `led/cmd` 已能动态改灯效 |
+| 列出灯带控制函数 | `ApplyStatic` / Blink / Breathe… | ✅ 已有 [`LedStripControl`](../../../led/led_strip_control.h)；MQTT `cmd/led` 已能动态改灯效 |
 | C 结构体 + 函数指针 | `map[KEY_A] = &red` | ✅ 运行时派发可用；⚠️ **不要**把指针写入 NVS/MQTT |
-| Web → MQTT 改映射 | 对换 A/B | ✅ 需新增 Topic（或扩 `handle/cmd`），载荷用 **action_id** |
+| Web → MQTT 改映射 | 对换 A/B | ✅ 需新增 Topic（或扩 `cmd/handle`），载荷用 **action_id** |
 | 写入 NVS 固化 | 断电仍有效 | ✅ 与 touch 阈值、MQTT broker、人脸库同一套路 |
 
 ### 3.2 为何不能直接存函数指针
@@ -116,7 +116,7 @@ HandleEventHub
          ├─ HandleAppDog          （编译期运控；可与 remap 互斥或门控）
          └─ HandleAppLedMap ★     （读 NVS 表；离散键 → LedStripControl）
               ↑
-         MQTT handle/keymap 或 led/keymap
+         MQTT status/handle/keymap（`status/led/keymap` 为**未采纳的评估备选**，固件未实现）
               ↑
          Web UI；成功后写 NVS + 可选 retain status
 ```
@@ -124,7 +124,7 @@ HandleEventHub
 | 原则 | 说明 |
 |------|------|
 | 保持 I01 分层 | 源仍只出 Snapshot；**映射只在 App 内**（与 I04 原则一致，只是 App 从表读而非写死） |
-| 不替代 `led/cmd` | 网页直接改灯效继续走 [08-led](../mqtt/modules/08-led.md)；keymap 只解决「按键触发哪条灯效」 |
+| 不替代 `cmd/led` | 网页直接改灯效继续走 [08-led](../mqtt/modules/08-led.md)；keymap 只解决「按键触发哪条灯效」 |
 | 与 dog App 冲突 | 同一键勿双执行：`disable` dog、或 remap 占用键时 dog 忽略该键、或分 profile |
 | touch 对照 | touch 也是编译期 App；阈值才 NVS。动态映射若做，**先手柄离散键**，touch 可后跟 |
 
@@ -146,7 +146,7 @@ HandleEventHub
 
 对换 A/B：交换两个 `bindings` 项即可，无需改固件。
 
-**上行（回读）**：retain `handle/keymap` 或并入 status 扩展字段，供 Web 打开即显示当前表。
+**上行（回读）**：retain `status/handle/keymap` 或并入 status 扩展字段，供 Web 打开即显示当前表。
 
 **NVS**：namespace 如 `h_keymap`；存 JSON 或定长数组；校验 `schema_ver` + `action_id < ACT_COUNT`，非法则回落出厂默认。
 
@@ -181,7 +181,7 @@ HandleEventHub
 | 原因 | 说明 |
 |------|------|
 | v0.1 运控键位仍在定 | [I04](./I04-apps-mapping.md) 多处 TBD；先稳定默认语义再开放 remap |
-| 灯效已可动态改 | `led/cmd` 已能改颜色/模式；**缺的只是「按键触发」这一层胶水** |
+| 灯效已可动态改 | `cmd/led` 已能改颜色/模式；**缺的只是「按键触发」这一层胶水** |
 | 编译期 App 更简单、更安全 | 狗控错误映射有安全风险；嵌入式量产常「出厂表 + 工程模式改」 |
 | 与「一手柄一 App」痛点不完全等同 | I01 已反对「一手柄一页面」；物理差异在 Normalize。痛点是 **业务动作写死**，不是手柄型号 |
 
@@ -230,16 +230,16 @@ HandleEventHub
 | D. 设备端 Lua/微服务脚本 | 极灵活 | 中低 | 高 | 非目标 |
 | E. 仅云端/桥侧映射，设备收「已翻译命令」 | 运行时 | 高（设备傻） | 中（依赖在线） | 可作补充；离线灯控仍要 B |
 
-推荐路径：**A 保底 + B 试点灯带**；PC 桥也可在 Python 侧先做「按键改写成 led/cmd」验证体验，再决定是否下沉固件 B。
+推荐路径：**A 保底 + B 试点灯带**；PC 桥也可在 Python 侧先做「按键改写成 cmd/led」验证体验，再决定是否下沉固件 B。
 
 ---
 
 ## 7. 若落地：建议切片
 
-1. **动作目录 v0**：仅 LED — `off / static / blink / breathe / scroll`，参数与 `led/cmd` 对齐。  
+1. **动作目录 v0**：仅 LED — `off / static / blink / breathe / scroll`，参数与 `cmd/led` 对齐。  
 2. **键集合 v0**：`a,b,x,y`（可选 `l1,r1`）；仅 **press 边沿**。  
-3. **Topic**：评估用 `handle/cmd` `action: set_keymap` + retain `handle/keymap`；**契约草稿见 [I08a](./I08a-keymap-mqtt-contract-draft.md)**；定稿后再写入 YAML 并同步 deep-trace。  
-4. **App**：`HandleAppLedMap`；与 `HandleAppDog` 通过 profile 或 `handle/cmd` 切换，避免双驱动。  
+3. **Topic**：评估用 `cmd/handle` `action: set_keymap` + retain `status/handle/keymap`；**契约草稿见 [I08a](./I08a-keymap-mqtt-contract-draft.md)**；定稿后再写入 YAML 并同步 deep-trace。  
+4. **App**：`HandleAppLedMap`；与 `HandleAppDog` 通过 profile 或 `cmd/handle` 切换，避免双驱动。  
 5. **出厂默认**：与当前演示一致（如 A 红静态、B 蓝静态）；NVS 无数据则用默认。  
 6. **验收**：Web 对换 A/B → 立即生效 → 断电重启仍对换 → 非法 id 回落默认且不崩。
 

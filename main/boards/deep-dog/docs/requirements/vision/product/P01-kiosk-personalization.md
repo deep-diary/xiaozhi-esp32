@@ -9,7 +9,7 @@
 
 ## 目标
 
-- 订阅 `person/active` 或轮询设备 `/api/face`，Kiosk 轮播该人物相册。
+- 订阅 `status/person/active` 或轮询设备 `/api/face`，Kiosk 轮播该人物相册。
 - 对话注入个人档案；无人物时用默认人设。
 
 ## 身份来源

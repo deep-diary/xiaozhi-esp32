@@ -306,7 +306,7 @@ bool RtspH264Pusher::SendUdpRtp(const uint8_t* rtp, size_t rtp_len) {
 - [ ] RTCP RR 接收与解析
 - [ ] 丢包率、抖动统计
 - [ ] 超时检测与自动重连触发
-- [ ] 上报到 MQTT `stream/status`
+- [ ] 上报到 MQTT `status/stream`
 
 ### Phase 3：性能对比与切换策略（约 0.5 人天）
 - [ ] 实测 TCP vs UDP 的延迟、带宽、CPU 差异
@@ -321,7 +321,7 @@ bool RtspH264Pusher::SendUdpRtp(const uint8_t* rtp, size_t rtp_len) {
 - [ ] 连续推流 10 分钟不中断，无花屏
 - [ ] TCP 模式仍可正常工作（编译回退 `DEEP_DOG_VISION_RTSP_TRANSPORT_UDP=0`）
 - [ ] 与 MJPEG、face_ai 的互斥/复用关系不变
-- [ ] MQTT `stream/status` 行为不变
+- [ ] MQTT `status/stream` 行为不变
 - [ ] 文档与代码注释同步更新
 
 ---

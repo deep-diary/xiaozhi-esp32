@@ -14,7 +14,7 @@
 | 场景 | 通道 |
 |------|------|
 | 局域网本地调试 | `ws://{ip}:{port}/ws` → `McpServer::ParseMessage` |
-| 远程 / 云控 | MQTT（`device/info` 含 `ip` + `ws_mcp_port` 供同网段发现后再连 WS） |
+| 远程 / 云控 | MQTT（`info/device` 含 `ip` + `ws_mcp_port` 供同网段发现后再连 WS） |
 | 语音 / 云端 MCP | 与 WS 共用同一套 `AddTool`；查 IP 用 `self.board.get_ip`（勿指望本地 WS 引导自己） |
 
 ## 架构
@@ -31,7 +31,7 @@
 
 支持 `tools/list`、`tools/call`、`initialize` 等标准 MCP 方法。
 
-## device/info 扩展（可选字段）
+## info/device 扩展（可选字段）
 
 | 字段 | 说明 |
 |------|------|

@@ -40,9 +40,68 @@
 | 架构图集 | `requirements/architecture/` | `*.html`（Mermaid） | `index.html` |
 | 跨端契约 | `interface/` | `NN-<topic>-contract.md` | `interface/README.md` |
 | 经验教训 | `ll/` | `LL-NNN-<slug>.md` | `ll/README.md` |
+| **功能/用例注册表** | `requirements/catalog/` | `F<NNNN>-<domain>-<slug>` / `TC<NNNN>-<domain>-<slug>`（见 §2.1） | `catalog/FEATURES.md` · `catalog/TESTS.md` |
 
 - 序号三位、全局递增，**不复用旧号**；文件夹只表归属，不代表顺序。
 - 文件名用 ASCII，正文用中文，命令用代码块。
+
+---
+
+## 2.1 功能需求编号（F）与测试用例编号（TC）
+
+> 目标：给**每一个功能点**一个稳定 ID，并让「功能点 ↔ 测试用例 ↔ 自动化脚本 ↔ 测试结果」四者可互相追溯。
+> 编号层与既有「路线图 ID」（M01 / V-S03 / MOT-01 / I08b / CFG-01 …）**并存不冲突**：
+> 路线图 ID 表**交付批次**，F/TC 表**可验证的最小功能单元**。两者在注册表里互相映射。
+
+### 命名格式
+
+| 类型 | 格式 | 示例 | 注册表（唯一真源） |
+|------|------|------|--------------------|
+| 功能点 | `F<NNNN>-<domain>-<slug>` | `F1050-motor-enable` | [`requirements/catalog/FEATURES.md`](./requirements/catalog/FEATURES.md) |
+| 测试用例 | `TC<NNNN>-<domain>-<slug>` | `TC1050-motor-enable` | [`requirements/catalog/TESTS.md`](./requirements/catalog/TESTS.md) |
+
+规则：
+
+1. `F<NNNN>`：**4 位十进制、全局唯一、只增不复用**；按域在预留号段内顺序分配（见下表）。
+2. `TC<NNNN>`：默认与所测 `F<NNNN>` **同号**（最常见 1:1）；一个功能点需要多组用例时，用**字母后缀**扩展（`TC1050a`/`TC1050b`），不额外占号。
+3. `<domain>`：取自下方**固定词表**，全小写；**禁止自造**。一个功能点只归一个主域。
+4. `<slug>`：小写 kebab-case ASCII，简短可读；同一域内不重复。
+5. 每个 `F` 必须至少指回一份需求文档（`出处` 列）；每个 `TC` 必须写明 `预期` 与 `判据`（`自动` / `串口` / `人工`）。
+6. 缩写约定：`slug` 里用 `cfg`=配置、`mqtt`=MQTT 通道、`http`=HTTP 通道、`mcp`=MCP 工具、`dp`=数据点。
+
+### 域词表与号段
+
+| domain | 号段 | 覆盖范围 |
+|--------|------|----------|
+| `device` | F0001–F0099 | 设备信息 / 心跳 / 内存 / 诊断 / 系统 |
+| `pair` | F0100–F0199 | 设备配对（MQTT 配对 + HTTP 配对） |
+| `net` | F0200–F0299 | SNTP / STA 寻址 / 配网页 broker |
+| `config` | F0300–F0399 | 统一配置中心 / 38·48 引出脚运行时模式 |
+| `stream` | F0400–F0499 | MQTT 推流 / MJPEG / 拍照 / 采集模式 |
+| `face` | F0500–F0599 | 人脸检测 / 识别 / 人脸库 / 人脸 MCP |
+| `immich` | F0600–F0649 | Immich 真名绑定 / 素材策略 |
+| `greet` | F0650–F0679 | 主动招呼 / `person/active` / 当前说话人 |
+| `track` | F0680–F0699 | 人脸跟踪 |
+| `touch` | F0700–F0749 | 触摸按键 / 标定 / 组合手势 |
+| `handle` | F0750–F0799 | 手柄输入 / 键位映射 / 轴映射 |
+| `led` | F0800–F0849 | WS2812 灯带 |
+| `gimbal` | F0850–F0899 | 云台 pan/tilt |
+| `servo` | F0900–F0949 | 裸舵机 |
+| `imu` | F0950–F0999 | IMU 六轴 / 动作开关 |
+| `can` | F1000–F1049 | CAN 总线 / 透传 / 帧注入 |
+| `motor` | F1050–F1149 | 单电机 / 示教录制回放 |
+| `dog` | F1150–F1249 | 四足运控 / 步态 / 姿态 |
+| `dp` | F1250–F1299 | 数据点归一化（Registry / 4 通道） |
+| `mcp` | F1300–F1349 | 局域网 WS-MCP 桥 |
+| `http` | F1350–F1399 | 内置 HTTP server / HTTP 契约 |
+| `rtsp` | F1400–F1449 | RTSP / MediaMTX / 流媒体客户端 |
+
+> 号段用尽时**新增号段**（追加到表尾），不复用历史号段。
+
+### 状态取值（`FEATURES.md` / `TESTS.md` 通用）
+
+`已实现` · `部分实现` · `占位` · `待办`（文档有/代码无） · `未见`（仅契约）·
+测试结果：`PASS` · `FAIL` · `SKIP`（附原因） · `BLOCKED`（附阻塞项）。
 
 ---
 

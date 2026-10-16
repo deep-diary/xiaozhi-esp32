@@ -9,7 +9,7 @@
 | 本轮执行 | `led_demo` / `gimbal` / **`motor`**；`dog`/`off` 不触发 keymap |
 | 前端 | deep-trace handle 230：`DiscreteKeymapPanel` + `AxisKeymapPanel` |
 
-前缀：`deepdiary/deep-dog/{device_id}/`
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）
 
 ---
 
@@ -32,8 +32,8 @@ UI：先选应用 → 下拉只显示该应用 `catalog` → 表已是默认，�
 
 | Topic | 方向 | retain | 用途 |
 |-------|------|--------|------|
-| `handle/cmd` | ↓ | false | set_keymap / get_keymap / reset_keymap / set_profile |
-| `handle/keymap` | ↑ | **true** | 当前表 + catalog + `bindable_keys` + **`bindable_axes` / `axis_bindings`** |
+| `cmd/handle` | ↓ | false | set_keymap / get_keymap / reset_keymap / set_profile |
+| `status/handle/keymap` | ↑ | **true** | 当前表 + catalog + `bindable_keys` + **`bindable_axes` / `axis_bindings`** |
 
 ---
 

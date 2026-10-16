@@ -62,7 +62,7 @@
 | MJPEG | HTTP 预览可与采集同分辨率或另行缩放（§9 以 RTSP 为主） |
 | `face_ai` | VGA 一帧 RGB565 ≈ **614KB**（240² 仅 ≈115KB）；队列拷贝占 PSRAM；`MIN_INTERVAL_MS` 宜 500～1000 |
 | RTSP / H.264 | 推流 **320×240@3～5fps**；`h264_sw_encoder` 建议输入 ≤320 宽 |
-| 控制页 / MQTT | `face/status` 的 `w`/`h` 反映**采集**分辨率（640×480）；流分辨率见 stream 文档 |
+| 控制页 / MQTT | `status/face` 的 `w`/`h` 反映**采集**分辨率（640×480）；流分辨率见 stream 文档 |
 | Immich | `MIN_CROP_PX=320`；VGA 下 `MAX_CROP_PX` 宜抬至 **480**；临时 asset **默认保留**（S05） |
 | 内存 | ESP32-S3 + **8MB PSRAM**：§9 评估**工程可行**；须实机观察 internal min free（Immich 并发时曾低至 ~3KB） |
 
@@ -114,7 +114,7 @@
 
 ### 8.3 流帧率与人脸检测
 
-MJPEG / RTSP 由 `VisionFrameHub` 节流；检测由 `DEEP_DOG_FACE_AI_MIN_INTERVAL_MS` 节流；MQTT `face/status` 与检测同频。**三者可不同步**；§9 另增「采集分辨率 ≠ 推流分辨率」。
+MJPEG / RTSP 由 `VisionFrameHub` 节流；检测由 `DEEP_DOG_FACE_AI_MIN_INTERVAL_MS` 节流；MQTT `status/face` 与检测同频。**三者可不同步**；§9 另增「采集分辨率 ≠ 推流分辨率」。
 
 ---
 
@@ -152,7 +152,7 @@ OV2640 RGB565 640×480 @ ~6fps
 
 | 路径 | 分辨率 | 帧率建议 |
 |------|--------|----------|
-| 传感器 / `face/status` `w×h` | **640×480** | 传感器 ~6fps；检测 `MIN_INTERVAL_MS` 500～1000 |
+| 传感器 / `status/face` `w×h` | **640×480** | 传感器 ~6fps；检测 `MIN_INTERVAL_MS` 500～1000 |
 | RTSP / HLS 输出 | **320×240** | 3～5fps（`DEEP_DOG_VISION_PUSH_FPS`） |
 | Immich 上传 crop | 短边 **≥320**，上限宜 **480** | 随检测触发，非每帧 |
 
@@ -177,12 +177,12 @@ OV2640 RGB565 640×480 @ ~6fps
 
 ### 9.5 验收（§9 专用）
 
-- [x] `face/status` / registry 侧帧尺寸 **640×480**（2026-08-13 实机）
+- [x] `status/face` / registry 侧帧尺寸 **640×480**（2026-08-13 实机）
 - [x] RTSP `DESCRIBE` / ffmpeg 拉流分辨率为 **320×240**
 - [ ] Immich 上传 crop 短边 **≥320**（`immich_late task create failed` 待修栈）
 - [ ] 真人 Immich 真名成功率优于 240² 基线
 - [x] 推流 + 人脸并发：无 WDT（`stream_face_stress_test` PASS）；internal min **2542**（face+RTSP）
-- [x] `stream/cmd` 关推流后，face 仍可用全 VGA 静默检测
+- [x] `cmd/stream` 关推流后，face 仍可用全 VGA 静默检测
 
 ### 9.6 相关
 

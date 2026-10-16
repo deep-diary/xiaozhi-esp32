@@ -18,7 +18,7 @@
 | `DEEP_DOG_EXT_PIN_A_GPIO` | 38（CAN TX） |
 | `DEEP_DOG_EXT_PIN_B_GPIO` | 48（CAN RX） |
 | `DEEP_DOG_EXT_PIN_MODE` | `DEEP_DOG_EXT_PIN_CAN` |
-| `device/info.ext_pins.mode` | `"can"` |
+| `info/device.ext_pins.mode` | `"can"` |
 
 模式互斥：`CAN` 时 PWM/云台/裸舵机不可用（`PWM_AVAILABLE=0`）。
 
@@ -43,7 +43,7 @@ CAN_ENABLE=1 → MOTOR_ENABLE=1 → DOG_ENABLE=0（本剖面）
 
 ## 验收
 
-- [ ] `device/info`：`ext_pins.mode=can`，`gpio_a=38`，`gpio_b=48`
+- [ ] `info/device`：`ext_pins.mode=can`，`gpio_a=38`，`gpio_b=48`
 - [ ] `capabilities.can === true`，`capabilities.motor === true`，`dog === false`
 - [ ] `capabilities.gimbal/servo === false`（本剖面）
 - [ ] 串口日志可见 CAN / DeepMotor 初始化成功

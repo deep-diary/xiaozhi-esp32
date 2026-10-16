@@ -26,7 +26,7 @@
 ## 流程
 
 ```text
-触发（MCP start_pairing / hold1_tap2 / pairing/cmd start_pairing）
+触发（MCP start_pairing / hold1_tap2 / cmd/pairing start_pairing）
   → POST {base}/devices/pair/handshake   Header: Device-Id: <MAC紧凑>
      ├─ 200 {bound:false, activation:{code,message,challenge,timeout_ms}, mqtt:{host,port,path,tls}}
      │     → 屏显 + 语音播报 activation.code → 进入轮询

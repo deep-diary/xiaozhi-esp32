@@ -22,7 +22,7 @@
    - `contacts`：最多 2 项 `{active,x,y}`  
    - `fingers`：活跃触点数 0～2  
    - 点击仍映射 `buttons.touch`
-2. 经 `handle/input` → 设备透传 → `handle/status` → 前端画 **最多 2 个圆点**。
+2. 经 `cmd/handle/input` → 设备透传 → `status/handle` → 前端画 **最多 2 个圆点**。
 3. 无 hidapi / 非 DS4 / Xbox：不传 `touchpad`；前端「仅点击或灰显」。
 
 ## 契约

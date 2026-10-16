@@ -9,7 +9,7 @@
 | 样例 | [motor/05](../motor/05-analog-axis-sample.md) · catalog [motor/04](../motor/04-handle-motor-catalog.md) |
 | 前端 | `AxisKeymapPanel` + `DiscreteKeymapPanel` → `HandleKeymapEditor` |
 
-前缀：`deepdiary/deep-dog/{device_id}/`
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）
 
 ---
 
@@ -164,7 +164,7 @@ OnSnapshot:
 |------|------|
 | `DiscreteKeymapPanel` | 现有 press/hold |
 | `AxisKeymapPanel` | 轴 × 连续 action |
-| `HandleKeymapEditor` | profile 顶栏 + 组合两面板；共用 `handle/keymap` / `set_keymap` |
+| `HandleKeymapEditor` | profile 顶栏 + 组合两面板；共用 `status/handle/keymap` / `set_keymap` |
 
 电机详情页**不**重复轴编辑器；链到 handle 或嵌入同一容器。
 
@@ -172,7 +172,7 @@ OnSnapshot:
 
 ## 9. 验收
 
-- [x] `handle/keymap` 含 `bindable_axes` + `axis_bindings`，`schema_ver=5`
+- [x] `status/handle/keymap` 含 `bindable_axes` + `axis_bindings`，`schema_ver=5`
 - [x] `profile=motor` 默认 `rx→motor.pos_norm` 实机生效
 - [ ] `profile=gimbal` 默认 `rx/ry→pan_rate/tilt_rate`；斜推双轴同动
 - [ ] 轴面板六轴（含 `l2`/`r2` 标注 0～1）可编辑并 persist

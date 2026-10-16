@@ -9,11 +9,11 @@
 ## 目标
 
 - 识别到**已命名**熟人且 `now - last_seen_at >= greet_gap_sec` → `WakeWordInvoke("face_greet:<display_name>")`
-- `device/status.current_speaker` 记录当前对话者
+- `status/device.current_speaker` 记录当前对话者
 - MCP `self.face.get_identity` 供云端/用户问「你知道我是谁吗」
-- **联调**：`face/cmd` / MCP `simulate_greet` 注入姓名（如葛维冬）并触发唤醒，无需摄像头
+- **联调**：`cmd/face` / MCP `simulate_greet` 注入姓名（如葛维冬）并触发唤醒，无需摄像头
 
-## MQTT · `face/cmd` 扩展
+## MQTT · `cmd/face` 扩展
 
 | action | 字段 | 说明 |
 |--------|------|------|
@@ -54,6 +54,6 @@ face_greet:<display_name>
 ## 验收
 
 - MQTT：`{"action":"simulate_greet","name":"葛维冬"}` → log `simulate_greet ok=1` + `Wake word detected: face_greet:葛维冬`
-- `device/status.current_speaker.display_name` = 葛维冬
+- `status/device.current_speaker.display_name` = 葛维冬
 - enroll 新人成功后写入 `last_seen_at`（= 首次注册时刻，SNTP 同步前提下 UI 不再显示「从未」）
 - init 从 facedb 补 orphan 槽 **不**写 `last_seen_at`

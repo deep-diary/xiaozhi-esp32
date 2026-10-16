@@ -45,21 +45,24 @@
 | `DeepMotor::requestActiveReport(id)` | ref++，0→1 时开启 |
 | `DeepMotor::releaseActiveReport(id)` | ref--，1→0 时关闭 |
 
-引用计数避免 `initializeMotor` 与 `motor/report_start` 互相 disable。
+引用计数避免 `initializeMotor` 与 `cmd/motor/report_start` 互相 disable。
 
 ## MQTT
 
+> **状态：未实现（固件待办）** —— 固件当前只订阅 `cmd/motor` 与 `cmd/motor/scan`（见 `mqtt/modules/motor_mqtt.cc`）。
+> Web 端（`frontend/.../motorProtocol.js`）已按下表发布，但**设备无响应**；见 `catalog/FEATURES.md` F1078（待办）与 `catalog/FINDINGS.md`（topic 名"未见"）。
+
 | Topic | 语义 |
 |-------|------|
-| `motor/report_start` | 对已注册电机 `requestActiveReport`（一次性，无 50ms 轮询） |
-| `motor/report_stop` | 对已注册电机 `releaseActiveReport` |
+| `cmd/motor/report_start`（**未实现**） | 对已注册电机 `requestActiveReport`（一次性，无 50ms 轮询） |
+| `cmd/motor/report_stop`（**未实现**） | 对已注册电机 `releaseActiveReport` |
 
-`motor/status` 由 **CAN 反馈事件 + 20ms 节流** 发布（`DEEP_DOG_MOTOR_MQTT_STATUS_THROTTLE_MS`），并保留 **1s 心跳**（`DEEP_DOG_MOTOR_MQTT_STATUS_HEARTBEAT_MS`）刷新 retain；数据来源为反馈帧或 T24 上报帧。
+`status/motor` 由 **CAN 反馈事件 + 20ms 节流** 发布（`DEEP_DOG_MOTOR_MQTT_STATUS_THROTTLE_MS`），并保留 **1s 心跳**（`DEEP_DOG_MOTOR_MQTT_STATUS_HEARTBEAT_MS`）刷新 retain；数据来源为反馈帧或 T24 上报帧。
 
 ## 验收
 
-- [ ] `motor/report_start` 后 TX：`01 02 03 04 05 06 01 00`，cmd=0x18
-- [ ] RX cmd=0x18，`motor/status` 角/速/矩持续更新
-- [ ] `motor/report_stop` 后 TX：`... 00 00`
+- [ ] `cmd/motor/report_start` 后 TX：`01 02 03 04 05 06 01 00`，cmd=0x18（**依赖固件实现该主题**）
+- [ ] RX cmd=0x18，`status/motor` 角/速/矩持续更新
+- [ ] `cmd/motor/report_stop` 后 TX：`... 00 00`
 - [ ] `initializeMotor` 写零阶段通过 T24 反馈校验
 - [ ] `sendRunModeForStatusQuery` 仍存在且未被删除

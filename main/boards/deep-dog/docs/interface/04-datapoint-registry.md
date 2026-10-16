@@ -76,6 +76,15 @@
 - `led` 模块只有 1 个灯带，无 `sub_id`
 - `can` 模块只有 1 路总线，无 `sub_id`
 
+**两种编码（勿混用）**：
+
+| 场景 | 编码 | 例 |
+|------|------|-----|
+| 点 id（注册表 / schema / MCP 名） | `module.<sub_id>.<point>` | `servo.0.target` |
+| `cmd/<module>` 扁平写入字段 | `<sub_id>_<point>` | `0_target` |
+
+设备侧按模块是否 `has_sub_instances` 做 `<sub>_<point>` → `module.<sub>.<point>` 翻译（见 §3.7）。
+
 ### 1.4 通道（Channel）
 
 > 数据点的发布/访问通道。
@@ -390,7 +399,8 @@ dp_register_module("motor", kMotorDataPoints, DP_ARRAY_SIZE(kMotorDataPoints),
     "data": { "brightness": 128, "mode": 2 } }
   ```
 
-- **设备侧处理**：registry 解析 `data` 每个字段 → 匹配 `module.<field>` 数据点 →
+- **设备侧处理**：registry 解析 `data` 每个字段 → 解析为数据点（单实例 `<point>` → `module.<point>`；
+  子实例 `<sub>_<point>` → `module.<sub>.<point>`，仅当模块 `has_sub_instances` 时启用） →
   **统一校验**（access：`ro` 忽略；type；enum；min/max）→ 调用写回调；
   未匹配到数据点的字段**静默忽略**（留给模块自身的业务处理）。
 - **兼容策略**：模块原有的 `cmd/<module>` 业务处理**保持不变**；registry 只负责
@@ -590,6 +600,8 @@ dp_register_module("motor", kMotorDataPoints, DP_ARRAY_SIZE(kMotorDataPoints),
 | **Phase 6** | MCP 自动生成 RW 工具 | 已迁移的模块 | 消除重复 MCP 注册代码 |
 | **Phase 7** | Telemetry 自动归并 | 带 telemetry 标志的点 | 消除数据双轨 |
 
+> **状态**：Phase 0–7 均已落地；写入通道（§3.7）为 Phase 4/5 之后的补充项，同样已落地。
+
 ### 6.2 增量迁移策略
 
 - **新旧并行**：未迁移的模块继续用原有 cJSON 方式，不影响功能
@@ -628,6 +640,8 @@ dp_register_module("motor", kMotorDataPoints, DP_ARRAY_SIZE(kMotorDataPoints),
 - [ ] HTTP 写入经过统一校验，超出范围返回正确错误码
 - [ ] MCP `tools/list` 中自动出现 `get_` / `set_` 工具，inputSchema 正确
 - [ ] telemetry `points[]` 中包含所有带 telemetry 标志的数值点
+- [ ] 单实例 `rw` 点：`cmd/<module>` 的 `<point>` 命中 `module.<point>`，`status/<module>` 反映新值
+- [ ] 子实例 `rw` 点：`cmd/<module>` 的 `<sub>_<point>` 命中 `module.<sub>.<point>`，写回调收到正确 `sub_id`
 - [ ] 新增一个数据点只需修改声明表，无需改动三通道代码
 
 ### 8.2 性能验收

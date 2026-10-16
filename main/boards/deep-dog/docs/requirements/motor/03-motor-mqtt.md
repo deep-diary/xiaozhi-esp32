@@ -5,7 +5,7 @@
 | ID | MOT-03 |
 | 状态 | 本轮新建契约并落地固件 |
 | 权威模块页 | [mqtt/modules/14-motor.md](../mqtt/modules/14-motor.md) |
-| YAML | `motor/cmd`、`motor/status` |
+| YAML | `cmd/motor`、`status/motor` |
 | 驱动 | [`motor/`](../../../motor/) · `DeepMotor` / `MotorProtocol` |
 
 ## 目标
@@ -17,8 +17,8 @@
 
 | Topic | 方向 | 用途 |
 |-------|------|------|
-| `motor/status` | ↑ retain | 已注册电机角/速/矩/故障 |
-| `motor/cmd` | ↓ 稀疏 | enable / disable / reset / position / speed_limit / iq_ref / MIT |
+| `status/motor` | ↑ retain | 已注册电机角/速/矩/故障 |
+| `cmd/motor` | ↓ 稀疏 | enable / disable / reset / position / speed_limit / iq_ref / MIT |
 
 位置量程：`P_MIN`～`P_MAX` = **±12.57 rad**（协议常量）。
 
@@ -27,5 +27,5 @@
 ## 验收
 
 - [ ] `capabilities.motor` 入口卡可见
-- [ ] `motor/cmd` 使能指定 `motor_id` 后 `motor/status` 有反馈
+- [ ] `cmd/motor` 使能指定 `motor_id` 后 `status/motor` 有反馈
 - [ ] 位置点动与 MCP `self.motor.*` 不互相破坏（并存）

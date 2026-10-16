@@ -48,7 +48,7 @@ Broker 地址：[vision/infra.md](../vision/infra.md)。推流能力依赖 [C02]
 源码：`main/boards/deep-dog/mqtt/`（`DEEP_DOG_MQTT_ENABLE`，默认 1）。
 
 NVS 命名空间 `deep_dog_mqtt`：`broker_host` / `broker_port` / `device_id` / `client_id` / `username` / `password` / `bound` / `pair_code` / `server_api_base` / `telemetry_topic` / `home_code` / `work_unit_code` / `device_program`。  
-联调默认 broker `192.168.3.73:1883`（本机 Docker EMQX，`DeepServer/emqx/start.sh`；公共站可选 `broker.emqx.io:1883`，NVS 可覆盖）。**配网 AP 高级页**可改 `broker_host`/`broker_port`（见 [N03](../net/N03-wifi-portal-mqtt-broker.md)），免重编译。**未绑定**时 `device_id` 默认为 **`dev`**（Topic `deepdiary/deep-dog/dev/`、RTSP path `deep-dog/dev`）；**已绑定**后切换为 STA MAC 紧凑串（如 `aabbccddeeff`）。NVS 显式写入 `device_id` 可覆盖（仅联调）。绑定/解绑见 [00-pairing](./modules/00-pairing.md)。  
+联调默认 broker `192.168.3.73:1883`（本机 Docker EMQX，`DeepServer/emqx/start.sh`；公共站可选 `broker.emqx.io:1883`，NVS 可覆盖）。**配网 AP 高级页**可改 `broker_host`/`broker_port`（见 [N03](../net/N03-wifi-portal-mqtt-broker.md)），免重编译。`device_id` 恒为 STA MAC 紧凑串（如 `aabbccddeeff`；**未绑定/绑定一致，无 `dev` 身份**）；MQTT Topic 前缀 `{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）。NVS 显式写入 `device_id` 可覆盖（仅联调）。绑定/解绑见 [00-pairing](./modules/00-pairing.md)。  
 Hub / ingest 内网走 `ws://192.168.3.73:8083/mqtt`，与设备本机 EMQX 为同一 broker（TCP 1883 与 WS 8083 互通）。MQTTX 可直连 `192.168.3.73:1883` 或 `ws://192.168.3.73:8083/mqtt`。
 
 ### MQTTX / 脚本验收清单
@@ -67,12 +67,12 @@ Hub / ingest 内网走 `ws://192.168.3.73:8083/mqtt`，与设备本机 EMQX 为�
 1. 连接本机 TCP `192.168.3.73:1883`（当前设备默认；或公共站 `broker.emqx.io:1883` / 网页 WS 对齐前端）。
 2. 订阅 `{prefix}/{device_id}/info/device`（`{device_id}` = MAC 紧凑小写；`{prefix}` 默认 `deep-trace`）→ retain 可见 capabilities / ip / firmware。
 3. 未绑定设备另订 `…/status/pairing` → retain 含 6 位 `code`；向 `…/cmd/pairing` 发 `{"action":"bound","ts":…}` 可模拟后端确认。
-4. 订阅 `…/device/status` → 约 5s 心跳。
-5. 订阅 `…/stream/status`；向 `…/stream/cmd` 发 QoS1：
+4. 订阅 `…/status/device` → 约 5s 心跳。
+5. 订阅 `…/status/stream`；向 `…/cmd/stream` 发 QoS1：
    - `{"action":"start","ts":1710000000}` → status 进入 starting/streaming，MediaMTX 可拉。
    - `{"action":"stop","ts":1710000000}` → idle/off。
 6. 发非法 `{"action":"nope"}` → 设备不重启，status.error 非空。
-7. 断网重连后 info/status 重新 retain，stream/cmd 仍可控制。
+7. 断网重连后 info/status 重新 retain，cmd/stream 仍可控制。
 
 Face / Track（同页联调）：
 
@@ -82,4 +82,4 @@ Face / Track（同页联调）：
 /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_track_verify.py --via both --wait 12
 ```
 
-`device/info.capabilities.track=true`（`DEEP_DOG_TRACK_MQTT_ENABLE`）；`actuator=none`。详见 [05-track](./modules/05-track.md)。
+`info/device.capabilities.track=true`（`DEEP_DOG_TRACK_MQTT_ENABLE`）；`actuator=none`。详见 [05-track](./modules/05-track.md)。

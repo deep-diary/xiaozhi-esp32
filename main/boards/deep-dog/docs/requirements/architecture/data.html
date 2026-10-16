@@ -22,7 +22,7 @@
 
 <header class="main">
   <h1>LEVEL 3 · 数据架构</h1>
-  <p>NVS · device/info retain · capabilities · FrameHub 缓冲 · CAN 反馈</p>
+  <p>NVS · info/device retain · capabilities · FrameHub 缓冲 · CAN 反馈</p>
 </header>
 
 <div class="wrap">
@@ -48,12 +48,12 @@ flowchart LR
 </section>
 
 <section>
-  <h2>device/info retain</h2>
+  <h2>info/device retain</h2>
   <div class="sub">上线后 retain，供前端按能力出入口卡</div>
   <div class="mmd">
 <pre class="mermaid">
 flowchart TB
-  Info["device/info retain"]
+  Info["info/device retain"]
   Info --> Ext["ext_pins<br/>mode gpio_a gpio_b"]
   Info --> Cap["capabilities<br/>can motor dog arm<br/>uart servo gimbal led<br/>vision face mqtt ws_mcp …"]
   Info --> Meta["device_id / 版本 / 端口"]
@@ -79,7 +79,7 @@ flowchart LR
   Hub --> Face["Face 消费"]
   Hub --> Enc["H264 编码缓冲"]
   CanRx["CAN RX"] --> Mot["DeepMotor 反馈缓存"]
-  Mot --> MqttCan["可选 can/frames 上报"]
+  Mot --> MqttCan["可选 status/can/frames 上报"]
 
   classDef io fill:#e08a3c,stroke:#a05a1a,color:#fff
   classDef data fill:#538f53,stroke:#2e5a2e,color:#fff

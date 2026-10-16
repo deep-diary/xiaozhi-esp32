@@ -164,7 +164,9 @@ modules:
     required: false
     note: >
       TWAI tunnel to MQTT for web frame table. Pins GPIO38/48 from esp-sparkbot UART
-      reused as CAN_TX/RX on deep-dog. Align web UI with deep-trace 80-can-web-tunnel.
+      reused as CAN_TX/RX on deep-dog. Align web UI with deep-trace
+      modules/can/80-can-web-tunnel.
+      Debug profile defaults: tunnel=true, allow_tx=true (revert for production).
     ref: main/boards/deep-dog/can/
     impl: modules/12-can
     pins:
@@ -1158,18 +1160,20 @@ topics:
     qos: 1
     retain: false
     sparse: true
-    note: "Enable tunnel + rate limits; allow_tx default false"
+    note: >
+      Enable tunnel + rate limits. Debug profile defaults: tunnel=true, allow_tx=true
+      (web may inject frames on the motor bus — bench only; revert for production).
     payload:
-      tunnel: { type: bool, optional: true }
+      tunnel: { type: bool, optional: true, default: true, note: "debug profile default true" }
       mirror_tx: { type: bool, optional: true }
-      allow_tx: { type: bool, optional: true, default: false }
+      allow_tx: { type: bool, optional: true, default: true, note: "DANGER: debug profile default true; production must be false" }
       max_hz: { type: int, optional: true, default: 50 }
       batch_max: { type: int, optional: true, default: 32 }
       id_filter:
         type: array
         optional: true
         item: { type: [int, string], note: "decimal or 0x hex string" }
-      ext_only: { type: bool, optional: true }
+      ext_only: { type: bool, optional: true, default: false, note: "debug profile default false (report both 11-bit standard and 29-bit extended); production true" }
       ts: { type: int }
 
   status/can:
@@ -1197,8 +1201,12 @@ topics:
     qos: 0
     retain: false
     when: tunnel_batch
-    note: "Packed frames for web CAN table; throttle via max_hz/batch_max"
-    web_ref: "deep-trace docs/requirements/features/iot/80-can-web-tunnel.md"
+    note: >
+      Packed frames for web CAN table; throttle via max_hz/batch_max.
+      Debug profile: a synthetic heartbeat RX frame (id_hex=0x1F000000, dlc=8,
+      data=seq(4B BE)+uptime_s(4B BE)) is injected every DEEP_DOG_CAN_HEARTBEAT_MS (default 2000)
+      without touching the bus, so the MQTT tunnel can be verified on a silent bus.
+    web_ref: "deep-trace docs/requirements/features/iot/modules/can/80-can-web-tunnel.md"
     payload:
       frames:
         type: array

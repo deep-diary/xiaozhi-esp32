@@ -95,6 +95,11 @@ CAN_ENABLE → MOTOR_ENABLE → DOG_ENABLE
 - **`DEEP_DOG_VISION_PUSH_AT_BOOT`**（`vision_config.h`，**默认 0**：不开自动推流）
 - `DEEP_DOG_HTTP_SERVER_ENABLE`（默认 0）
 - `DEEP_DOG_HANDLE_ENABLE`（云台剖面默认 1；瘦剖面可关）
+- **`DEEP_DOG_CAN_HEARTBEAT_MS`**（`can/can_config.h`，**默认 2000**：每 2 s 注入 1 条模拟 RX 心跳帧
+  `id=0x1F000000`，仅走 MQTT 透传、**不写总线**，用于区分「透传链路故障」与「总线无报文」；`0` = 关闭）
+- CAN 透传默认值：`tunnel=true`、`allow_tx=true`、`ext_only=false`（`mqtt/modules/can_mqtt.h` 成员初值，
+  **联调剖面**；`allow_tx=true` 表示网页可注入原始帧，`ext_only=false` 表示标准帧也上报，
+  量产/正式版本须改回 `allow_tx=false`、`ext_only=true`）
 
 引出脚外设 ENABLE 见上表（`CAN`/`UART`/`IO`/`LED` 等）；**灯带只用 `LED_ENABLE`，不用 `IO_ENABLE`**。
 

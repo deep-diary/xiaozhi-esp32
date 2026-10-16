@@ -4,7 +4,7 @@
 |----|------|
 | source | `wifi` |
 | 典型硬件 | 电脑已连接的 **PS4 DualShock 4** 或 Xbox（USB / 系统蓝牙均可） |
-| 路径 | PC 读 HID → 归一化 → 发布 `handle/input` → 设备 Hub |
+| 路径 | PC 读 HID → 归一化 → 发布 `cmd/handle/input` → 设备 Hub |
 | 脚本 | [`scripts/deep_dog/deep_dog_handle_bridge.py`](../../../../../../scripts/deep_dog/deep_dog_handle_bridge.py) |
 | 实测图 | [assets/ps4-hid-map.png](./assets/ps4-hid-map.png)（Linux 标注；pygame 0-based） |
 
@@ -12,7 +12,7 @@
 
 - ESP32-S3 **不能**无线直连 PS4；电脑可以。
 - 现有 MQTT 前缀与 Broker 已通（见 [infra](../vision/infra.md)）。
-- 契约增加下行 **`handle/input`**，与 `handle/status` 快照同构，设备侧与板载 BT **同一 Hub**。
+- 契约增加下行 **`cmd/handle/input`**，与 `status/handle` 快照同构，设备侧与板载 BT **同一 Hub**。
 
 ## 数据流
 
@@ -20,15 +20,15 @@
 PS4/Xbox ──(OS HID)──► Python 桥（Normalize）
                          │  publish QoS0
                          ▼
-              …/handle/input  (downlink)
+              …/cmd/handle/input  (downlink)
                          │
                          ▼
               deep-dog HandleEventHub
                          │
-              handle/status ↑（合并后给网页）
+              status/handle ↑（合并后给网页）
 ```
 
-前端 **只订** `handle/status`，不订 `handle/input`。
+前端 **只订** `status/handle`，不订 `cmd/handle/input`。
 
 `--touchpad-xy` 时附带可选 `motion`（I07）：accel 重映射 `(-x,z,-y)`；gyro 用 ` (x,-z,y)` 保持右手系。平放 `accel_z≈-1`；右侧朝下 `accel_x≈+1`。对着 +轴看：**逆时针 gyro 正、顺时针负**。
 
@@ -114,8 +114,8 @@ Mac 蓝牙下 `hidapi` 可枚举并读 **17B** 输入 report；**无陀螺仪/�
 |----|------|
 | 读入 | pygame（当前） |
 | 映射 | 上表；`--layout auto\|ds4\|xbox\|xbox_sdl\|xbox_xinput` |
-| 发布 | `deepdiary/deep-dog/{device_id}/handle/input` |
-| `device_id` | 默认 **`auto`**：订 `…/+/device/info`（+ `device/status`），优先在线且 `capabilities.handle`；恰好一台则锁定；多台用 `~/.cache/deep-dog/handle_bridge_device_id` 或要求 `--device-id`；环境变量 `DEEP_DOG_DEVICE_ID` 同显式 |
+| 发布 | `{prefix}/{device_id}/cmd/handle/input` |
+| `device_id` | 默认 **`auto`**：订 `…/+/info/device`（+ `status/device`），优先在线且 `capabilities.handle`；恰好一台则锁定；多台用 `~/.cache/deep-dog/handle_bridge_device_id` 或要求 `--device-id`；环境变量 `DEEP_DOG_DEVICE_ID` 同显式 |
 | 节流 | on_change 或 ≤20～30 Hz |
 | 断线 | 桥发心跳；手柄休眠/拔出发 `connected:false`；**唤醒后自动 rescan 重连，无需重启脚本**；停发后设备超时 **1000ms** 清零（容忍短暂 MQTT 抖动） |
 | 触控 XY | **默认 HID 全量读**（触控双点 + motion + 灯震）；`--no-touchpad-xy` 回退 pygame（Xbox/通用输入 + **output 震动**）；探测见 `scripts/deep_dog/deep_dog_ds4_touchpad_probe.py`；[I06](./I06-touchpad-xy.md) · [I09](./I09-ds4-output-feedback.md) |
@@ -141,9 +141,9 @@ Mac 蓝牙下 `hidapi` 可枚举并读 **17B** 输入 report；**无陀螺仪/�
 
 ```bash
 pip3 install paho-mqtt hidapi pygame
-# 默认：DS4 HID + --device-id auto（扫 device/info）
+# 默认：DS4 HID + --device-id auto（扫 info/device）
 python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan
-# 显式 id（绑后 MAC 或未绑 dev）
+# 显式 id（MAC 紧凑串）
 python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --device-id 1051db847e88
 # Xbox：pygame 输入 + output 震动（macOS 优先蓝牙连手柄）
 python3 scripts/deep_dog/deep_dog_handle_bridge.py --via lan --layout xbox
@@ -160,9 +160,9 @@ python3 scripts/deep_dog/deep_dog_handle_bridge.py --probe-xbox-rumble
 
 ## 验收（本源）
 
-- [x] 文档与 YAML 含 `handle/input`
+- [x] 文档与 YAML 含 `cmd/handle/input`
 - [x] PS4 HID ↔ 抽象对照表定稿（含极性）
-- [x] PC 脚本按表归一化；设备透传 `handle/status`
-- [x] 默认 HID + `handle/cmd` `output` 反馈（I09）
+- [x] PC 脚本按表归一化；设备透传 `status/handle`
+- [x] 默认 HID + `cmd/handle` `output` 反馈（I09）
 - [x] pygame 路径 Xbox `output` 震动
 - [ ] 断流 / `connected:false` 后狗控停止或轴归零（联调勾选）

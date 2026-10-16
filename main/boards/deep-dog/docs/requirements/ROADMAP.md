@@ -20,7 +20,7 @@
 | D6 | 力矩保护 | 同上 §阶段六 | D1～D5 | 待办 |
 | D7 | 大步插值/运控 | 同上 §阶段七 | D3 | 部分进行中 |
 | D8 | 晃身/横移 | 同上 §阶段八 | D5 | ✅ |
-| D9 | IMU（BMI270） | 同上 §阶段九；MQTT `imu/status` | — | 待办（型号已拍板） |
+| D9 | IMU（BMI270） | 同上 §阶段九；MQTT `status/imu` | — | 待办（型号已拍板） |
 | D11～D13 | RK3588 / ROS | 同上 | — | 远期 |
 | **V-S01** | HTTP 狗控 | [vision/server/S01](./vision/server/S01-http-dog-motion.md) | DogControl | 主体 ✅ |
 | **V-S02** | HTTP MJPEG | [vision/server/S02](./vision/server/S02-http-mjpeg.md) | S01 | ✅ |
@@ -30,7 +30,7 @@
 | **V-S06** | 预览/检测 VGA（640×480） | [vision/server/S06](./vision/server/S06-higher-resolution.md) | S02/S05 | §9 代码保留；**联调默认 240²**（8MB PSRAM 并发不足） |
 | **V-S07** | 人脸 MCP + registry | [vision/server/S07](./vision/server/S07-face-control-mcp.md) | S05 · M01 | 本轮 |
 | **V-S08** | RTSP+人脸 WDT 缓解 | [vision/server/S08](./vision/server/S08-rtsp-face-wdt-mitigation.md) | C02 · S04 | 已落地间隔下限 |
-| **V-S09** | Internal SRAM 优化 | [vision/server/S09](./vision/server/S09-internal-sram-optimization.md) | S04/S05 · S08 · M01 device/status | **评估 ✅**（MEM-01～11 待 Agent 逐项落地） |
+| **V-S09** | Internal SRAM 优化 | [vision/server/S09](./vision/server/S09-internal-sram-optimization.md) | S04/S05 · S08 · M01 status/device | **评估 ✅**（MEM-01～11 待 Agent 逐项落地） |
 | V-C01 | MediaMTX 验收 | [vision/client/C01](./vision/client/C01-stream-server-verify.md) | [infra](./vision/infra.md) | 基建可达；完整推拉待稳定 LAN 复验 |
 | V-C02 | 设备推流 | [vision/client/C02](./vision/client/C02-device-push-stream.md) | S04/S05、C01 | **固件已实现**（人脸永驻 + MJPEG/RTSP 互斥）；实机长稳待勾 |
 | **M01** | 板级 MQTT 总览 | [mqtt/M01](./mqtt/M01-board-mqtt-protocol.md) / [YAML](./mqtt/protocol/deep-dog-mqtt.yml) / [modules](./mqtt/modules/) | infra | **文档 ✅**（入口卡+详情页规格）；**dev 退场 / `device_id` 恒 MAC** 收口 → [00-pairing](./mqtt/modules/00-pairing.md)（对齐云端 REQ-IOT-310） |
@@ -64,7 +64,7 @@ C01 ─────────────────────────�
 M01 + modules/ ──────────────────────────→ 各模块 MQTT（含 V-C03/C04）
 M01 + input/ ────────────────────────────→ I-HANDLE（bt / wifi 双源；固件 planned）
 S05 ─────────────────────────────────────→ P01
-D9 (BMI270) ─────────────────────────────→ imu/status (modules/03-imu)
+D9 (BMI270) ─────────────────────────────→ status/imu (modules/03-imu)
 M01 + 云端工位配置 ───────────────────────→ telemetry (DT-01)
 M01 + 云端 144 ──────────────────────────→ HTTP 配对 (DT-02)
 ```
@@ -85,3 +85,10 @@ M01 + 云端 144 ─────────────────────
 
 - 地址：[vision/infra.md](./vision/infra.md)（MediaMTX / EMQX / Immich，无明文密钥）。
 - 整板 Topic / 字段：[mqtt/](./mqtt/)（[M01](./mqtt/M01-board-mqtt-protocol.md) + [modules](./mqtt/modules/) 前端详情页规格 + YAML）。
+
+## 功能点与测试
+
+- 全仓库功能点编号（F）/ 测试用例编号（TC）：[catalog/](./catalog/)（规则见 [CONVENTIONS §2.1](../CONVENTIONS.md)）。
+- 最近一次全盘自动化测试：[TEST_REPORT.md](./TEST_REPORT.md)；
+  失败根因与契约冲突：[catalog/FINDINGS.md](./catalog/FINDINGS.md)。
+- 自动化脚本：`scripts/deep_dog/tests/`（`python scripts/deep_dog/tests/run.py`）。

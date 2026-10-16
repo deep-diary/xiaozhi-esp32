@@ -71,18 +71,18 @@ def main() -> int:
     ap.add_argument("--username", default=os.environ.get("DEEP_DOG_MQTT_USER", ""))
     ap.add_argument("--password", default=os.environ.get("DEEP_DOG_MQTT_PASS", ""))
     ap.add_argument("--wait", type=float, default=30.0, help="seconds to listen after connect")
-    ap.add_argument("--start-stream", action="store_true", help="publish stream/cmd start")
-    ap.add_argument("--stop-stream", action="store_true", help="publish stream/cmd stop")
+    ap.add_argument("--start-stream", action="store_true", help="publish cmd/stream start")
+    ap.add_argument("--stop-stream", action="store_true", help="publish cmd/stream stop")
     ap.add_argument("--cmd-delay", type=float, default=3.0, help="delay before sending cmd")
     args = ap.parse_args()
 
-    prefix = f"deepdiary/deep-dog/{args.device_id}"
+    prefix = f"deep-trace/{args.device_id}"
     topics = [
-        (f"{prefix}/device/info", 0),
-        (f"{prefix}/device/status", 0),
-        (f"{prefix}/stream/status", 0),
+        (f"{prefix}/info/device", 0),
+        (f"{prefix}/status/device", 0),
+        (f"{prefix}/status/stream", 0),
     ]
-    cmd_topic = f"{prefix}/stream/cmd"
+    cmd_topic = f"{prefix}/cmd/stream"
 
     seen: dict[str, int] = {t: 0 for t, _ in topics}
     connected = {"ok": False, "rc": None}
@@ -192,7 +192,7 @@ def main() -> int:
     for topic, _ in topics:
         n = seen.get(topic, 0)
         mark = "OK" if n > 0 else "MISS"
-        if n == 0 and (topic.endswith("device/info") or topic.endswith("device/status")):
+        if n == 0 and (topic.endswith("/info/device") or topic.endswith("/status/device")):
             ok = False
         print(f"  [{mark}] {topic} count={n}")
     if not ok:

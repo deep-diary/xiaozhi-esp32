@@ -17,7 +17,7 @@ internal RAM 瓶颈在 **固定 task 栈 + WiFi/MQTT**，与注册人脸人数�
 
 - RTSP 推流 + 人脸检测 **可并存**，但默认 **降低人脸送帧频率**。
 - 不合并 `dog_face_ai` 与 `vision_hub` 为单 task（避免阻塞与 WDT 恶化）。
-- 可观测：`device/status.tasks[]` 提供 `stack_hwm` 审计。
+- 可观测：`status/device.tasks[]` 提供 `stack_hwm` 审计。
 
 ## 3. 实现
 
@@ -32,7 +32,7 @@ internal RAM 瓶颈在 **固定 task 栈 + WiFi/MQTT**，与注册人脸人数�
 
 RTSP 推流期间 **暂停 AFE**（`EnableWakeWordDetection(false)` + `EnableVoiceProcessing(false)`），消除 `AFE Ringbuffer full`；推流结束或 5min 超时后恢复唤醒。
 
-用户仍可通过 MQTT `face/cmd.detect_interval_ms` 抬高间隔；低于下限时固件自动夹紧。推流期间识别最小间隔临时抬高至 **4000ms**（不写 NVS）。
+用户仍可通过 MQTT `cmd/face.detect_interval_ms` 抬高间隔；低于下限时固件自动夹紧。推流期间识别最小间隔临时抬高至 **4000ms**（不写 NVS）。
 
 ### 3.1 facedb Flash 与 PSRAM 栈（`face_facedb`）
 
@@ -50,11 +50,11 @@ lazy-start 顺序：`face_persist` → **`face_facedb`** → `dog_face_ai` → �
 ## 4. 验收
 
 - [ ] RTSP 推流期间无（或极少）`AFE: Ringbuffer ... full`
-- [ ] 推流 5 分钟后 `stream/status` → `idle`，`error=auto_stop_timeout`，唤醒恢复
-- [ ] `stream/status.voice_paused` 推流中为 `true`
+- [ ] 推流 5 分钟后 `status/stream` → `idle`，`error=auto_stop_timeout`，唤醒恢复
+- [ ] `status/stream.voice_paused` 推流中为 `true`
 - [ ] facedb enroll / delete / clear_db 不触发 `esp_task_stack_is_sane_cache_disabled`（`face_facedb` internal 栈）
 - [ ] 推流时串口可见送帧间隔 ≥ `RTSP_MIN_INTERVAL_MS`（或用户更大值）
-- [ ] `device/status.mem.internal.min` 不低于健康阈值（见 01-device `low_internal_heap`）
+- [ ] `status/device.mem.internal.min` 不低于健康阈值（见 01-device `low_internal_heap`）
 - [ ] `scripts/deep_dog/deep_dog_device_audit.py` 可输出 `tasks[]` 与 `face_summary`
 
 ## 5. 后续 POC（未做）

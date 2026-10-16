@@ -10,18 +10,18 @@
 
 | Topic | 方向 | retain | 说明 |
 |-------|------|--------|------|
-| `…/face/immich/status` | ↑ | **true** | 配置摘要 + 服务器探活 + 上次 upload/poll 结果 |
+| `…/status/face/immich` | ↑ | **true** | 配置摘要 + 服务器探活 + 上次 upload/poll 结果 |
 
-## `face/cmd` 扩展 action
+## `cmd/face` 扩展 action
 
 | action | 字段 | 说明 |
 |--------|------|------|
 | `set_immich_config` | `api_url?`, `api_key?`, `delete_asset?`, `latitude?`, `longitude?` | 写入 NVS `fdog_im`；GPS 成对下发；upload 后 PUT asset 经纬度 |
-| `ping_immich` | — | 立即 `GET {api_url}/server/ping`，刷新 `face/immich/status` |
+| `ping_immich` | — | 立即 `GET {api_url}/server/ping`，刷新 `status/face/immich` |
 
 也可在**无 action** 时仅带 `api_url` / `api_key` / `delete_asset`（稀疏更新，与 HTTP POST 等价）。
 
-## `face/immich/status` 载荷
+## `status/face/immich` 载荷
 
 ```json
 {

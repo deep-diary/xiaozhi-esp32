@@ -32,9 +32,9 @@
 
 ## MQTT
 
-`motor/status.motors[].init_state`：`none` | `initializing` | `ready` | `failed`
+`status/motor.motors[].init_state`：`none` | `initializing` | `ready` | `failed`
 
-`motor/cmd.enable=true` 在异步模式下立即返回（状态变为 `initializing`），前端应订 status 等待 `ready`。
+`cmd/motor.enable=true` 在异步模式下立即返回（状态变为 `initializing`），前端应订 status 等待 `ready`。
 
 ## 验收
 

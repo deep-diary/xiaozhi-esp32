@@ -76,9 +76,9 @@ LAN_PORT_DEFAULT = 1883
 
 LAYOUT_CHOICES = ("auto", "ds4_sdl", "ds4_linux", "ds4", "xbox", "xbox_sdl", "xbox_xinput")
 
-TOPIC_ROOT = "deepdiary/deep-dog"
-DISCOVER_INFO_TOPIC = f"{TOPIC_ROOT}/+/device/info"
-DISCOVER_STATUS_TOPIC = f"{TOPIC_ROOT}/+/device/status"
+TOPIC_ROOT = "deep-trace"  # 统一骨架根（REQ-IOT-310）
+DISCOVER_INFO_TOPIC = f"{TOPIC_ROOT}/+/info/device"
+DISCOVER_STATUS_TOPIC = f"{TOPIC_ROOT}/+/status/device"
 DEVICE_ID_CACHE_PATH = os.path.expanduser("~/.cache/deep-dog/handle_bridge_device_id")
 
 
@@ -98,10 +98,10 @@ def make_client(client_id: str, transport: str):
 
 
 def device_id_from_topic(topic: str) -> str | None:
-    """Parse id from deepdiary/deep-dog/{device_id}/…"""
+    """Parse id from {root}/{device_id}/…"""
     parts = topic.split("/")
-    if len(parts) >= 4 and parts[0] == "deepdiary" and parts[1] == "deep-dog":
-        did = parts[2].strip().lower()
+    if len(parts) >= 3 and parts[0] == TOPIC_ROOT:
+        did = parts[1].strip().lower()
         return did or None
     return None
 
@@ -164,7 +164,7 @@ def discover_devices(client: mqtt.Client, timeout_s: float) -> dict[str, dict[st
             return
         with lock:
             d = devices.setdefault(did, {"device_id": did})
-            if msg.topic.endswith("/device/info"):
+            if msg.topic.endswith("/info/device"):
                 caps = o.get("capabilities") if isinstance(o.get("capabilities"), dict) else {}
                 if "handle" in caps:
                     d["handle"] = bool(caps.get("handle"))
@@ -175,7 +175,7 @@ def discover_devices(client: mqtt.Client, timeout_s: float) -> dict[str, dict[st
                 if o.get("board"):
                     d["board"] = o.get("board")
                 d["seen_info"] = True
-            elif msg.topic.endswith("/device/status"):
+            elif msg.topic.endswith("/status/device"):
                 if "online" in o:
                     d["online"] = bool(o.get("online"))
                 d["seen_status"] = True
@@ -1112,7 +1112,7 @@ def main() -> int:
     ap.add_argument(
         "--device-id",
         default=os.environ.get("DEEP_DOG_DEVICE_ID", "auto"),
-        help="MQTT id under deepdiary/deep-dog/{id}/; default auto "
+        help="MQTT id under {prefix}/{device_id}/（默认 {prefix}=deep-trace）；default auto "
         "(scan device/info) or DEEP_DOG_DEVICE_ID",
     )
     ap.add_argument(
@@ -1372,9 +1372,9 @@ def main() -> int:
         save_cached_device_id(device_id)
 
     prefix = f"{TOPIC_ROOT}/{device_id}"
-    input_topic = f"{prefix}/handle/input"
-    status_topic = f"{prefix}/handle/status"
-    cmd_topic = f"{prefix}/handle/cmd"
+    input_topic = f"{prefix}/cmd/handle/input"
+    status_topic = f"{prefix}/status/handle"
+    cmd_topic = f"{prefix}/cmd/handle"
     topics["input"] = input_topic
     topics["status"] = status_topic
     topics["cmd"] = cmd_topic

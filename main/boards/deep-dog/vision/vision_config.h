@@ -13,9 +13,17 @@
 #define DEEP_DOG_VISION_PUSH_AT_BOOT 0
 #endif
 
-/** MediaMTX RTSP 发布基址（不含 path） */
+/**
+ * MediaMTX RTSP 发布基址（不含 path）。
+ *
+ * 默认与 EMQX 同主机（见 docs/requirements/vision/infra.md：MediaMTX / EMQX / Immich 同机），
+ * 因此与 `DEEP_DOG_MQTT_DEFAULT_BROKER_HOST` 保持一致；换部署时两者一起改，
+ * 或在本宏显式覆盖。**勿再各写一个实验室 IP**（会造成推流目标不可达，见 FINDINGS F-04）。
+ *
+ * TODO(F-07)：配置中心 `connectivity.mediamtx.rtsp_host` 目前未接入本 URL 生成路径。
+ */
 #ifndef DEEP_DOG_VISION_RTSP_HOST
-#define DEEP_DOG_VISION_RTSP_HOST "192.168.31.25"
+#define DEEP_DOG_VISION_RTSP_HOST "10.99.79.54"
 #endif
 #ifndef DEEP_DOG_VISION_RTSP_PORT
 #define DEEP_DOG_VISION_RTSP_PORT 8554

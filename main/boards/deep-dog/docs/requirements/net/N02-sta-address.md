@@ -17,13 +17,13 @@
 |----|------|
 | STA IPv4 | **默认 DHCP**（`DEEP_DOG_WIFI_USE_STATIC_IP=0`） |
 | 局域网 WS MCP | httpd 听 **`0.0.0.0:8080`**，**不绑定**某一网段。客户端连 `ws://{当前STA-IP}:8080/ws` |
-| 地址从哪来 | 串口 `Got IP` / `WS MCP bridge ws://…`；**Web**：MQTT `device/info.ip` + `ws_mcp_port`/`ws_mcp_path` 拼 URL；**语音**：云端 MCP `self.board.get_ip` / `self.get_device_status.network.ip`（不必先连本地 WS） |
+| 地址从哪来 | 串口 `Got IP` / `WS MCP bridge ws://…`；**Web**：MQTT `info/device.ip` + `ws_mcp_port`/`ws_mcp_path` 拼 URL；**语音**：云端 MCP `self.board.get_ip` / `self.get_device_status.network.ip`（不必先连本地 WS） |
 
 ## Web / 语音如何得知 WS IP（发现路径）
 
 | 客户端 | 推荐 | 说明 |
 |--------|------|------|
-| deep-trace Hub | **先 MQTT，再 WS** | 订 retain `device/info` → 读 `ip`、`ws_mcp_port`、`ws_mcp_path` → `ws://{ip}:{port}{path}`（已实现，见 REQ-IOT-236） |
+| deep-trace Hub | **先 MQTT，再 WS** | 订 retain `info/device` → 读 `ip`、`ws_mcp_port`、`ws_mcp_path` → `ws://{ip}:{port}{path}`（已实现，见 REQ-IOT-236） |
 | 手动调试页 | MQTT 自动填，或听语音/看串口后手输 | 鸡生蛋：本地 WS **不能**用来发现自己的 IP |
 | otto 无自有 MQTT | 串口 / 小程序看 IP，**手输** `ws://…:8080/ws` | `self.otto.get_ip` 走**云端语音 MCP**，方便口述，不是 Web 发现真源 |
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify deep-dog MQTT track/cmd + track/status (LAN and/or WSS).
+"""Verify deep-dog MQTT cmd/track + status/track (LAN and/or WSS).
 
 Suggested order (Face page track section):
   /usr/bin/python3 scripts/deep_dog/deep_dog_mqtt_verify.py --via web --stop-stream --wait 5
@@ -78,11 +78,11 @@ def validate_status(obj: dict) -> list[str]:
 
 
 def run_once(via: str, args: argparse.Namespace) -> int:
-    prefix = f"deepdiary/deep-dog/{args.device_id}"
-    status_topic = f"{prefix}/track/status"
-    cmd_topic = f"{prefix}/track/cmd"
-    face_cmd_topic = f"{prefix}/face/cmd"
-    info_topic = f"{prefix}/device/info"
+    prefix = f"deep-trace/{args.device_id}"
+    status_topic = f"{prefix}/status/track"
+    cmd_topic = f"{prefix}/cmd/track"
+    face_cmd_topic = f"{prefix}/cmd/face"
+    info_topic = f"{prefix}/info/device"
     topics = [(status_topic, 0), (info_topic, 0)]
 
     seen: dict[str, int] = {t: 0 for t, _ in topics}
@@ -121,13 +121,13 @@ def run_once(via: str, args: argparse.Namespace) -> int:
         except json.JSONDecodeError as e:
             field_errors.append(f"json:{e}")
             return
-        if msg.topic.endswith("device/info"):
+        if msg.topic.endswith("/info/device"):
             caps = obj.get("capabilities") or {}
             if "track" in caps:
                 caps_track["seen"] = True
                 caps_track["value"] = bool(caps["track"])
             return
-        if msg.topic.endswith("track/status"):
+        if msg.topic.endswith("/status/track"):
             field_errors.extend(validate_status(obj))
             if isinstance(obj.get("enabled"), bool):
                 enabled_seen.append(obj["enabled"])
@@ -217,24 +217,24 @@ def run_once(via: str, args: argparse.Namespace) -> int:
     client.disconnect()
 
     print(f"\n=== summary via={via} ===")
-    print(f"  track/status count={seen.get(status_topic, 0)} (min={args.min_msgs})")
-    print(f"  device/info count={seen.get(info_topic, 0)}")
+    print(f"  status/track count={seen.get(status_topic, 0)} (min={args.min_msgs})")
+    print(f"  info/device count={seen.get(info_topic, 0)}")
     if caps_track["seen"]:
         print(f"  capabilities.track={caps_track['value']}")
     if statuses:
-        print("  sample track/status:")
+        print("  sample status/track:")
         print("  " + json.dumps(statuses[-1], ensure_ascii=False))
 
     ok = True
     if seen.get(status_topic, 0) < args.min_msgs:
-        print(f"FAIL: need >= {args.min_msgs} track/status", file=sys.stderr)
+        print(f"FAIL: need >= {args.min_msgs} status/track", file=sys.stderr)
         ok = False
     uniq_errs = sorted(set(field_errors))
     if uniq_errs:
         print(f"FAIL: field errors: {uniq_errs}", file=sys.stderr)
         ok = False
     if not caps_track["seen"]:
-        print("FAIL: never saw capabilities.track in device/info", file=sys.stderr)
+        print("FAIL: never saw capabilities.track in info/device", file=sys.stderr)
         ok = False
     elif caps_track["value"] is not True:
         print("FAIL: capabilities.track is not true", file=sys.stderr)
@@ -279,7 +279,7 @@ def main() -> int:
         "--ensure-face",
         action="store_true",
         default=True,
-        help="send face/cmd enabled=true before track enable (default)",
+        help="send cmd/face enabled=true before track enable (default)",
     )
     ap.add_argument("--no-ensure-face", action="store_false", dest="ensure_face")
     ap.add_argument(

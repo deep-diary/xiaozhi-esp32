@@ -449,15 +449,138 @@ void McpServer::ReplyError(int id, const std::string& message) {
     Application::GetInstance().SendMcpMessage(payload);
 }
 
+std::string McpServer::AutoToolToJson(const char* name, const char* desc,
+                                      const PropertyList& props, bool user_only) {
+    cJSON* json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "name", name ? name : "");
+    cJSON_AddStringToObject(json, "description", desc ? desc : "");
+
+    cJSON* input_schema = cJSON_CreateObject();
+    cJSON_AddStringToObject(input_schema, "type", "object");
+    cJSON* properties = cJSON_Parse(props.to_json().c_str());
+    cJSON_AddItemToObject(input_schema, "properties", properties);
+    std::vector<std::string> required = props.GetRequired();
+    if (!required.empty()) {
+        cJSON* required_array = cJSON_CreateArray();
+        for (const auto& property : required) {
+            cJSON_AddItemToArray(required_array, cJSON_CreateString(property.c_str()));
+        }
+        cJSON_AddItemToObject(input_schema, "required", required_array);
+    }
+    cJSON_AddItemToObject(json, "inputSchema", input_schema);
+
+    if (user_only) {
+        cJSON* annotations = cJSON_CreateObject();
+        cJSON* audience = cJSON_CreateArray();
+        cJSON_AddItemToArray(audience, cJSON_CreateString("user"));
+        cJSON_AddItemToObject(annotations, "audience", audience);
+        cJSON_AddItemToObject(json, "annotations", annotations);
+    }
+
+    char* json_str = cJSON_PrintUnformatted(json);
+    std::string result(json_str ? json_str : "{}");
+    if (json_str) {
+        cJSON_free(json_str);
+    }
+    cJSON_Delete(json);
+    return result;
+}
+
+bool McpServer::ParseArgs(PropertyList& props, const cJSON* args, std::string* error) {
+    try {
+        for (auto& argument : props) {
+            bool found = false;
+            if (cJSON_IsObject(args)) {
+                auto value = cJSON_GetObjectItem(args, argument.name().c_str());
+                if (argument.type() == kPropertyTypeBoolean && cJSON_IsBool(value)) {
+                    argument.set_value<bool>(value->valueint == 1);
+                    found = true;
+                } else if (argument.type() == kPropertyTypeInteger && cJSON_IsNumber(value)) {
+                    argument.set_value<int>(value->valueint);
+                    found = true;
+                } else if (argument.type() == kPropertyTypeString && cJSON_IsString(value)) {
+                    argument.set_value<std::string>(value->valuestring);
+                    found = true;
+                }
+            }
+            if (!argument.has_default_value() && !found) {
+                if (error) {
+                    *error = "Missing valid argument: " + argument.name();
+                }
+                return false;
+            }
+        }
+    } catch (const std::exception& e) {
+        if (error) {
+            *error = e.what();
+        }
+        return false;
+    }
+    return true;
+}
+
+bool McpServer::InvokeAutoToolSync(const std::string& tool_name, const cJSON* tool_arguments,
+                                   InvokeResult* out) {
+    if (!out) {
+        return false;
+    }
+    AutoToolSource* src = auto_source_;
+    if (!src) {
+        return false;
+    }
+    const size_t n = src->ToolCount();
+    for (size_t i = 0; i < n; ++i) {
+        char name[96];
+        char desc[160];
+        PropertyList props;
+        bool user_only = true;
+        if (!src->DescribeTool(i, name, sizeof(name), desc, sizeof(desc), &props, &user_only)) {
+            return false;
+        }
+        if (tool_name != name) {
+            continue;
+        }
+        std::string err;
+        if (!ParseArgs(props, tool_arguments, &err)) {
+            out->error_message = err;
+            return true;
+        }
+        try {
+            std::string result;
+            if (!src->InvokeTool(name, props, &result)) {
+                out->error_message = "Unknown tool: " + tool_name;
+                return true;
+            }
+            out->result_json = result;
+            out->ok = true;
+        } catch (const std::exception& e) {
+            out->error_message = e.what();
+        }
+        return true;
+    }
+    return false;
+}
+
 void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_only_tools) {
     // 单包过大时 MQTT TLS（硬件 AES）需连续内部 DRAM；deep-dog 等板面内存紧，压到 ~2.8KB 强制分页
     const int max_payload_size = 2800;
     std::string json = "{\"tools\":[";
-    
+
     bool found_cursor = cursor.empty();
-    auto it = tools_.begin();
     std::string next_cursor = "";
-    
+    bool overflow = false;
+
+    // 追加一条工具（超限则记录 nextCursor 并返回 false）
+    auto append_tool = [&](const std::string& name, const std::string& tool_json) -> bool {
+        if (json.length() + tool_json.length() + 30 > max_payload_size) {
+            next_cursor = name;
+            return false;
+        }
+        json += tool_json;
+        return true;
+    };
+
+    auto it = tools_.begin();
     while (it != tools_.end()) {
         // 如果我们还没有找到起始位置，继续搜索
         if (!found_cursor) {
@@ -473,24 +596,48 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
             ++it;
             continue;
         }
-        
+
         // 添加tool前检查大小
-        std::string tool_json = (*it)->to_json() + ",";
-        if (json.length() + tool_json.length() + 30 > max_payload_size) {
-            // 如果添加这个tool会超出大小限制，设置next_cursor并退出循环
-            next_cursor = (*it)->name();
+        if (!append_tool((*it)->name(), (*it)->to_json() + ",")) {
+            overflow = true;
             break;
         }
-        
-        json += tool_json;
         ++it;
     }
-    
+
+    // 批量自动工具（数据点归一化等）：**不常驻堆对象**，逐条现算（F-12）
+    if (!overflow && auto_source_) {
+        const size_t auto_count = auto_source_->ToolCount();
+        char name[96];
+        char desc[160];
+        for (size_t i = 0; i < auto_count; ++i) {
+            PropertyList props;
+            bool user_only = true;
+            if (!auto_source_->DescribeTool(i, name, sizeof(name), desc, sizeof(desc),
+                                            &props, &user_only)) {
+                break;
+            }
+            if (!found_cursor) {
+                if (cursor != name) {
+                    continue;
+                }
+                found_cursor = true;
+            }
+            if (!list_user_only_tools && user_only) {
+                continue;
+            }
+            if (!append_tool(name, AutoToolToJson(name, desc, props, user_only) + ",")) {
+                overflow = true;
+                break;
+            }
+        }
+    }
+
     if (json.back() == ',') {
         json.pop_back();
     }
-    
-    if (json.back() == '[' && !tools_.empty()) {
+
+    if (json.back() == '[' && !next_cursor.empty()) {
         // 如果没有添加任何tool，返回错误
         ESP_LOGE(TAG, "tools/list: Failed to add tool %s because of payload size limit", next_cursor.c_str());
         ReplyError(id, "Failed to add tool " + next_cursor + " because of payload size limit");
@@ -502,7 +649,7 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     } else {
         json += "],\"nextCursor\":\"" + next_cursor + "\"}";
     }
-    
+
     ReplyResult(id, json);
 }
 
@@ -511,34 +658,17 @@ McpServer::InvokeResult McpServer::InvokeToolSync(const std::string& tool_name, 
     auto tool_iter = std::find_if(tools_.begin(), tools_.end(),
                                   [&tool_name](const McpTool* tool) { return tool->name() == tool_name; });
     if (tool_iter == tools_.end()) {
+        if (InvokeAutoToolSync(tool_name, tool_arguments, &out)) {
+            return out;
+        }
         out.error_message = "Unknown tool: " + tool_name;
         return out;
     }
 
     PropertyList arguments = (*tool_iter)->properties();
-    try {
-        for (auto& argument : arguments) {
-            bool found = false;
-            if (cJSON_IsObject(tool_arguments)) {
-                auto value = cJSON_GetObjectItem(tool_arguments, argument.name().c_str());
-                if (argument.type() == kPropertyTypeBoolean && cJSON_IsBool(value)) {
-                    argument.set_value<bool>(value->valueint == 1);
-                    found = true;
-                } else if (argument.type() == kPropertyTypeInteger && cJSON_IsNumber(value)) {
-                    argument.set_value<int>(value->valueint);
-                    found = true;
-                } else if (argument.type() == kPropertyTypeString && cJSON_IsString(value)) {
-                    argument.set_value<std::string>(value->valuestring);
-                    found = true;
-                }
-            }
-            if (!argument.has_default_value() && !found) {
-                out.error_message = "Missing valid argument: " + argument.name();
-                return out;
-            }
-        }
-    } catch (const std::exception& e) {
-        out.error_message = e.what();
+    std::string parse_err;
+    if (!ParseArgs(arguments, tool_arguments, &parse_err)) {
+        out.error_message = parse_err;
         return out;
     }
 
@@ -574,6 +704,27 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
                                  });
     
     if (tool_iter == tools_.end()) {
+        // 批量自动工具（按需生成，不常驻堆对象）：同样在主线程执行（F-12）
+        if (auto_source_) {
+            cJSON* args_copy = tool_arguments ? cJSON_Duplicate(tool_arguments, 1) : nullptr;
+            auto& app = Application::GetInstance();
+            app.Schedule([this, id, tool_name, args_copy]() {
+                InvokeResult res;
+                if (!InvokeAutoToolSync(tool_name, args_copy, &res)) {
+                    ESP_LOGE(TAG, "tools/call: Unknown tool: %s", tool_name.c_str());
+                    ReplyError(id, "Unknown tool: " + tool_name);
+                } else if (res.ok) {
+                    ReplyResult(id, res.result_json);
+                } else {
+                    ESP_LOGE(TAG, "tools/call: %s", res.error_message.c_str());
+                    ReplyError(id, res.error_message);
+                }
+                if (args_copy) {
+                    cJSON_Delete(args_copy);
+                }
+            });
+            return;
+        }
         ESP_LOGE(TAG, "tools/call: Unknown tool: %s", tool_name.c_str());
         ReplyError(id, "Unknown tool: " + tool_name);
         return;

@@ -20,7 +20,7 @@
 | POST | `/api/vision_publish?mode=off\|stream\|rtsp_push` | 切换发布（与 `/api/capture_mode` 同源） |
 | GET | `/api/status` | 含 `mode`、`push_status`、`push_url` |
 
-默认开机不推流（`DEEP_DOG_VISION_PUSH_AT_BOOT=0`）。默认 URL：`rtsp://192.168.31.25:8554/deep-dog/dev`。H.264 默认约 3fps、240×240。
+默认开机不推流（`DEEP_DOG_VISION_PUSH_AT_BOOT=0`）。默认 URL：`rtsp://192.168.31.25:8554/deep-dog/{device_id}`。H.264 默认约 3fps、240×240。
 
 ## 联调 / 验收
 
@@ -34,7 +34,7 @@ python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir h264 --python-onl
 python3 scripts/deep_dog/deep_dog_rtsp_pull_verify.py --outdir jpeg --python-only
 
 # DESCRIBE 期望 H264/90000
-# HLS（软探，非硬门禁）：http://192.168.31.25:8888/deep-dog/dev/index.m3u8
+# HLS（软探，非硬门禁）：http://192.168.31.25:8888/deep-dog/{device_id}/index.m3u8
 ```
 
 产物目录：[`docs/requirements/vision/fixtures/rtsp_pull_verify/`](../docs/requirements/vision/fixtures/rtsp_pull_verify/)。

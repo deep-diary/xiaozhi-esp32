@@ -1,4 +1,5 @@
 #include "ws-mcp/deep_dog_ws_mcp_server.h"
+#include "ws-mcp/datapoint_mcp.h"
 
 #if DEEP_DOG_WS_MCP_ENABLE
 
@@ -100,18 +101,28 @@ bool DeepDogWsMcpServer::Start(uint16_t port) {
     };
 
     esp_err_t start_err = ESP_FAIL;
-    for (int attempt = 1; attempt <= 3; ++attempt) {
+    // F-13：httpd 任务需要一块**连续 internal**（默认栈 4096B）。实测开机阶段 `largest_int`
+    // 可能只有 ~3.5KB（OTA/TLS 缓冲区尚未释放）→ `httpd_start` 失败，且旧实现 3 次×0.5s 用完后
+    // **本会话再没有 WS-MCP / 数据点 REST**（TC1302–TC1315、TC1252–TC1260 全不可用）。
+    // 修复：把重试窗口拉长到 ~4s（内存约在 15~16s 才回稳），仍保持**轻量**（不长时间阻塞启动路径）。
+    constexpr int kAttempts = 8;
+    constexpr int kRetryGapMs = 500;
+    for (int attempt = 1; attempt <= kAttempts; ++attempt) {
         const size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         const size_t largest_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
         start_err = httpd_start(&server_handle_, &config);
         if (start_err == ESP_OK) {
+            if (attempt > 1) {
+                ESP_LOGI(TAG, "httpd_start ok on attempt %d/%d (free_int=%u largest_int=%u)",
+                         attempt, kAttempts, (unsigned)free_int, (unsigned)largest_int);
+            }
             break;
         }
-        ESP_LOGW(TAG, "httpd_start attempt %d/3 failed port=%u err=%s free_int=%u largest_int=%u",
-                 attempt, static_cast<unsigned>(port_), esp_err_to_name(start_err), (unsigned)free_int,
-                 (unsigned)largest_int);
+        ESP_LOGW(TAG, "httpd_start attempt %d/%d failed port=%u err=%s free_int=%u largest_int=%u",
+                 attempt, kAttempts, static_cast<unsigned>(port_), esp_err_to_name(start_err),
+                 (unsigned)free_int, (unsigned)largest_int);
         server_handle_ = nullptr;
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(kRetryGapMs));
     }
     if (start_err != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed on port %u err=%s", static_cast<unsigned>(port_), esp_err_to_name(start_err));
@@ -149,7 +160,7 @@ void DeepDogWsMcpServer::HandleMessage(httpd_req_t* req, const char* data, size_
         return;
     }
     if (len > DEEP_DOG_WS_MCP_MAX_MSG_LEN) {
-        ESP_LOGE(TAG, "message too long: %zu", len);
+        ESP_LOGE(TAG, "message too long: %u", static_cast<unsigned>(len));
         return;
     }
 
@@ -173,20 +184,33 @@ void DeepDogWsMcpServer::HandleMessage(httpd_req_t* req, const char* data, size_
         payload = cJSON_GetObjectItem(root, "payload");
         if (payload) {
             cJSON_DetachItemViaPointer(root, payload);
-            McpServer::GetInstance().ParseMessage(payload);
-            cJSON_Delete(payload);
         }
     } else {
         payload = cJSON_Duplicate(root, 1);
-        if (payload) {
-            McpServer::GetInstance().ParseMessage(payload);
-            cJSON_Delete(payload);
-        }
     }
 
     if (!payload) {
         ESP_LOGE(TAG, "invalid MCP envelope");
+        cJSON_Delete(root);
+        return;
     }
+
+    // 本地 WS-MCP 是「全量」通道（docs/interface/02-ws-contract.md）：
+    // 数据点自动工具为 user_only（零 per-tool 堆开销，已由板级 InitializeTools 挂接 auto source，
+    // 见 F-12），故 tools/list 强制带 withUserTools=true 使其在本通道可见。
+    cJSON* method = cJSON_GetObjectItem(payload, "method");
+    if (method && cJSON_IsString(method) && strcmp(method->valuestring, "tools/list") == 0) {
+        cJSON* params = cJSON_GetObjectItem(payload, "params");
+        if (!params || !cJSON_IsObject(params)) {
+            params = cJSON_AddObjectToObject(payload, "params");
+        }
+        if (params && !cJSON_GetObjectItem(params, "withUserTools")) {
+            cJSON_AddBoolToObject(params, "withUserTools", true);
+        }
+    }
+
+    McpServer::GetInstance().ParseMessage(payload);
+    cJSON_Delete(payload);
     cJSON_Delete(root);
 }
 
@@ -194,14 +218,16 @@ void DeepDogWsMcpServer::AddClient(httpd_req_t* req) {
     const int sock_fd = httpd_req_to_sockfd(req);
     if (clients_.find(sock_fd) == clients_.end()) {
         clients_[sock_fd] = req;
-        ESP_LOGI(TAG, "client connected fd=%d total=%zu", sock_fd, clients_.size());
+        ESP_LOGI(TAG, "client connected fd=%d total=%u", sock_fd,
+                 static_cast<unsigned>(clients_.size()));
     }
 }
 
 void DeepDogWsMcpServer::RemoveClient(httpd_req_t* req) {
     const int sock_fd = httpd_req_to_sockfd(req);
     clients_.erase(sock_fd);
-    ESP_LOGI(TAG, "client disconnected fd=%d total=%zu", sock_fd, clients_.size());
+    ESP_LOGI(TAG, "client disconnected fd=%d total=%u", sock_fd,
+             static_cast<unsigned>(clients_.size()));
 }
 
 size_t DeepDogWsMcpServer::GetClientCount() const {
@@ -210,10 +236,20 @@ size_t DeepDogWsMcpServer::GetClientCount() const {
 
 struct WsBroadcastJob {
     httpd_handle_t server;
+    DeepDogWsMcpServer* self;
     int fd;
     char* payload;
     size_t len;
 };
+
+/** 广播载荷缓冲：**优先 PSRAM**（internal 紧张时少一次内部堆分配，见 S09 / F-12）。 */
+static char* AllocBroadcastPayload(size_t len) {
+    char* p = static_cast<char*>(heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!p) {
+        p = static_cast<char*>(malloc(len));
+    }
+    return p;
+}
 
 static void WsBroadcastSendJob(void* arg) {
     WsBroadcastJob* job = static_cast<WsBroadcastJob*>(arg);
@@ -226,9 +262,23 @@ static void WsBroadcastSendJob(void* arg) {
     const esp_err_t ret = httpd_ws_send_frame_async(job->server, job->fd, &ws_pkt);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "broadcast send failed fd=%d err=%d", job->fd, ret);
+        // 对端已不读/已断开：摘除，避免下一次广播继续在同一 fd 上超时（F-14）
+        if (job->self) {
+            job->self->DropClient(job->fd);
+        }
     }
-    free(job->payload);
+    heap_caps_free(job->payload);
     free(job);
+}
+
+void DeepDogWsMcpServer::DropClient(int fd) {
+    auto it = clients_.find(fd);
+    if (it == clients_.end()) {
+        return;
+    }
+    clients_.erase(it);
+    ESP_LOGW(TAG, "dropped stale ws client fd=%d (remaining=%u)", fd,
+             static_cast<unsigned>(clients_.size()));
 }
 
 void DeepDogWsMcpServer::BroadcastMessage(const std::string& message) {
@@ -243,9 +293,10 @@ void DeepDogWsMcpServer::BroadcastMessage(const std::string& message) {
             continue;
         }
         job->server = server_handle_;
+        job->self = this;
         job->fd = fd;
         job->len = message.length();
-        job->payload = static_cast<char*>(malloc(message.length() + 1));
+        job->payload = AllocBroadcastPayload(message.length() + 1);
         if (!job->payload) {
             free(job);
             continue;
@@ -254,7 +305,7 @@ void DeepDogWsMcpServer::BroadcastMessage(const std::string& message) {
         job->payload[message.length()] = '\0';
 
         if (httpd_queue_work(server_handle_, WsBroadcastSendJob, job) != ESP_OK) {
-            free(job->payload);
+            heap_caps_free(job->payload);
             free(job);
         }
     }

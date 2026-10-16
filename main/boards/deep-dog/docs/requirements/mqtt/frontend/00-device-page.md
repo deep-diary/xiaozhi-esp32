@@ -13,16 +13,16 @@
 | **本页** | Device Basic + **模块入口卡片**；**不展示 detail、不做模块控制** |
 | **模块详情页** | 点卡进入；见 [`../modules/`](../modules/) |
 
-**默认**：本页除 `device/info`、`device/status` 外，**不订阅**各模块业务 Topic。
+**默认**：本页除 `info/device`、`status/device` 外，**不订阅**各模块业务 Topic。
 
 ## Topic（本页）
 
 | Topic | 方向 | QoS | retain | 用途 |
 |-------|------|-----|--------|------|
-| `device/info` | ↑ | 0 | true | capabilities、ext_pins、固件、IP、复位原因、电量能力 |
-| `device/status` | ↑ | 0 | false | 心跳：RSSI、内存、health（可选） |
+| `info/device` | ↑ | 0 | true | capabilities、ext_pins、固件、IP、复位原因、电量能力 |
+| `status/device` | ↑ | 0 | false | 心跳：RSSI、内存、health（可选） |
 
-前缀：`deepdiary/deep-dog/{device_id}/`。  
+前缀：`{prefix}/{device_id}/`（`{prefix}` 默认 `deep-trace`）。  
 生产默认 `device_id` = STA MAC 紧凑串；之家添加设备用配对码，见 [00-pairing](../modules/00-pairing.md)（**无入口卡**）。  
 Broker（网页）：`wss://broker.emqx.io:8084/mqtt`。
 
@@ -44,7 +44,7 @@ Motor 卡：单电机调试（`capabilities.motor && !dog` 或独立电机页）
 ## Steps（前端）
 
 - **Step 1** 使用 `device_id` 连接 EMQX（MQTT over WebSocket）。
-- **Step 2** 订阅 `…/device/info`（retain）与可选 `…/device/status`。
+- **Step 2** 订阅 `…/info/device`（retain）与可选 `…/status/device`。
 - **Step 3** 渲染 Device Basic：`device_id` / `firmware` / `ip` / `http_port` / `ext_pins.mode`；有 status 时附加 `rssi`、**内存进度条**（`mem.internal|psram` 的 free/total）、`health.ok` / `health.warn`（含 `low_internal_heap` 标红）。可展开 **任务栈表**（`tasks[]` 按 `stack_hwm` 升序，余量最小在上）。电量仅当 `power.supported===true`。可链 [01-device](../modules/01-device.md)。
 - **Step 4** 读 `capabilities` + `ext_pins`，过滤模块列表（**忽略独立 person 卡**），渲染入口卡。
 - **Step 5** 点击 → `navigate(/device/:deviceId/modules/:moduleId)`。
@@ -55,7 +55,7 @@ Motor 卡：单电机调试（`capabilities.motor && !dog` 或独立电机页）
 | 禁止 | 允许 |
 |------|------|
 | 完整字段表、控制按钮组、高频图表 | 模块标题、图标、一句话说明 |
-| 订阅 `stream/*`、`face/*` 等业务 Topic | 仅用本页已有的 `device/*` |
+| 订阅 `cmd|status/stream`、`cmd|status/face` 等业务 Topic | 仅用本页已有的 `info/device`、`status/device` |
 
 ## 验收
 

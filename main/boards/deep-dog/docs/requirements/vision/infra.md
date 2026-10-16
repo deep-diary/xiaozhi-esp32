@@ -20,7 +20,7 @@
 | 用途 | 路径示例 |
 |------|----------|
 | deep-dog 主码流 | `deep-dog/<device_id>` |
-| 联调 | `deep-dog/dev` |
+| 联调 | `deep-dog/{device_id}` |
 
 ## 2. EMQX
 
@@ -32,26 +32,26 @@
 | 网页 / ingest（公网） | `wss://broker.emqx.io:8084/mqtt` |
 | Dashboard | 本机 `http://localhost:18083`（admin/public）/ `https://mqtt.deep-diary.com/` |
 
-密码见密钥库；固件用 NVS。自建公网 `mqtt-tcp.` 勿裸连（须 Access TCP）。当前联调优先本机 EMQX（内网更快、更稳）；切回公共站时改宏/NVS 与前端 `via=web`。Topic `deepdiary/deep-dog/dev/` 在公共站无鉴权可被他人订阅。
+密码见密钥库；固件用 NVS。自建公网 `mqtt-tcp.` 勿裸连（须 Access TCP）。当前联调优先本机 EMQX（内网更快、更稳）；切回公共站时改宏/NVS 与前端 `via=web`。Topic `{prefix}/{device_id}/` 在公共站无鉴权可被他人订阅。
 
-Topic 前缀：`deepdiary/deep-dog/<device_id>/...`  
+Topic 前缀：`{prefix}/{device_id}/...`（`{prefix}` 默认 `deep-trace`）  
 **字段真源**：[mqtt/protocol/deep-dog-mqtt.yml](../mqtt/protocol/deep-dog-mqtt.yml)（需求 [M01](../mqtt/M01-board-mqtt-protocol.md)）。
 
 | Topic | 方向 | 关联 |
 |-------|------|------|
-| `device/info` / `device/status` | ↑ | [M01](../mqtt/M01-board-mqtt-protocol.md) |
-| `stream/cmd` / `stream/status` | 双向 | [02-stream](../mqtt/modules/02-stream.md)（V-C03） |
-| `face/cmd` / `face/status` | 双向 | [04-face](../mqtt/modules/04-face.md) / M01 |
-| `dog/cmd` / `dog/status` | 双向 | [07-dog](../mqtt/modules/07-dog.md) |
-| `imu/status` | ↑ | [03-imu](../mqtt/modules/03-imu.md) / D9 |
-| `led/cmd` / `led/status` | 双向 | [08-led](../mqtt/modules/08-led.md) |
-| `servo/cmd` / `servo/status` | 双向 | [10-servo](../mqtt/modules/10-servo.md) |
-| `gimbal/cmd` / `gimbal/status` | 双向 | [09-gimbal](../mqtt/modules/09-gimbal.md)（V-C04） |
-| `handle/cmd` / `handle/input` / `handle/status` | 双向 | [11-handle](../mqtt/modules/11-handle.md)；架构 [input/](../input/) |
-| `touch/status` | ↑ | [06-touch](../mqtt/modules/06-touch.md) |
-| `can/cmd` / `can/status` / `can/frames` / `can/tx` | 双向 | [12-can](../mqtt/modules/12-can.md) |
-| `person/active` | ↑ | [13-person](../mqtt/modules/13-person.md)（预留） |
-| `track/cmd` / `track/status` | 双向 | [05-track](../mqtt/modules/05-track.md)（MQTT ready / actuator=none） |
+| `info/device` / `status/device` | ↑ | [M01](../mqtt/M01-board-mqtt-protocol.md) |
+| `cmd/stream` / `status/stream` | 双向 | [02-stream](../mqtt/modules/02-stream.md)（V-C03） |
+| `cmd/face` / `status/face` | 双向 | [04-face](../mqtt/modules/04-face.md) / M01 |
+| `cmd/dog` / `status/dog` | 双向 | [07-dog](../mqtt/modules/07-dog.md) |
+| `status/imu` | ↑ | [03-imu](../mqtt/modules/03-imu.md) / D9 |
+| `cmd/led` / `status/led` | 双向 | [08-led](../mqtt/modules/08-led.md) |
+| `cmd/servo` / `status/servo` | 双向 | [10-servo](../mqtt/modules/10-servo.md) |
+| `cmd/gimbal` / `status/gimbal` | 双向 | [09-gimbal](../mqtt/modules/09-gimbal.md)（V-C04） |
+| `cmd/handle` / `cmd/handle/input` / `status/handle` | 双向 | [11-handle](../mqtt/modules/11-handle.md)；架构 [input/](../input/) |
+| `status/touch` | ↑ | [06-touch](../mqtt/modules/06-touch.md) |
+| `cmd/can` / `status/can` / `status/can/frames` / `cmd/can/tx` | 双向 | [12-can](../mqtt/modules/12-can.md) |
+| `status/person/active` | ↑ | [13-person](../mqtt/modules/13-person.md)（预留） |
+| `cmd/track` / `status/track` | 双向 | [05-track](../mqtt/modules/05-track.md)（MQTT ready / actuator=none） |
 
 ## 3. Immich
 

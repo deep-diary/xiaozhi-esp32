@@ -334,9 +334,19 @@ private:
 #endif
 
 #if DEEP_DOG_CAN_ENABLE && DEEP_DOG_MOTOR_ENABLE
+    /**
+     * CAN RX 任务 + **总线健康守护**。
+     *
+     * 健康守护背景：TWAI 进入 Bus-Off 后控制器脱离总线、**不会自愈**，必须
+     * `twai_initiate_recovery()`；且 IDF 恢复完成后会停在 `TWAI_STATE_STOPPED`，
+     * 还需再 `twai_start()` 才能重新上线。本工程此前没有任何 `recover()` 调用，
+     * 一旦 Bus-Off（收发器/接线异常、无 ACK、错误计数累积）就**永久收不到帧到重启**。
+     */
     static void CanRxTask(void* arg) {
         DeepMotor* motor = static_cast<DeepMotor*>(arg);
         CanFrame frame;
+        uint32_t next_health_ms = 0;
+        uint32_t recover_attempts = 0;
         while (1) {
             if (ESP32Can.readFrame(&frame, 50)) {
                 DeepDogCanNotifyFrame(&frame, 0);
@@ -368,6 +378,26 @@ private:
                         }
 #endif
                     }
+                }
+            }
+
+            const uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+            if ((int32_t)(now_ms - next_health_ms) >= 0) {
+                next_health_ms = now_ms + DEEP_DOG_CAN_HEALTH_CHECK_MS;
+                const uint32_t can_state = ESP32Can.canState();
+                if (can_state == TWAI_STATE_BUS_OFF) {
+                    ++recover_attempts;
+                    const bool ok = ESP32Can.recover();
+                    ESP_LOGW(TAG, "CAN bus-off: recovery attempt %lu ok=%d (bus_err=%lu rx_err=%lu tx_err=%lu)",
+                             (unsigned long)recover_attempts, ok ? 1 : 0, (unsigned long)ESP32Can.busErrCounter(),
+                             (unsigned long)ESP32Can.rxErrorCounter(), (unsigned long)ESP32Can.txErrorCounter());
+                } else if (can_state == TWAI_STATE_STOPPED) {
+                    // 恢复流程走完后 IDF 停在 STOPPED，需显式重启才回到总线上
+                    ESP_LOGW(TAG, "CAN stopped: restarting controller");
+                    ESP32Can.restart();
+                } else if (can_state == TWAI_STATE_RUNNING && recover_attempts > 0) {
+                    ESP_LOGI(TAG, "CAN back to RUNNING after %lu recovery attempt(s)", (unsigned long)recover_attempts);
+                    recover_attempts = 0;
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(1));
@@ -813,8 +843,10 @@ private:
             }
         }
 #endif
-        // 数据点自动生成 MCP get/set 工具（在所有模块注册完数据点后调用）
-        RegisterDataPointMcpTools(McpServer::GetInstance());
+        // 数据点自动生成 MCP get/set 工具：**不在此处注册**（F-01）。
+        // 开机注册会常驻数十 KB internal（name/description/properties/callback），
+        // 把 internal 压到不足以创建 httpd / MQTT 任务栈，导致 WS-MCP 与板级 MQTT 起不来。
+        // 改为本地 WS-MCP「全量 tools/list」时按需注册（见 deep_dog_ws_mcp_server.cc）。
 #if DEEP_DOG_FACE_AI_ENABLE
 #if DEEP_DOG_FACE_AI_DEFAULT_ENABLED
         if (DeepDogMemoryWaitInternalReady("face_ai", DEEP_DOG_BOOT_MIN_INTERNAL_FREE,
@@ -834,6 +866,12 @@ private:
 #endif
 #if DEEP_DOG_VISION_HUB_ENABLE
         if (vision_hub_ && !vision_hub_->IsRunning()) {
+            // MEM-01：等 face 模型加载后的 internal 回稳再启 VisionHub（避免 camera/JPEG 与模型抢内存）
+            if (!DeepDogMemoryWaitInternalReady("vision_hub", DEEP_DOG_VISION_HUB_MIN_INTERNAL_FREE,
+                                                DEEP_DOG_VISION_HUB_MIN_INTERNAL_LARGEST,
+                                                DEEP_DOG_VISION_HUB_MEMORY_WAIT_MS)) {
+                ESP_LOGW(TAG, "VisionHub start without memory gate (internal not ready)");
+            }
             if (!vision_hub_->Start()) {
                 ESP_LOGW(TAG, "VisionFrameHub 启动失败");
             }
@@ -890,6 +928,8 @@ private:
         RegisterFaceMcpTools(mcp_server);
 #endif
         RegisterBoardDiagnosticsMcpTools(mcp_server);
+        // 数据点自动工具（self.<mod>.get_/set_<point>）：零 per-tool 堆开销，可开机无条件挂接（F-12）
+        RegisterDataPointMcpTools(mcp_server);
 #if !DEEP_DOG_DOG_ENABLE && !DEEP_DOG_MOTOR_ENABLE && !DEEP_DOG_LED_ENABLE && !DEEP_DOG_SERVO_ENABLE && !DEEP_DOG_MQTT_ENABLE && !DEEP_DOG_FACE_AI_ENABLE
         (void)mcp_server;
 #endif
@@ -1119,6 +1159,12 @@ public:
 #else
 #if DEEP_DOG_VISION_HUB_ENABLE
         if (vision_hub_ && !vision_hub_->IsRunning()) {
+            // MEM-01：等 face 模型加载后的 internal 回稳再启 VisionHub（避免 camera/JPEG 与模型抢内存）
+            if (!DeepDogMemoryWaitInternalReady("vision_hub", DEEP_DOG_VISION_HUB_MIN_INTERNAL_FREE,
+                                                DEEP_DOG_VISION_HUB_MIN_INTERNAL_LARGEST,
+                                                DEEP_DOG_VISION_HUB_MEMORY_WAIT_MS)) {
+                ESP_LOGW(TAG, "VisionHub start without memory gate (internal not ready)");
+            }
             if (!vision_hub_->Start()) {
                 ESP_LOGW(TAG, "VisionFrameHub 启动失败");
             }
